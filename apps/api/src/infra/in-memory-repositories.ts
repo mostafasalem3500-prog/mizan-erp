@@ -370,17 +370,22 @@ export class InMemoryPrismaClient implements PrismaClientLike {
         },
       },
       idempotencyKey: {
-        find: async ({ organizationId, key }: { organizationId: string; key: string }) => {
-          return this.db.idempotencyKeys.get(`${organizationId}:${key}`) ?? null;
+        // Sprint 32 — signatures now match real Prisma Client exactly
+        // (findUnique with the auto-generated compound-key name from
+        // @@id([organizationId, key]), and create wrapped in { data }),
+        // so this shim and a genuine PrismaClient are interchangeable
+        // from AccountingPostingEngine's point of view.
+        findUnique: async ({
+          where: { organizationId_key },
+        }: {
+          where: { organizationId_key: { organizationId: string; key: string } };
+        }) => {
+          return this.db.idempotencyKeys.get(`${organizationId_key.organizationId}:${organizationId_key.key}`) ?? null;
         },
         create: async ({
-          organizationId,
-          key,
-          journalEntryId,
+          data: { organizationId, key, journalEntryId },
         }: {
-          organizationId: string;
-          key: string;
-          journalEntryId: string;
+          data: { organizationId: string; key: string; journalEntryId: string };
         }) => {
           this.db.idempotencyKeys.set(`${organizationId}:${key}`, { journalEntryId });
         },

@@ -131,7 +131,34 @@ class ConsoleAuditSink implements AuditSink {
     { provide: "BranchesRepository", useFactory: (db: InMemoryDatabase) => new InMemoryBranchesRepository(db), inject: [InMemoryDatabase] },
     { provide: BranchesService, useFactory: (repo: any) => new BranchesService(repo), inject: ["BranchesRepository"] },
 
-    { provide: "PrismaClientLike", useFactory: (db: InMemoryDatabase) => new InMemoryPrismaClient(db), inject: [InMemoryDatabase] },
+    {
+      provide: "PrismaClientLike",
+      useFactory: (db: InMemoryDatabase) => {
+        // Sprint 32 — the first real switch-over point. AccountingPostingEngine's
+        // Prisma calls were rewritten (this same sprint) to match real Prisma
+        // Client's actual API exactly, so a genuine PrismaClient now satisfies
+        // this interface without any adapter.
+        //
+        // Deliberately gated on a SEPARATE flag from DATABASE_URL, not
+        // DATABASE_URL's mere presence: DATABASE_URL is already set on the
+        // Railway deployment (needed for `prisma migrate deploy` at startup),
+        // but organizations/accounting periods/accounts are still only
+        // seeded into the in-memory store by main.ts — a real PrismaClient
+        // would find no matching accountingPeriod row in real Postgres and
+        // every posting call would fail immediately. Flipping this on for
+        // real requires the seed logic to move to real Prisma writes FIRST
+        // (tracked as the next step, not yet done) — until then this stays
+        // opt-in-only via USE_REAL_PRISMA_ACCOUNTING so the current stable,
+        // fully in-memory deployment is never silently broken by this change.
+        if (process.env.USE_REAL_PRISMA_ACCOUNTING === "true") {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { PrismaClient } = require("@prisma/client");
+          return new PrismaClient();
+        }
+        return new InMemoryPrismaClient(db);
+      },
+      inject: [InMemoryDatabase],
+    },
     { provide: AccountingPostingEngine, useFactory: (prisma: any) => new AccountingPostingEngine(prisma), inject: ["PrismaClientLike"] },
 
     { provide: "AccountingQueryRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService) => new InMemoryAccountingQueryRepository(db, accounts), inject: [InMemoryDatabase, AccountsService] },

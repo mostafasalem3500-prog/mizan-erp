@@ -26,9 +26,10 @@ function makePrismaMock(overrides: Partial<Record<string, any>> = {}) {
       findUniqueOrThrow: async () => state.period,
     },
     idempotencyKey: {
-      find: async ({ organizationId, key }: any) =>
-        state.idempotencyKeys.get(`${organizationId}:${key}`) ?? null,
-      create: async ({ organizationId, key, journalEntryId }: any) => {
+      // Sprint 32 — matches real Prisma Client's findUnique/create shape.
+      findUnique: async ({ where: { organizationId_key } }: any) =>
+        state.idempotencyKeys.get(`${organizationId_key.organizationId}:${organizationId_key.key}`) ?? null,
+      create: async ({ data: { organizationId, key, journalEntryId } }: any) => {
         state.idempotencyKeys.set(`${organizationId}:${key}`, { journalEntryId });
       },
     },

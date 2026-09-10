@@ -91,11 +91,23 @@ interface PrismaTransactionClient {
    * (organizationId, key) — see schema.prisma. `create` must throw (or the
    * caller must treat a unique-constraint violation as "already posted")
    * when the same key is used twice; this in-process engine handles that
-   * by checking `find` first inside the same transaction.
+   * by checking `findUnique` first inside the same transaction.
+   *
+   * Sprint 32 — these signatures were rewritten to match REAL Prisma
+   * Client's actual API exactly (`findUnique` with the auto-generated
+   * compound-key name from `@@id([organizationId, key])`, and `create`
+   * wrapped in `{ data: ... }`) rather than a convenience shape invented
+   * for the in-memory shim. This is what makes swapping in a genuine
+   * `PrismaClient` instance a drop-in change instead of a rewrite: the
+   * in-memory shim in in-memory-repositories.ts was updated to match this
+   * same real-Prisma-shaped interface, so both paths are now identical
+   * from this engine's point of view.
    */
   idempotencyKey: {
-    find(args: { organizationId: string; key: string }): Promise<{ journalEntryId: string } | null>;
-    create(args: { organizationId: string; key: string; journalEntryId: string }): Promise<void>;
+    findUnique(args: {
+      where: { organizationId_key: { organizationId: string; key: string } };
+    }): Promise<{ journalEntryId: string } | null>;
+    create(args: { data: { organizationId: string; key: string; journalEntryId: string } }): Promise<void>;
   };
 }
 
@@ -209,9 +221,8 @@ export class AccountingPostingEngine {
 
     return this.prisma.$transaction(async (tx) => {
       if (request.idempotencyKey) {
-        const existing = await tx.idempotencyKey.find({
-          organizationId: request.organizationId,
-          key: request.idempotencyKey,
+        const existing = await tx.idempotencyKey.findUnique({
+          where: { organizationId_key: { organizationId: request.organizationId, key: request.idempotencyKey } },
         });
         if (existing) {
           // Same request, replayed — return what was already posted rather
@@ -252,9 +263,7 @@ export class AccountingPostingEngine {
 
       if (request.idempotencyKey) {
         await tx.idempotencyKey.create({
-          organizationId: request.organizationId,
-          key: request.idempotencyKey,
-          journalEntryId: entry.id,
+          data: { organizationId: request.organizationId, key: request.idempotencyKey, journalEntryId: entry.id },
         });
       }
 
