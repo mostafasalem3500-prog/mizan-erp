@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ميزان</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<!-- شاشة تسجيل الدخول -->
+<section id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="brand">
+      <span class="brand-mark">م</span>
+      <h1>ميزان</h1>
+    </div>
+    <p class="login-sub">منصة محاسبية سعودية — سجّل الدخول للمتابعة</p>
+    <form id="login-form">
+      <label>البريد الإلكتروني
+        <input type="email" id="login-email" value="owner@mizan-demo.sa" required />
+      </label>
+      <label>كلمة المرور
+        <input type="password" id="login-password" value="DemoPass123!" required />
+      </label>
+      <label>معرّف المنظمة (Organization ID)
+        <input type="text" id="login-org" placeholder="يُطبع في سجل الخادم عند الإقلاع" required />
+      </label>
+      <button type="submit">دخول</button>
+      <p class="login-error" id="login-error" hidden></p>
+    </form>
+  </div>
+</section>
+
+<!-- هيكل التطبيق بعد الدخول -->
+<div id="app-shell" class="app-shell" hidden>
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark small">م</span>
+      <span>ميزان</span>
+    </div>
+    <nav>
+      <button class="nav-item active" data-view="dashboard">الرئيسية</button>
+      <button class="nav-item" data-view="invoices">فواتير المبيعات</button>
+      <button class="nav-item" data-view="pos">نقطة البيع</button>
+      <button class="nav-item" data-view="shift">الوردية</button>
+      <button class="nav-item" data-view="returns">الإرجاع</button>
+      <button class="nav-item" data-view="customers">العملاء</button>
+      <button class="nav-item" data-view="inventory">المخزون</button>
+      <button class="nav-item" data-view="purchases">المشتريات</button>
+      <button class="nav-item" data-view="assets">الأصول الثابتة</button>
+      <button class="nav-item" data-view="reports">التقارير</button>
+      <button class="nav-item" data-view="accounts">دليل الحسابات</button>
+    </nav>
+    <button id="logout-btn" class="logout">تسجيل الخروج</button>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h2 id="view-title">نظرة عامة</h2>
+      <button id="quick-create" class="quick-create">+ جديد</button>
+    </header>
+
+    <!-- الرئيسية -->
+    <section id="view-dashboard" class="view">
+      <div class="ledger-strip">
+        <div class="ledger-item">
+          <span class="ledger-label">إجمالي المدين</span>
+          <span class="ledger-value" id="kpi-debit">—</span>
+        </div>
+        <div class="ledger-item">
+          <span class="ledger-label">إجمالي الدائن</span>
+          <span class="ledger-value" id="kpi-credit">—</span>
+        </div>
+        <div class="ledger-item">
+          <span class="ledger-label">الميزان</span>
+          <span class="ledger-value" id="kpi-balanced">—</span>
+        </div>
+        <div class="ledger-item">
+          <span class="ledger-label">صافي الدخل (الفترة)</span>
+          <span class="ledger-value" id="kpi-income">—</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>قائمة الدخل المختصرة</h3>
+        <table class="ledger-table" id="pnl-table">
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- الفواتير -->
+    <section id="view-invoices" class="view" hidden>
+      <div class="panel">
+        <h3>إنشاء فاتورة مبيعات</h3>
+        <form id="invoice-form" class="stacked-form">
+          <label>العميل
+            <select id="invoice-customer"></select>
+          </label>
+          <div id="invoice-lines"></div>
+          <button type="button" id="add-line" class="ghost-btn">+ إضافة سطر</button>
+          <button type="submit" class="primary-btn">ترحيل الفاتورة</button>
+        </form>
+        <p id="invoice-result"></p>
+      </div>
+    </section>
+
+    <!-- العملاء -->
+    <section id="view-customers" class="view" hidden>
+      <div class="panel">
+        <h3>إضافة عميل</h3>
+        <form id="customer-form" class="inline-form">
+          <input type="text" id="customer-name" placeholder="اسم العميل" required />
+          <button type="submit" class="primary-btn">إضافة</button>
+        </form>
+        <table class="ledger-table">
+          <thead><tr><th>الاسم</th><th>المعرّف</th></tr></thead>
+          <tbody id="customers-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- دليل الحسابات -->
+    <section id="view-accounts" class="view" hidden>
+      <div class="panel">
+        <h3>دليل الحسابات</h3>
+        <table class="ledger-table">
+          <thead><tr><th>الكود</th><th>الاسم</th><th>النوع</th></tr></thead>
+          <tbody id="accounts-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- نقطة البيع -->
+    <section id="view-pos" class="view" hidden>
+      <div class="panel">
+        <h3>بيع نقدي سريع</h3>
+        <form id="pos-form" class="stacked-form">
+          <div id="pos-lines"></div>
+          <button type="button" id="pos-add-line" class="ghost-btn">+ إضافة سطر</button>
+          <button type="submit" class="primary-btn">إتمام البيع (نقدًا)</button>
+        </form>
+        <p id="pos-result"></p>
+      </div>
+    </section>
+
+    <!-- المخزون -->
+    <section id="view-inventory" class="view" hidden>
+      <div class="panel">
+        <h3>إضافة منتج</h3>
+        <form id="product-form" class="stacked-form">
+          <div class="line-row" style="grid-template-columns: 1fr 2fr 1fr 1fr">
+            <input type="text" id="product-sku" placeholder="SKU" required />
+            <input type="text" id="product-name" placeholder="اسم المنتج" required />
+            <input type="text" id="product-unit" placeholder="الوحدة (PCS)" value="PCS" required />
+            <input type="number" id="product-price" placeholder="سعر البيع" step="0.01" required />
+          </div>
+          <select id="product-tax" style="margin-bottom:14px">
+            <option value="STANDARD">خاضع 15%</option>
+            <option value="ZERO">نسبة صفر</option>
+            <option value="EXEMPT">معفى</option>
+          </select>
+          <button type="submit" class="primary-btn">إضافة المنتج</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h3>استلام مخزون</h3>
+        <form id="receipt-form" class="stacked-form">
+          <label>المنتج
+            <select id="receipt-product"></select>
+          </label>
+          <div class="line-row" style="grid-template-columns: 1fr 1fr">
+            <input type="number" id="receipt-qty" placeholder="الكمية" min="1" required />
+            <input type="number" id="receipt-cost" placeholder="تكلفة الوحدة" step="0.01" required />
+          </div>
+          <button type="submit" class="primary-btn">استلام</button>
+        </form>
+        <p id="receipt-result"></p>
+      </div>
+
+      <div class="panel">
+        <h3>المنتجات ومستوى المخزون</h3>
+        <table class="ledger-table">
+          <thead><tr><th>SKU</th><th>الاسم</th><th>الكمية المتوفرة</th><th>متوسط التكلفة</th><th></th></tr></thead>
+          <tbody id="products-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- المشتريات -->
+    <section id="view-purchases" class="view" hidden>
+      <div class="panel">
+        <h3>إضافة مورد</h3>
+        <form id="supplier-form" class="inline-form">
+          <input type="text" id="supplier-name" placeholder="اسم المورد" required />
+          <button type="submit" class="primary-btn">إضافة</button>
+        </form>
+        <table class="ledger-table">
+          <thead><tr><th>الاسم</th><th>المعرّف</th></tr></thead>
+          <tbody id="suppliers-table-body"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h3>إنشاء فاتورة شراء</h3>
+        <form id="bill-form" class="stacked-form">
+          <label>المورد
+            <select id="bill-supplier"></select>
+          </label>
+          <div id="bill-lines"></div>
+          <button type="button" id="bill-add-line" class="ghost-btn">+ إضافة سطر</button>
+          <button type="submit" class="primary-btn">ترحيل فاتورة الشراء</button>
+        </form>
+        <p id="bill-result"></p>
+      </div>
+    </section>
+
+    <!-- الوردية -->
+    <section id="view-shift" class="view" hidden>
+      <div class="panel" id="shift-closed-panel">
+        <h3>فتح وردية جديدة</h3>
+        <form id="shift-open-form" class="stacked-form">
+          <div class="line-row" style="grid-template-columns: 1fr 1fr">
+            <input type="text" id="shift-terminal" placeholder="رقم الجهاز" value="POS-01" required />
+            <input type="number" id="shift-opening-cash" placeholder="رصيد الافتتاح النقدي" step="0.01" value="0" required />
+          </div>
+          <button type="submit" class="primary-btn">فتح الوردية</button>
+        </form>
+      </div>
+
+      <div class="panel" id="shift-open-panel" hidden>
+        <h3>الوردية المفتوحة حاليًا</h3>
+        <div class="ledger-strip" style="margin-bottom:20px">
+          <div class="ledger-item"><span class="ledger-label">رقم الجهاز</span><span class="ledger-value" id="shift-info-terminal">—</span></div>
+          <div class="ledger-item"><span class="ledger-label">رصيد الافتتاح</span><span class="ledger-value" id="shift-info-opening">—</span></div>
+          <div class="ledger-item"><span class="ledger-label">الحالة</span><span class="ledger-value">مفتوحة</span></div>
+        </div>
+        <form id="shift-close-form" class="stacked-form">
+          <label>النقد الفعلي في الدرج عند الإغلاق
+            <input type="number" id="shift-actual-cash" step="0.01" required />
+          </label>
+          <button type="submit" class="primary-btn">إغلاق الوردية</button>
+        </form>
+        <p id="shift-result"></p>
+      </div>
+    </section>
+
+    <!-- الإرجاع -->
+    <section id="view-returns" class="view" hidden>
+      <div class="panel">
+        <h3>بحث عن عملية بيع</h3>
+        <div class="inline-form">
+          <input type="text" id="return-sale-id" placeholder="معرّف عملية البيع (Sale ID)" style="flex:1" />
+          <button type="button" id="return-search-btn" class="primary-btn">بحث</button>
+        </div>
+        <p id="return-search-error" style="color:#A3432F"></p>
+      </div>
+
+      <div class="panel" id="return-sale-panel" hidden>
+        <h3>أسطر عملية البيع</h3>
+        <table class="ledger-table">
+          <thead><tr><th>الوصف</th><th>الكمية الأصلية</th><th>المتبقي</th><th>كمية الإرجاع</th></tr></thead>
+          <tbody id="return-lines-body"></tbody>
+        </table>
+        <label style="display:block; margin: 14px 0">سبب الإرجاع
+          <input type="text" id="return-reason" placeholder="مثال: عيب في المنتج" />
+        </label>
+        <div style="display:flex; gap:10px">
+          <button type="button" id="return-partial-btn" class="primary-btn">تنفيذ الإرجاع الجزئي المحدَّد</button>
+          <button type="button" id="return-full-btn" class="ghost-btn" style="margin:0">إرجاع كامل العملية</button>
+        </div>
+        <p id="return-result"></p>
+      </div>
+    </section>
+
+    <!-- الأصول الثابتة -->
+    <section id="view-assets" class="view" hidden>
+      <div class="panel">
+        <h3>اقتناء أصل ثابت</h3>
+        <form id="asset-form" class="stacked-form">
+          <div class="line-row" style="grid-template-columns: 2fr 1fr 1fr 1fr">
+            <input type="text" id="asset-name" placeholder="اسم الأصل" required />
+            <input type="number" id="asset-cost" placeholder="التكلفة" step="0.01" required />
+            <input type="number" id="asset-residual" placeholder="القيمة المتبقية" step="0.01" value="0" />
+            <input type="number" id="asset-life" placeholder="العمر الإنتاجي (شهر)" required />
+          </div>
+          <button type="submit" class="primary-btn">اقتناء الأصل (دفع نقدًا)</button>
+        </form>
+        <p id="asset-result"></p>
+      </div>
+    </section>
+
+    <!-- التقارير -->
+    <section id="view-reports" class="view" hidden>
+      <div class="panel">
+        <h3>الميزانية العمومية</h3>
+        <div class="ledger-strip" id="bs-strip"></div>
+      </div>
+      <div class="panel">
+        <h3>قائمة التدفقات النقدية</h3>
+        <table class="ledger-table" id="cf-table"><tbody></tbody></table>
+      </div>
+      <div class="panel">
+        <h3>تعمير الذمم المدينة</h3>
+        <table class="ledger-table">
+          <thead><tr><th>0-30 يوم</th><th>31-60 يوم</th><th>61-90 يوم</th><th>+90 يوم</th><th>الإجمالي</th></tr></thead>
+          <tbody id="aging-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- نافذة عرض الفاتورة/الإيصال -->
+<div id="receipt-overlay" class="receipt-overlay" hidden>
+  <div class="receipt-box">
+    <button id="receipt-close" class="receipt-close">×</button>
+    <div id="receipt-content"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

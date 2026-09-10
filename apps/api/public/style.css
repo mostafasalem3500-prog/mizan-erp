@@ -1,0 +1,399 @@
+:root {
+  --petrol: #0F3D3E;
+  --petrol-dark: #0A2B2C;
+  --bg: #FAF7F2;
+  --gold: #B8935F;
+  --charcoal: #1C1C1C;
+  --sage: #DCE5DE;
+  --white: #FFFFFF;
+  --danger: #A3432F;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--charcoal);
+  font-family: "IBM Plex Sans Arabic", sans-serif;
+  font-size: 15px;
+}
+
+h1, h2, h3 {
+  font-family: "Cairo", sans-serif;
+  margin: 0;
+}
+
+/* ---------- شاشة تسجيل الدخول ---------- */
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, var(--petrol) 0%, var(--petrol-dark) 100%);
+}
+
+.login-card {
+  background: var(--white);
+  border-radius: 4px;
+  padding: 48px 40px;
+  width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--gold);
+  color: var(--petrol-dark);
+  font-family: "Cairo", sans-serif;
+  font-weight: 800;
+  font-size: 20px;
+  border-radius: 4px;
+}
+
+.brand-mark.small { width: 30px; height: 30px; font-size: 15px; }
+
+.brand h1 { font-size: 28px; color: var(--petrol); font-weight: 800; }
+
+.login-sub {
+  color: #6b6b6b;
+  font-size: 13.5px;
+  margin: 6px 0 28px;
+  line-height: 1.6;
+}
+
+#login-form label {
+  display: block;
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 16px;
+}
+
+#login-form input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid #D8D2C6;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 14px;
+  background: #FDFCFA;
+}
+
+#login-form input:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
+
+#login-form button[type="submit"] {
+  width: 100%;
+  padding: 12px;
+  background: var(--petrol);
+  color: var(--white);
+  border: none;
+  border-radius: 3px;
+  font-family: "Cairo", sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+#login-form button[type="submit"]:hover { background: var(--petrol-dark); }
+
+.login-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* ---------- هيكل التطبيق ---------- */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  background: var(--petrol);
+  color: var(--white);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+  flex-shrink: 0;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px 28px;
+  font-family: "Cairo", sans-serif;
+  font-weight: 800;
+  font-size: 19px;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  margin-bottom: 20px;
+}
+
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+
+.nav-item {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.75);
+  text-align: right;
+  padding: 12px 24px;
+  font-family: inherit;
+  font-size: 14.5px;
+  cursor: pointer;
+  border-right: 3px solid transparent;
+}
+
+.nav-item:hover { background: rgba(255,255,255,0.06); color: var(--white); }
+
+.nav-item.active {
+  background: rgba(255,255,255,0.1);
+  color: var(--white);
+  border-right-color: var(--gold);
+  font-weight: 600;
+}
+
+.logout {
+  margin: 0 24px;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: rgba(255,255,255,0.7);
+  padding: 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.main { flex: 1; padding: 32px 40px; max-width: 1000px; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.topbar h2 { font-size: 24px; color: var(--petrol-dark); }
+
+.quick-create {
+  background: var(--gold);
+  color: var(--petrol-dark);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 3px;
+  font-family: "Cairo", sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ---------- شريط الدفتر (بدل بطاقات SaaS) ---------- */
+.ledger-strip {
+  display: flex;
+  border-top: 2px solid var(--petrol);
+  border-bottom: 2px solid var(--petrol);
+  margin-bottom: 32px;
+}
+
+.ledger-item {
+  flex: 1;
+  padding: 18px 20px;
+  border-left: 1px solid var(--sage);
+}
+.ledger-item:first-child { border-left: none; }
+
+.ledger-label {
+  display: block;
+  font-size: 12px;
+  color: #6b6b6b;
+  margin-bottom: 6px;
+}
+
+.ledger-value {
+  display: block;
+  font-family: "Cairo", sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--petrol-dark);
+  direction: ltr;
+  text-align: right;
+}
+
+/* ---------- لوحات المحتوى ---------- */
+.panel {
+  background: var(--white);
+  border: 1px solid var(--sage);
+  border-radius: 4px;
+  padding: 24px 28px;
+  margin-bottom: 24px;
+}
+
+.panel h3 {
+  font-size: 16px;
+  color: var(--petrol-dark);
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sage);
+}
+
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ledger-table th {
+  text-align: right;
+  font-size: 12px;
+  color: #6b6b6b;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--sage);
+}
+.ledger-table td { padding: 10px 6px; border-bottom: 1px solid #EFEBE3; }
+.ledger-table td.num { direction: ltr; text-align: right; font-family: "Cairo", sans-serif; }
+
+/* ---------- نماذج ---------- */
+.stacked-form label, .inline-form { display: block; margin-bottom: 14px; }
+.inline-form { display: flex; gap: 10px; margin-bottom: 20px; }
+
+input, select {
+  padding: 9px 10px;
+  border: 1px solid #D8D2C6;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 14px;
+  background: #FDFCFA;
+}
+
+.line-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.primary-btn {
+  background: var(--petrol);
+  color: var(--white);
+  border: none;
+  padding: 10px 22px;
+  border-radius: 3px;
+  font-family: "Cairo", sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ghost-btn {
+  background: none;
+  border: 1px dashed var(--gold);
+  color: var(--gold);
+  padding: 8px 16px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-bottom: 16px;
+}
+
+#invoice-result { font-size: 14px; margin-top: 12px; }
+
+/* ---------- نافذة عرض الفاتورة (Sprint 25) ---------- */
+.receipt-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 43, 44, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.receipt-box {
+  position: relative;
+  background: var(--white);
+  width: 320px;
+  padding: 22px 18px 26px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.receipt-close {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.rcpt-biz-name {
+  text-align: center;
+  font-family: "Cairo", sans-serif;
+  font-weight: 800;
+  font-size: 17px;
+  color: var(--petrol);
+  margin-bottom: 2px;
+}
+
+.rcpt-biz-meta {
+  text-align: center;
+  font-size: 11px;
+  color: #666;
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+
+.rcpt-title-band {
+  text-align: center;
+  font-family: "Cairo", sans-serif;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--petrol);
+  background: #F1EDE2;
+  padding: 6px 0;
+  margin-bottom: 12px;
+}
+
+.rcpt-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: #444;
+  margin-bottom: 4px;
+}
+.rcpt-meta-row span:first-child { color: #888; }
+.rcpt-meta-row .val { direction: ltr; }
+
+.rcpt-table { width: 100%; border-collapse: collapse; margin: 14px 0 10px; font-size: 12px; }
+.rcpt-table th {
+  text-align: right; font-size: 10.5px; color: #888; font-weight: 500;
+  padding-bottom: 6px; border-bottom: 1px solid #E4DFD2;
+}
+.rcpt-table th.num, .rcpt-table td.num { text-align: left; direction: ltr; }
+.rcpt-table td { padding: 7px 0; border-bottom: 1px dotted #EDE9DD; color: #222; }
+
+.rcpt-totals-row {
+  display: flex; justify-content: space-between; font-size: 12.5px; padding: 4px 0; color: #333;
+}
+.rcpt-totals-row .amt { direction: ltr; }
+.rcpt-totals-row.grand {
+  font-family: "Cairo", sans-serif; font-weight: 800; font-size: 16px; color: var(--petrol);
+  border-top: 2px solid var(--petrol); margin-top: 6px; padding-top: 8px;
+}
+
+.rcpt-payment {
+  text-align: center; font-size: 11.5px; color: #555; margin: 14px 0 4px;
+  background: #F7F5EE; padding: 6px; border-radius: 3px;
+}
+
+.rcpt-qr-wrap { text-align: center; margin-top: 16px; }
+.rcpt-qr-wrap img { width: 128px; height: 128px; }
+.rcpt-qr-caption { font-size: 9.5px; color: #999; margin-top: 6px; line-height: 1.5; }

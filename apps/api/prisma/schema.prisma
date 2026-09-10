@@ -1,0 +1,274 @@
+// Mizan ERP — Phase 0 schema
+// Scope: Security Foundation (Step 4) + Accounting Core (Step 5) ONLY.
+// Sales/Purchases/Inventory/POS/Invoice/ZATCA models are intentionally NOT
+// included yet — per docs/MVP_ROADMAP.md, no operational module is modeled
+// before the posting engine it depends on is implemented and tested.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// TENANCY
+// ─────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id              String   @id @default(uuid())
+  legalNameAr     String
+  legalNameEn     String?
+  commercialName  String?
+  vatNumber       String?  @unique
+  crNumber        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  branches        Branch[]
+  organizationUsers OrganizationUser[]
+  roles           Role[]
+  accounts        Account[]
+  fiscalYears     FiscalYear[]
+  journalEntries  JournalEntry[]
+
+  @@map("organizations")
+}
+
+model Branch {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  address        String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("branches")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  organizationUsers OrganizationUser[]
+
+  @@map("users")
+}
+
+// A user's membership + role within ONE organization — this row, not the
+// User row itself, is what tenant-scoped authorization checks against.
+model OrganizationUser {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  roleId         String
+  branchId       String?
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+  role           Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@map("organization_users")
+}
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  isSystem       Boolean  @default(false) // seeded default roles (Owner, Accountant, Cashier, ...)
+  createdAt      DateTime @default(now())
+
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  organizationUsers  OrganizationUser[]
+  rolePermissions    RolePermission[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+// Global catalog — NOT tenant-scoped (the permission "invoice.post" exists
+// once; which roles have it is tenant-scoped via RolePermission).
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g. "invoice.post", "pos.overrideDiscount"
+  module      String   // e.g. "invoice", "pos", "journal"
+  description String?
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ACCOUNTING CORE
+// ─────────────────────────────────────────────────────────────────────────
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  COST_OF_SALES
+  EXPENSE
+  OTHER_INCOME
+  OTHER_EXPENSE
+}
+
+model Account {
+  id             String      @id @default(uuid())
+  organizationId String
+  code           String
+  nameAr         String
+  nameEn         String?
+  type           AccountType
+  parentId       String?
+  isPostable     Boolean     @default(true) // false = header/group account, cannot receive postings
+  isActive       Boolean     @default(true)
+  currency       String      @default("SAR")
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  parent         Account?     @relation("AccountTree", fields: [parentId], references: [id])
+  children       Account[]    @relation("AccountTree")
+  journalLines   JournalEntryLine[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("accounts")
+}
+
+enum PeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  CLOSED
+  LOCKED
+}
+
+model FiscalYear {
+  id             String   @id @default(uuid())
+  organizationId String
+  startDate      DateTime
+  endDate        DateTime
+  status         PeriodStatus @default(OPEN)
+
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  periods        AccountingPeriod[]
+
+  @@index([organizationId])
+  @@map("fiscal_years")
+}
+
+model AccountingPeriod {
+  id           String       @id @default(uuid())
+  fiscalYearId String
+  startDate    DateTime
+  endDate      DateTime
+  status       PeriodStatus @default(OPEN)
+
+  fiscalYear   FiscalYear     @relation(fields: [fiscalYearId], references: [id])
+  journalEntries JournalEntry[]
+
+  @@index([fiscalYearId])
+  @@map("accounting_periods")
+}
+
+enum JournalSourceEvent {
+  MANUAL_JOURNAL_POSTED
+  SALE_INVOICE_POSTED
+  POS_SALE_COMPLETED
+  POS_RETURN_COMPLETED
+  PURCHASE_BILL_POSTED
+  PURCHASE_RETURN_COMPLETED
+  PAYMENT_RECEIVED
+  PAYMENT_PAID
+  EXPENSE_POSTED
+  INVENTORY_RECEIVED
+  INVENTORY_ISSUED
+  STOCK_ADJUSTED
+  ASSET_ACQUIRED
+  ASSET_DEPRECIATED
+  BANK_TRANSFER
+}
+
+// Written ONLY by the AccountingPostingEngine. No other module writes here
+// directly — see docs/ARCHITECTURE.md §4.
+model JournalEntry {
+  id             String             @id @default(uuid())
+  organizationId String
+  branchId       String?
+  periodId       String
+  sourceEvent    JournalSourceEvent
+  sourceDocId    String?            // e.g. invoice_documents.id, pos_sales.id — no FK yet, those tables don't exist in Phase 0
+  reference      String?
+  postedAt       DateTime           @default(now())
+  reversedById   String?            @unique // points to the reversing JournalEntry, if any
+  isReversal     Boolean            @default(false)
+
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  period         AccountingPeriod  @relation(fields: [periodId], references: [id])
+  lines          JournalEntryLine[]
+
+  @@index([organizationId])
+  @@index([periodId])
+  @@map("journal_entries")
+}
+
+/**
+ * Backs the idempotency guarantee in AccountingPostingEngine.post() (spec
+ * band 91). The unique constraint is what actually prevents a duplicate
+ * financial transaction under concurrent retries — the application-level
+ * find-then-create in the engine is a fast path, not the real guarantee;
+ * a race would still be caught here by Postgres rejecting the second
+ * insert, which the engine should treat as "already posted" and re-fetch.
+ */
+model IdempotencyKey {
+  organizationId String
+  key            String
+  journalEntryId String
+  createdAt      DateTime @default(now())
+
+  @@id([organizationId, key])
+  @@map("idempotency_keys")
+}
+
+model JournalEntryLine {
+  id             String   @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  debit          Decimal  @default(0) @db.Decimal(18, 4)
+  credit         Decimal  @default(0) @db.Decimal(18, 4)
+  costCenterId   String?
+  description    String?
+
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
+  account        Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
