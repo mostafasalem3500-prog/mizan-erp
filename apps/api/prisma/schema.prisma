@@ -24,6 +24,16 @@ model Organization {
   commercialName  String?
   vatNumber       String?  @unique
   crNumber        String?
+  // Sprint 34 — added to match fields OrganizationRow gained across
+  // Sprint 29 (org settings) and Sprint 30 (ZATCA seller address for
+  // XML generation), which schema.prisma had not been updated to carry.
+  requireShiftForPosSale Boolean @default(false)
+  streetName      String?
+  buildingNumber  String?
+  city            String?
+  postalZone      String?
+  district        String?
+  countryCode     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

@@ -76,6 +76,7 @@ import {
   InMemoryAccountingQueryRepository,
   InMemoryPrismaClient,
 } from "./infra/in-memory-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository } from "./infra/prisma-repositories";
 
 /** Logs to stdout — the Phase 0 stand-in for a real `audit_logs` table writer. */
 class ConsoleAuditSink implements AuditSink {
@@ -125,39 +126,39 @@ class ConsoleAuditSink implements AuditSink {
     { provide: "RolePermissionLookup", useFactory: (db: InMemoryDatabase) => new InMemoryRolePermissionLookup(db), inject: [InMemoryDatabase] },
     PermissionsGuard,
 
-    { provide: "OrganizationsRepository", useFactory: (db: InMemoryDatabase) => new InMemoryOrganizationsRepository(db), inject: [InMemoryDatabase] },
+    {
+      provide: "OrganizationsRepository",
+      useFactory: (db: InMemoryDatabase, realPrisma: any) =>
+        realPrisma ? new PrismaOrganizationsRepository(realPrisma) : new InMemoryOrganizationsRepository(db),
+      inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
+    },
     { provide: OrganizationsService, useFactory: (repo: any) => new OrganizationsService(repo), inject: ["OrganizationsRepository"] },
 
     { provide: "BranchesRepository", useFactory: (db: InMemoryDatabase) => new InMemoryBranchesRepository(db), inject: [InMemoryDatabase] },
     { provide: BranchesService, useFactory: (repo: any) => new BranchesService(repo), inject: ["BranchesRepository"] },
 
     {
-      provide: "PrismaClientLike",
-      useFactory: (db: InMemoryDatabase) => {
-        // Sprint 32 — the first real switch-over point. AccountingPostingEngine's
-        // Prisma calls were rewritten (this same sprint) to match real Prisma
-        // Client's actual API exactly, so a genuine PrismaClient now satisfies
-        // this interface without any adapter.
-        //
-        // Deliberately gated on a SEPARATE flag from DATABASE_URL, not
-        // DATABASE_URL's mere presence: DATABASE_URL is already set on the
-        // Railway deployment (needed for `prisma migrate deploy` at startup),
-        // but organizations/accounting periods/accounts are still only
-        // seeded into the in-memory store by main.ts — a real PrismaClient
-        // would find no matching accountingPeriod row in real Postgres and
-        // every posting call would fail immediately. Flipping this on for
-        // real requires the seed logic to move to real Prisma writes FIRST
-        // (tracked as the next step, not yet done) — until then this stays
-        // opt-in-only via USE_REAL_PRISMA_ACCOUNTING so the current stable,
-        // fully in-memory deployment is never silently broken by this change.
-        if (process.env.USE_REAL_PRISMA_ACCOUNTING === "true") {
+      // Sprint 34 — a single shared real PrismaClient instance (or null),
+      // consumed by AccountingPostingEngine AND the three repositories
+      // that must move together (Accounts, Organizations, Periods) — see
+      // prisma-repositories.ts and prisma-seed.ts's header comments for
+      // why these can't be flipped one at a time. Renamed from Sprint
+      // 32's USE_REAL_PRISMA_ACCOUNTING to USE_REAL_PRISMA_DB now that
+      // the flag's scope covers more than just the posting engine.
+      provide: "RealPrismaClientOrNull",
+      useFactory: () => {
+        if (process.env.USE_REAL_PRISMA_DB === "true") {
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { PrismaClient } = require("@prisma/client");
           return new PrismaClient();
         }
-        return new InMemoryPrismaClient(db);
+        return null;
       },
-      inject: [InMemoryDatabase],
+    },
+    {
+      provide: "PrismaClientLike",
+      useFactory: (db: InMemoryDatabase, realPrisma: any) => realPrisma ?? new InMemoryPrismaClient(db),
+      inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
     },
     { provide: AccountingPostingEngine, useFactory: (prisma: any) => new AccountingPostingEngine(prisma), inject: ["PrismaClientLike"] },
 
@@ -167,7 +168,12 @@ class ConsoleAuditSink implements AuditSink {
     { provide: "CustomersRepository", useFactory: (db: InMemoryDatabase) => new InMemoryCustomersRepository(db), inject: [InMemoryDatabase] },
     { provide: CustomersService, useFactory: (repo: any) => new CustomersService(repo), inject: ["CustomersRepository"] },
 
-    { provide: "AccountsRepository", useFactory: (db: InMemoryDatabase) => new InMemoryAccountsRepository(db), inject: [InMemoryDatabase] },
+    {
+      provide: "AccountsRepository",
+      useFactory: (db: InMemoryDatabase, realPrisma: any) =>
+        realPrisma ? new PrismaAccountsRepository(realPrisma) : new InMemoryAccountsRepository(db),
+      inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
+    },
     { provide: AccountsService, useFactory: (repo: any) => new AccountsService(repo), inject: ["AccountsRepository"] },
 
     { provide: "SalesRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService) => new InMemorySalesRepository(db, accounts), inject: [InMemoryDatabase, AccountsService] },
@@ -261,7 +267,12 @@ class ConsoleAuditSink implements AuditSink {
       inject: [SalesService, PurchasesService],
     },
 
-    { provide: "PeriodsRepository", useFactory: (db: InMemoryDatabase) => new InMemoryPeriodsRepository(db), inject: [InMemoryDatabase] },
+    {
+      provide: "PeriodsRepository",
+      useFactory: (db: InMemoryDatabase, realPrisma: any) =>
+        realPrisma ? new PrismaPeriodsRepository(realPrisma) : new InMemoryPeriodsRepository(db),
+      inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
+    },
     { provide: PeriodsService, useFactory: (repo: any) => new PeriodsService(repo), inject: ["PeriodsRepository"] },
 
     {

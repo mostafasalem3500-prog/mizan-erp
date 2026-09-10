@@ -24,7 +24,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 
-const OWNER_PERMISSIONS = [
+export const OWNER_PERMISSIONS = [
   "invoice.view", "invoice.create", "invoice.approve", "invoice.post", "invoice.credit", "invoice.print",
   "invoice_template.view", "invoice_template.edit", "invoice_template.publish",
   "journal.create", "journal.post", "journal.reverse",
