@@ -238,14 +238,12 @@ model JournalEntry {
   @@map("journal_entries")
 }
 
-/**
- * Backs the idempotency guarantee in AccountingPostingEngine.post() (spec
- * band 91). The unique constraint is what actually prevents a duplicate
- * financial transaction under concurrent retries — the application-level
- * find-then-create in the engine is a fast path, not the real guarantee;
- * a race would still be caught here by Postgres rejecting the second
- * insert, which the engine should treat as "already posted" and re-fetch.
- */
+/// Backs the idempotency guarantee in AccountingPostingEngine.post() (spec
+/// band 91). The unique constraint is what actually prevents a duplicate
+/// financial transaction under concurrent retries — the application-level
+/// find-then-create in the engine is a fast path, not the real guarantee;
+/// a race would still be caught here by Postgres rejecting the second
+/// insert, which the engine should treat as "already posted" and re-fetch.
 model IdempotencyKey {
   organizationId String
   key            String
