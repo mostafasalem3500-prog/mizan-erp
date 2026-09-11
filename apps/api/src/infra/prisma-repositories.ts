@@ -190,6 +190,11 @@ export class PrismaAuthUserLookup implements AuthUserLookup {
     if (!membership) return null;
     return { organizationId: membership.organizationId, roleId: membership.roleId, branchId: membership.branchId ?? undefined };
   }
+
+  async listMemberships(userId: string): Promise<OrganizationMembershipRow[]> {
+    const memberships = await (this.prisma as any).organizationUser.findMany({ where: { userId } });
+    return memberships.map((m: any) => ({ organizationId: m.organizationId, roleId: m.roleId, branchId: m.branchId ?? undefined }));
+  }
 }
 
 export class PrismaPeriodsRepository implements PeriodsRepository {

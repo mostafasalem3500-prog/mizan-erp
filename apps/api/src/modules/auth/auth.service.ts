@@ -29,6 +29,15 @@ export interface AuthUserLookup {
    * token to; this looks up that specific membership, not "the first one".
    */
   findMembership(userId: string, organizationId: string): Promise<OrganizationMembershipRow | null>;
+  /**
+   * Sprint 36 — all memberships for a user, so login can resolve the
+   * organization automatically when there is exactly one. Requiring the
+   * user to type a raw UUID into the login form (the previous behavior)
+   * was a real usability defect: the id is an internal technical
+   * identifier no human should ever need to know or copy, and it is not
+   * a security boundary — the password already is.
+   */
+  listMemberships(userId: string): Promise<OrganizationMembershipRow[]>;
 }
 
 const BCRYPT_ROUNDS = 12;
@@ -44,7 +53,15 @@ export class AuthService {
     return bcrypt.hash(plaintext, BCRYPT_ROUNDS);
   }
 
-  async login(email: string, password: string, organizationId: string): Promise<{ accessToken: string }> {
+  /**
+   * `organizationId` is optional as of Sprint 36. When omitted, it is
+   * resolved automatically if the user belongs to exactly one
+   * organization — the overwhelmingly common case, and the one where
+   * demanding a UUID from the user served no purpose. It stays required
+   * (as an explicit choice) only for genuinely multi-organization users,
+   * where the system cannot know which tenant to scope the session to.
+   */
+  async login(email: string, password: string, organizationId?: string): Promise<{ accessToken: string }> {
     const credentials = await this.userLookup.findCredentialsByEmail(email);
 
     if (!credentials || !credentials.isActive) {
@@ -58,9 +75,28 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const membership = await this.userLookup.findMembership(credentials.userId, organizationId);
-    if (!membership) {
-      throw new UnauthorizedException("User is not a member of this organization");
+    let membership: OrganizationMembershipRow | null;
+
+    if (organizationId) {
+      membership = await this.userLookup.findMembership(credentials.userId, organizationId);
+      if (!membership) {
+        throw new UnauthorizedException("User is not a member of this organization");
+      }
+    } else {
+      const memberships = await this.userLookup.listMemberships(credentials.userId);
+      if (memberships.length === 0) {
+        throw new UnauthorizedException("User is not a member of any organization");
+      }
+      if (memberships.length > 1) {
+        // Deliberately not picking one silently: for a genuinely
+        // multi-tenant user, guessing which organization they meant
+        // would scope their whole session — and every posting they make
+        // — to possibly the wrong company's books.
+        throw new UnauthorizedException(
+          "This account belongs to multiple organizations — organizationId is required to choose one",
+        );
+      }
+      membership = memberships[0];
     }
 
     const payload: AuthTokenPayload = {

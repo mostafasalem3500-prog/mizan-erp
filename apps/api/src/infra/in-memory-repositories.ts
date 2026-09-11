@@ -211,6 +211,12 @@ export class InMemoryAuthUserLookup implements AuthUserLookup {
     if (!membership) return null;
     return { organizationId: membership.organizationId, roleId: membership.roleId, branchId: membership.branchId };
   }
+
+  async listMemberships(userId: string): Promise<OrganizationMembershipRow[]> {
+    return this.db.orgUsers
+      .filter((m) => m.userId === userId)
+      .map((m) => ({ organizationId: m.organizationId, roleId: m.roleId, branchId: m.branchId }));
+  }
 }
 
 export class InMemoryRolePermissionLookup implements RolePermissionLookup {

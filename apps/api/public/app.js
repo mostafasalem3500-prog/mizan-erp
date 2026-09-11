@@ -27,17 +27,23 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = document.getElementById("login-email").value;
   const password = document.getElementById("login-password").value;
-  const organizationId = document.getElementById("login-org").value.trim();
   const errorEl = document.getElementById("login-error");
   errorEl.hidden = true;
 
   try {
     const result = await api("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password, organizationId }),
+      body: JSON.stringify({ email, password }),
     });
     state.token = result.accessToken;
-    state.orgId = organizationId;
+    // Sprint 36 — the organization is no longer typed in by the user; the
+    // server resolves it and encodes it in the JWT, so read it back from
+    // there. This is the same value the server will enforce on every
+    // subsequent request via TenantGuard, so it can't drift from what the
+    // token actually authorizes.
+    const payload = decodeJwtPayload(state.token);
+    state.orgId = payload ? payload.organizationId : null;
+    if (!state.orgId) throw new Error("تعذّر تحديد المنظمة من رمز الدخول");
     localStorage.setItem("mizan_token", state.token);
     localStorage.setItem("mizan_org", state.orgId);
     await enterApp();
