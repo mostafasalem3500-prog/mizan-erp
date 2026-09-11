@@ -34,6 +34,10 @@ model Organization {
   postalZone      String?
   district        String?
   countryCode     String?
+  phone           String?
+  email           String?
+  invoiceFooter   String?
+  defaultReceiptTemplate String @default("thermal")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -46,6 +50,7 @@ model Organization {
   customers       Customer[]
   suppliers       Supplier[]
   products        Product[]
+  posSales        PosSale[]
 
   @@map("organizations")
 }
@@ -194,11 +199,47 @@ model Customer {
   vatNumber      String?
   phone          String?
   email          String?
+  crNumber       String?
+  streetName     String?
+  buildingNumber String?
+  city           String?
+  postalZone     String?
+  district       String?
+  countryCode    String? @default("SA")
 
   organization   Organization @relation(fields: [organizationId], references: [id])
+  posSales       PosSale[]
 
   @@index([organizationId])
   @@map("customers")
+}
+
+model PosSale {
+  id                  String   @id
+  organizationId      String
+  customerId          String?
+  invoiceNumber       String
+  terminalId          String
+  periodId            String
+  lines               Json
+  tenders             Json
+  subtotal            Decimal  @db.Decimal(18, 4)
+  taxTotal            Decimal  @db.Decimal(18, 4)
+  total               Decimal  @db.Decimal(18, 4)
+  saleJournalEntryId  String
+  inventoryEffects    Json
+  remainingQuantities Json
+  status              String
+  shiftId             String?
+  soldAt              DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, soldAt])
+  @@index([organizationId, customerId])
+  @@map("pos_sales")
 }
 
 model Supplier {

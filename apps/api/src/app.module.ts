@@ -76,7 +76,7 @@ import {
   InMemoryAccountingQueryRepository,
   InMemoryPrismaClient,
 } from "./infra/in-memory-repositories";
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository } from "./infra/prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository, PrismaPosRepository } from "./infra/prisma-repositories";
 
 /** Logs to stdout — the Phase 0 stand-in for a real `audit_logs` table writer. */
 class ConsoleAuditSink implements AuditSink {
@@ -231,12 +231,12 @@ class ConsoleAuditSink implements AuditSink {
       inject: [AccountingPostingEngine, SuppliersService, InventoryService, "PurchasesRepository", ProductsService],
     },
 
-    { provide: "PosRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService) => new InMemoryPosRepository(db, accounts), inject: [InMemoryDatabase, AccountsService] },
+    { provide: "PosRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService, realPrisma: any) => realPrisma ? new PrismaPosRepository(realPrisma, accounts) : new InMemoryPosRepository(db, accounts), inject: [InMemoryDatabase, AccountsService, "RealPrismaClientOrNull"] },
     {
       provide: PosService,
-      useFactory: (engine: AccountingPostingEngine, inventory: InventoryService, repo: any, shifts: ShiftsService, orgs: OrganizationsService) =>
-        new PosService(engine, inventory, repo, shifts, orgs),
-      inject: [AccountingPostingEngine, InventoryService, "PosRepository", ShiftsService, OrganizationsService],
+      useFactory: (engine: AccountingPostingEngine, inventory: InventoryService, repo: any, shifts: ShiftsService, orgs: OrganizationsService, customers: CustomersService) =>
+        new PosService(engine, inventory, repo, shifts, orgs, customers),
+      inject: [AccountingPostingEngine, InventoryService, "PosRepository", ShiftsService, OrganizationsService, CustomersService],
     },
 
     { provide: "ShiftsRepository", useFactory: (db: InMemoryDatabase) => new InMemoryShiftsRepository(db), inject: [InMemoryDatabase] },

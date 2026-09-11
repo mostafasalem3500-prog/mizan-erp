@@ -26,6 +26,8 @@ import type { CustomersRepository, CustomerRow, CreateCustomerInput } from "../m
 import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../modules/suppliers/suppliers.service";
 import type { ProductsRepository, ProductRow, CreateProductInput } from "../modules/inventory/products.service";
 import type { RolePermissionLookup } from "../modules/common/permissions.guard";
+import type { PosRepository, PosGLAccountMapping, PosSaleRecord } from "../modules/pos/pos.service";
+import { AccountsService } from "../modules/accounts/accounts.service";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
 function toAccountRow(row: any): AccountRow {
@@ -96,6 +98,11 @@ function toOrganizationRow(row: any): OrganizationRow {
     postalZone: row.postalZone ?? undefined,
     district: row.district ?? undefined,
     countryCode: row.countryCode ?? undefined,
+    commercialName: row.commercialName ?? undefined,
+    phone: row.phone ?? undefined,
+    email: row.email ?? undefined,
+    invoiceFooter: row.invoiceFooter ?? undefined,
+    defaultReceiptTemplate: row.defaultReceiptTemplate ?? "thermal",
   };
 }
 
@@ -150,7 +157,7 @@ export class PrismaOrganizationsRepository implements OrganizationsRepository {
 
   async updateSettings(
     organizationId: string,
-    settings: Partial<Pick<OrganizationRow, "requireShiftForPosSale">>,
+    settings: Partial<Omit<OrganizationRow, "id">>,
   ): Promise<OrganizationRow> {
     const row = await (this.prisma as any).organization.update({
       where: { id: organizationId },
@@ -253,7 +260,14 @@ export class PrismaPeriodsRepository implements PeriodsRepository {
 }
 
 function toCustomerRow(row: any): CustomerRow {
-  return { id: row.id, organizationId: row.organizationId, name: row.name, vatNumber: row.vatNumber ?? undefined, phone: row.phone ?? undefined, email: row.email ?? undefined };
+  return {
+    id: row.id, organizationId: row.organizationId, name: row.name,
+    vatNumber: row.vatNumber ?? undefined, phone: row.phone ?? undefined, email: row.email ?? undefined,
+    crNumber: row.crNumber ?? undefined, streetName: row.streetName ?? undefined,
+    buildingNumber: row.buildingNumber ?? undefined, city: row.city ?? undefined,
+    postalZone: row.postalZone ?? undefined, district: row.district ?? undefined,
+    countryCode: row.countryCode ?? undefined,
+  };
 }
 
 export class PrismaCustomersRepository implements CustomersRepository {
@@ -349,5 +363,83 @@ export class PrismaRolePermissionLookup implements RolePermissionLookup {
       include: { permission: true },
     });
     return rolePermissions.map((rp: any) => rp.permission.code);
+  }
+}
+
+function toPosSaleRecord(row: any): PosSaleRecord {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    customerId: row.customerId ?? undefined,
+    invoiceNumber: row.invoiceNumber,
+    terminalId: row.terminalId,
+    periodId: row.periodId,
+    lines: row.lines,
+    tenders: row.tenders,
+    subtotal: row.subtotal.toString(),
+    taxTotal: row.taxTotal.toString(),
+    total: row.total.toString(),
+    saleJournalEntryId: row.saleJournalEntryId,
+    inventoryEffects: row.inventoryEffects,
+    status: row.status,
+    shiftId: row.shiftId ?? undefined,
+    soldAt: new Date(row.soldAt).toISOString(),
+    remainingQuantities: row.remainingQuantities,
+  };
+}
+
+export class PrismaPosRepository implements PosRepository {
+  constructor(private readonly prisma: PrismaClient, private readonly accounts: AccountsService) {}
+
+  async getGLAccountMapping(organizationId: string): Promise<PosGLAccountMapping> {
+    return {
+      cashAccountId: await this.accounts.getAccountIdByCode(organizationId, "1100"),
+      cardClearingAccountId: await this.accounts.getAccountIdByCode(organizationId, "1120"),
+      salesRevenueAccountId: await this.accounts.getAccountIdByCode(organizationId, "4100"),
+      vatOutputAccountId: await this.accounts.getAccountIdByCode(organizationId, "2200"),
+      salesReturnsAccountId: await this.accounts.getAccountIdByCode(organizationId, "4200"),
+      inventoryAccountId: await this.accounts.getAccountIdByCode(organizationId, "1300"),
+      cogsAccountId: await this.accounts.getAccountIdByCode(organizationId, "5100"),
+    };
+  }
+
+  async saveSale(record: PosSaleRecord): Promise<PosSaleRecord> {
+    const data = {
+      organizationId: record.organizationId,
+      customerId: record.customerId,
+      invoiceNumber: record.invoiceNumber ?? record.id.slice(0, 8),
+      terminalId: record.terminalId,
+      periodId: record.periodId,
+      lines: record.lines,
+      tenders: record.tenders,
+      subtotal: record.subtotal,
+      taxTotal: record.taxTotal,
+      total: record.total,
+      saleJournalEntryId: record.saleJournalEntryId,
+      inventoryEffects: record.inventoryEffects,
+      remainingQuantities: record.remainingQuantities,
+      status: record.status,
+      shiftId: record.shiftId,
+      soldAt: new Date(record.soldAt),
+    };
+    const row = await (this.prisma as any).posSale.upsert({ where: { id: record.id }, create: { id: record.id, ...data }, update: data });
+    return toPosSaleRecord(row);
+  }
+
+  async findSale(organizationId: string, saleId: string): Promise<PosSaleRecord | null> {
+    const row = await (this.prisma as any).posSale.findFirst({ where: { organizationId, OR: [{ id: saleId }, { invoiceNumber: saleId }] } });
+    return row ? toPosSaleRecord(row) : null;
+  }
+
+  async searchSales(organizationId: string, query = ""): Promise<PosSaleRecord[]> {
+    const rows = await (this.prisma as any).posSale.findMany({
+      where: { organizationId },
+      orderBy: { soldAt: "desc" },
+      take: 200,
+    });
+    const needle = query.toLowerCase();
+    return rows.map(toPosSaleRecord).filter((sale: PosSaleRecord) =>
+      !needle || sale.id.toLowerCase().includes(needle) || sale.invoiceNumber?.toLowerCase().includes(needle) || sale.customerId?.toLowerCase().includes(needle) || sale.lines.some((line) => line.description.toLowerCase().includes(needle)),
+    );
   }
 }

@@ -6,6 +6,13 @@ export interface CreateCustomerInput {
   vatNumber?: string;
   phone?: string;
   email?: string;
+  crNumber?: string;
+  streetName?: string;
+  buildingNumber?: string;
+  city?: string;
+  postalZone?: string;
+  district?: string;
+  countryCode?: string;
 }
 
 export interface CustomerRow {
@@ -15,6 +22,13 @@ export interface CustomerRow {
   vatNumber?: string;
   phone?: string;
   email?: string;
+  crNumber?: string;
+  streetName?: string;
+  buildingNumber?: string;
+  city?: string;
+  postalZone?: string;
+  district?: string;
+  countryCode?: string;
 }
 
 /**

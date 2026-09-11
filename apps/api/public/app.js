@@ -9,6 +9,7 @@ const state = {
   posCategory: "all",
   posPayment: "CASH",
   receiptTemplate: "thermal",
+  organization: null,
 };
 
 const money = new Intl.NumberFormat("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -98,6 +99,7 @@ function showView(name) {
     dashboard: "نظرة عامة",
     invoices: "فواتير المبيعات",
     pos: "نقطة البيع",
+    "pos-invoices": "سجل فواتير نقطة البيع",
     shift: "الوردية",
     returns: "الإرجاع",
     customers: "العملاء",
@@ -106,6 +108,7 @@ function showView(name) {
     assets: "الأصول الثابتة",
     reports: "التقارير",
     accounts: "دليل الحسابات",
+    settings: "إعدادات المنشأة",
   };
   document.getElementById("view-title").textContent = titles[name];
   if (name === "dashboard") loadDashboard();
@@ -118,6 +121,8 @@ function showView(name) {
   if (name === "reports") loadReports();
   if (name === "inventory") loadInventoryView();
   if (name === "purchases") loadPurchasesView();
+  if (name === "pos-invoices") loadPosInvoices();
+  if (name === "settings") loadOrganizationSettings();
 }
 
 // ---------- الدخول إلى التطبيق ----------
@@ -195,9 +200,21 @@ document.getElementById("customer-form").addEventListener("submit", async (e) =>
   if (!name) return;
   await api(`/api/v1/organizations/${state.orgId}/customers`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({
+      name,
+      vatNumber: document.getElementById("customer-vat").value.trim() || undefined,
+      crNumber: document.getElementById("customer-cr").value.trim() || undefined,
+      phone: document.getElementById("customer-phone").value.trim() || undefined,
+      email: document.getElementById("customer-email").value.trim() || undefined,
+      city: document.getElementById("customer-city").value.trim() || undefined,
+      district: document.getElementById("customer-district").value.trim() || undefined,
+      streetName: document.getElementById("customer-street").value.trim() || undefined,
+      buildingNumber: document.getElementById("customer-building").value.trim() || undefined,
+      postalZone: document.getElementById("customer-postal").value.trim() || undefined,
+      countryCode: "SA",
+    }),
   });
-  document.getElementById("customer-name").value = "";
+  e.currentTarget.reset();
   await loadCustomers();
 });
 
@@ -205,7 +222,7 @@ async function loadCustomers() {
   state.customers = await api(`/api/v1/organizations/${state.orgId}/customers`);
   const tbody = document.getElementById("customers-table-body");
   tbody.innerHTML = state.customers
-    .map((c) => `<tr><td>${c.name}</td><td class="num" style="direction:ltr;font-size:11px;color:#999">${c.id}</td></tr>`)
+    .map((c) => `<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.vatNumber || "—")}</td><td>${escapeHtml(c.phone || "—")}</td><td>${escapeHtml(c.city || "—")}</td></tr>`)
     .join("");
 }
 
@@ -314,6 +331,8 @@ function orderedCatalog(products) {
 }
 
 async function loadPosView() {
+  if (!state.customers.length) await loadCustomers();
+  document.getElementById("pos-customer").innerHTML = `<option value="">عميل نقدي</option>${state.customers.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("")}`;
   const grid = document.getElementById("pos-product-grid");
   grid.setAttribute("aria-busy", "true");
   try {
@@ -471,7 +490,7 @@ document.getElementById("pos-checkout").addEventListener("click", async () => {
     return;
   }
 
-  const lines = state.posCart.map((line) => ({ description: line.name, quantity: line.quantity, unitPrice: Number(line.sellingPrice), taxCode: line.taxCode }));
+  const lines = state.posCart.map((line) => ({ description: line.name, quantity: line.quantity, unitPrice: Number(line.sellingPrice), taxCode: line.taxCode, ...(line.isDemo ? {} : { productId: line.id }) }));
 
   const rateByCode = { STANDARD: 0.15, ZERO: 0, EXEMPT: 0 };
   const total = lines.reduce((sum, l) => {
@@ -488,6 +507,7 @@ document.getElementById("pos-checkout").addEventListener("click", async () => {
         lines,
         tenders: [{ method: state.posPayment, amount: Number(total.toFixed(2)) }],
         idempotencyKey: `web-pos-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        ...(document.getElementById("pos-customer").value ? { customerId: document.getElementById("pos-customer").value } : {}),
         ...(state.shiftId ? { shiftId: state.shiftId } : {}),
       }),
     });
@@ -753,9 +773,12 @@ function renderReceiptHtml(r) {
   return `
     <div class="rcpt-biz-name">${escapeHtml(r.sellerName)}</div>
     <div class="rcpt-biz-meta">${r.sellerVatNumber ? "الرقم الضريبي: " + escapeHtml(r.sellerVatNumber) : ""}</div>
+    ${r.sellerAddress ? `<div class="rcpt-biz-meta">${escapeHtml(r.sellerAddress)}</div>` : ""}
+    ${r.sellerPhone || r.sellerEmail ? `<div class="rcpt-biz-meta">${escapeHtml([r.sellerPhone, r.sellerEmail].filter(Boolean).join(" · "))}</div>` : ""}
     <div class="rcpt-title-band">فاتورة ضريبية</div>
     <div class="rcpt-meta-row"><span>رقم المستند</span><span class="val">${escapeHtml(r.documentNumber)}</span></div>
     <div class="rcpt-meta-row"><span>التاريخ والوقت</span><span class="val">${dt}</span></div>
+    ${r.customer ? `<div class="rcpt-customer"><strong>بيانات العميل</strong><span>${escapeHtml(r.customer.name)}</span>${r.customer.vatNumber ? `<span>الرقم الضريبي: ${escapeHtml(r.customer.vatNumber)}</span>` : ""}${r.customer.address ? `<span>${escapeHtml(r.customer.address)}</span>` : ""}</div>` : ""}
     <table class="rcpt-table">
       <thead><tr><th>الصنف</th><th class="num">كمية</th><th class="num">سعر</th><th class="num">الإجمالي</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -768,8 +791,63 @@ function renderReceiptHtml(r) {
       <img src="${escapeHtml(r.qrCodeDataUrl)}" alt="رمز الاستجابة السريعة للفاتورة الضريبية" />
       <div class="rcpt-qr-caption">رمز الاستجابة السريعة لضريبة القيمة المضافة — نموذج المرحلة الأولى</div>
     </div>
+    ${r.invoiceFooter ? `<div class="rcpt-footer">${escapeHtml(r.invoiceFooter)}</div>` : ""}
   `;
 }
+
+// ---------- سجل فواتير نقطة البيع ----------
+async function loadPosInvoices(query = "") {
+  const sales = await api(`/api/v1/organizations/${state.orgId}/pos/sales${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+  if (!state.customers.length) await loadCustomers();
+  const customerNames = new Map(state.customers.map((c) => [c.id, c.name]));
+  const body = document.getElementById("pos-invoices-body");
+  document.getElementById("pos-invoices-empty").hidden = sales.length > 0;
+  body.innerHTML = sales.map((sale) => `<tr>
+    <td class="num">${escapeHtml(sale.invoiceNumber || sale.id.slice(0, 8))}</td>
+    <td>${new Date(sale.soldAt).toLocaleString("ar-SA")}</td>
+    <td>${escapeHtml(customerNames.get(sale.customerId) || "عميل نقدي")}</td>
+    <td>${escapeHtml(sale.lines.map((line) => line.description).join("، "))}</td>
+    <td class="num">${escapeHtml(sale.total)} ر.س</td><td>${sale.status === "COMPLETED" ? "مكتملة" : "مرتجعة"}</td>
+    <td><button class="ghost-btn view-pos-invoice" data-sale-id="${escapeHtml(sale.id)}">عرض وطباعة</button></td>
+  </tr>`).join("");
+  body.querySelectorAll(".view-pos-invoice").forEach((button) => button.addEventListener("click", () => openPosReceipt(button.dataset.saleId)));
+}
+
+let invoiceSearchTimer;
+document.getElementById("pos-invoice-search").addEventListener("input", (event) => {
+  clearTimeout(invoiceSearchTimer);
+  invoiceSearchTimer = setTimeout(() => loadPosInvoices(event.target.value.trim()), 250);
+});
+
+// ---------- إعدادات المنشأة ----------
+async function loadOrganizationSettings() {
+  state.organization = await api(`/api/v1/organizations/${state.orgId}`);
+  const o = state.organization;
+  const fields = { "org-legal-name": o.legalNameAr, "org-commercial-name": o.commercialName, "org-vat": o.vatNumber, "org-cr": o.crNumber, "org-phone": o.phone, "org-email": o.email, "org-city": o.city, "org-district": o.district, "org-street": o.streetName, "org-building": o.buildingNumber, "org-postal": o.postalZone, "org-footer": o.invoiceFooter };
+  Object.entries(fields).forEach(([id, value]) => { document.getElementById(id).value = value || ""; });
+  document.getElementById("org-template").value = o.defaultReceiptTemplate || "thermal";
+  document.getElementById("org-require-shift").checked = Boolean(o.requireShiftForPosSale);
+}
+
+document.getElementById("organization-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const result = document.getElementById("organization-settings-result");
+  try {
+    const body = {
+      legalNameAr: document.getElementById("org-legal-name").value.trim(), commercialName: document.getElementById("org-commercial-name").value.trim() || undefined,
+      vatNumber: document.getElementById("org-vat").value.trim() || undefined, crNumber: document.getElementById("org-cr").value.trim() || undefined,
+      phone: document.getElementById("org-phone").value.trim() || undefined, email: document.getElementById("org-email").value.trim() || undefined,
+      city: document.getElementById("org-city").value.trim() || undefined, district: document.getElementById("org-district").value.trim() || undefined,
+      streetName: document.getElementById("org-street").value.trim() || undefined, buildingNumber: document.getElementById("org-building").value.trim() || undefined,
+      postalZone: document.getElementById("org-postal").value.trim() || undefined, countryCode: "SA",
+      invoiceFooter: document.getElementById("org-footer").value.trim() || undefined, defaultReceiptTemplate: document.getElementById("org-template").value,
+      requireShiftForPosSale: document.getElementById("org-require-shift").checked,
+    };
+    state.organization = await api(`/api/v1/organizations/${state.orgId}/settings`, { method: "PATCH", body: JSON.stringify(body) });
+    state.receiptTemplate = state.organization.defaultReceiptTemplate || "thermal";
+    result.textContent = "تم حفظ البيانات بنجاح"; result.style.color = "#168a61"; showToast("تم تحديث بيانات المنشأة والفاتورة");
+  } catch (err) { result.textContent = "تعذّر الحفظ: " + err.message; result.style.color = "#b54837"; }
+});
 
 async function openPosReceipt(saleId) {
   const receipt = await api(`/api/v1/organizations/${state.orgId}/pos/sales/${saleId}/receipt`);

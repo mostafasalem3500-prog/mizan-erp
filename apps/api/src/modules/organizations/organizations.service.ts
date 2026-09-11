@@ -31,6 +31,11 @@ export interface OrganizationRow {
   postalZone?: string;
   district?: string;
   countryCode?: string;
+  commercialName?: string;
+  phone?: string;
+  email?: string;
+  invoiceFooter?: string;
+  defaultReceiptTemplate?: "thermal" | "a4" | "simple";
 }
 
 /**
@@ -72,7 +77,7 @@ export interface OrganizationsRepository {
     owner: { email: string; fullName: string; passwordHash: string };
   }): Promise<CreateOrganizationResult>;
   findById(organizationId: string): Promise<OrganizationRow | null>;
-  updateSettings(organizationId: string, settings: Partial<Pick<OrganizationRow, "requireShiftForPosSale">>): Promise<OrganizationRow>;
+  updateSettings(organizationId: string, settings: Partial<Omit<OrganizationRow, "id">>): Promise<OrganizationRow>;
 }
 
 @Injectable()
@@ -125,7 +130,7 @@ export class OrganizationsService {
    */
   async updateSettings(
     organizationId: string,
-    settings: Partial<Pick<OrganizationRow, "requireShiftForPosSale">>,
+    settings: Partial<Omit<OrganizationRow, "id">>,
   ): Promise<OrganizationRow> {
     const org = await this.repo.findById(organizationId);
     if (!org) {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Query, UseGuards, UseInterceptors } from "@nestjs/common";
 import { PosService, PosSellInput } from "./pos.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { TenantGuard } from "../common/tenant.guard";
@@ -10,6 +10,12 @@ import { AuditAction, AuditInterceptor } from "../common/audit.interceptor";
 @UseInterceptors(AuditInterceptor)
 export class PosController {
   constructor(private readonly posService: PosService) {}
+
+  @Get()
+  @RequirePermissions("pos.sell")
+  async search(@Param("organizationId") organizationId: string, @Query("q") query?: string) {
+    return this.posService.searchSales(organizationId, query);
+  }
 
   @Post()
   @RequirePermissions("pos.sell")

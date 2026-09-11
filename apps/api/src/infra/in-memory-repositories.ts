@@ -281,7 +281,7 @@ export class InMemoryOrganizationsRepository implements OrganizationsRepository 
 
   async updateSettings(
     organizationId: string,
-    settings: Partial<Pick<OrganizationRow, "requireShiftForPosSale">>,
+    settings: Partial<Omit<OrganizationRow, "id">>,
   ): Promise<OrganizationRow> {
     const existing = this.db.organizations.get(organizationId);
     if (!existing) {
@@ -615,6 +615,15 @@ export class InMemoryPosRepository implements PosRepository {
   async findSale(organizationId: string, saleId: string): Promise<PosSaleRecord | null> {
     const record = this.db.posSales.get(saleId);
     return record && record.organizationId === organizationId ? { ...record } : null;
+  }
+
+  async searchSales(organizationId: string, query = ""): Promise<PosSaleRecord[]> {
+    const needle = query.toLowerCase();
+    return [...this.db.posSales.values()]
+      .filter((r) => r.organizationId === organizationId)
+      .filter((r) => !needle || r.id.toLowerCase().includes(needle) || r.invoiceNumber?.toLowerCase().includes(needle) || r.customerId?.toLowerCase().includes(needle) || r.lines.some((l) => l.description.toLowerCase().includes(needle)))
+      .sort((a, b) => b.soldAt.localeCompare(a.soldAt))
+      .map((r) => ({ ...r }));
   }
 }
 

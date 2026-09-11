@@ -35,6 +35,11 @@ export interface ReceiptData {
    * collect a full address yet, won't have these.
    */
   xmlInvoice?: string;
+  customer?: { name: string; vatNumber?: string; phone?: string; address?: string };
+  sellerAddress?: string;
+  sellerPhone?: string;
+  sellerEmail?: string;
+  invoiceFooter?: string;
 }
 
 const TAX_CODE_TO_ZATCA_CATEGORY: Record<string, ZatcaVatCategory> = {
@@ -73,6 +78,7 @@ export class ReceiptsService {
       throw new NotFoundException(`POS sale ${saleId} not found`);
     }
     const org = await this.organizationsService.getOrganization(organizationId);
+    const customer = sale.customerId ? await this.posService.getCustomer(organizationId, sale.customerId) : null;
 
     const lines: ReceiptLine[] = sale.lines.map((l) => ({
       description: l.description,
@@ -93,7 +99,7 @@ export class ReceiptsService {
     return {
       sellerName: org?.legalNameAr ?? "منظمة غير معروفة",
       sellerVatNumber: org?.vatNumber,
-      documentNumber: sale.id.slice(0, 8),
+      documentNumber: sale.invoiceNumber ?? sale.id.slice(0, 8),
       issuedAt: sale.soldAt,
       lines,
       subtotal: sale.subtotal,
@@ -110,6 +116,16 @@ export class ReceiptsService {
         sale.taxTotal,
         sale.total,
       ),
+      customer: customer ? {
+        name: customer.name,
+        vatNumber: customer.vatNumber,
+        phone: customer.phone,
+        address: [customer.buildingNumber, customer.streetName, customer.district, customer.city, customer.postalZone].filter(Boolean).join("، "),
+      } : undefined,
+      sellerAddress: org ? [org.buildingNumber, org.streetName, org.district, org.city, org.postalZone].filter(Boolean).join("، ") : undefined,
+      sellerPhone: org?.phone,
+      sellerEmail: org?.email,
+      invoiceFooter: org?.invoiceFooter,
     };
   }
 

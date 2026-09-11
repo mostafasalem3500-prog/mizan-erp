@@ -30,7 +30,7 @@ export class OrganizationsController {
   @RequirePermissions("settings.manage")
   async updateSettings(
     @Param("organizationId") organizationId: string,
-    @Body() body: Partial<Pick<OrganizationRow, "requireShiftForPosSale">>,
+    @Body() body: Partial<Omit<OrganizationRow, "id">>,
   ) {
     return this.organizationsService.updateSettings(organizationId, body);
   }

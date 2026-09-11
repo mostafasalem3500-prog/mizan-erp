@@ -3,6 +3,7 @@ import { AccountingPostingEngine } from "../accounting/accounting-posting-engine
 import { InventoryService } from "../inventory/inventory.service";
 import { ShiftsService } from "./shifts.service";
 import { OrganizationsService } from "../organizations/organizations.service";
+import { CustomersService } from "../customers/customers.service";
 
 const TAX_RATE_BY_CODE: Record<string, number> = {
   STANDARD: 0.15,
@@ -69,6 +70,8 @@ export interface PosSaleRecord {
   status: "COMPLETED" | "PARTIALLY_RETURNED" | "RETURNED";
   shiftId?: string;
   soldAt: string;
+  invoiceNumber?: string;
+  customerId?: string;
   /** Remaining (not-yet-returned) quantity per line, parallel to `lines` — spec band 41's partial-return support. */
   remainingQuantities: number[];
 }
@@ -88,6 +91,7 @@ export interface PosRepository {
   getGLAccountMapping(organizationId: string): Promise<PosGLAccountMapping>;
   saveSale(record: PosSaleRecord): Promise<PosSaleRecord>;
   findSale(organizationId: string, saleId: string): Promise<PosSaleRecord | null>;
+  searchSales?(organizationId: string, query?: string): Promise<PosSaleRecord[]>;
 }
 
 function round2(value: number): string {
@@ -117,6 +121,7 @@ export class PosService {
     // explicitly opt in via OrganizationsService.updateSettings() see any
     // behavior change.
     private readonly organizationsService?: OrganizationsService,
+    private readonly customersService?: CustomersService,
   ) {}
 
   async sell(input: PosSellInput): Promise<PosSaleRecord> {
@@ -125,6 +130,11 @@ export class PosService {
     }
     if (input.tenders.length === 0) {
       throw new BadRequestException("A sale must have at least one payment tender");
+    }
+
+    if (input.customerId && this.customersService) {
+      const customer = await this.customersService.getCustomer(input.organizationId, input.customerId);
+      if (!customer) throw new NotFoundException(`Customer ${input.customerId} not found`);
     }
 
     // Sprint 29 — resolves the Sprint 12 open question. Off by default
@@ -244,8 +254,18 @@ export class PosService {
       status: "COMPLETED",
       shiftId: input.shiftId,
       soldAt: new Date().toISOString(),
+      invoiceNumber: `POS-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${saleEntry.id.slice(0, 8).toUpperCase()}`,
+      customerId: input.customerId,
       remainingQuantities: input.lines.map((l) => l.quantity),
     });
+  }
+
+  async searchSales(organizationId: string, query?: string): Promise<PosSaleRecord[]> {
+    return this.repo.searchSales ? this.repo.searchSales(organizationId, query?.trim()) : [];
+  }
+
+  async getCustomer(organizationId: string, customerId: string) {
+    return this.customersService?.getCustomer(organizationId, customerId) ?? null;
   }
 
   /**

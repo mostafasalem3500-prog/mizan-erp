@@ -43,6 +43,7 @@
     <nav>
       <button class="nav-item active" data-view="dashboard"><i class="ri-layout-grid-line"></i><span>الرئيسية</span></button>
       <button class="nav-item pos-nav" data-view="pos"><i class="ri-shopping-cart-2-line"></i><span>نقطة البيع</span></button>
+      <button class="nav-item" data-view="pos-invoices"><i class="ri-receipt-line"></i><span>سجل فواتير POS</span></button>
       <button class="nav-item" data-view="invoices"><i class="ri-file-list-3-line"></i><span>فواتير المبيعات</span></button>
       <button class="nav-item" data-view="shift"><i class="ri-time-line"></i><span>الوردية</span></button>
       <button class="nav-item" data-view="returns"><i class="ri-arrow-go-back-line"></i><span>الإرجاع</span></button>
@@ -52,6 +53,7 @@
       <button class="nav-item" data-view="assets"><i class="ri-building-2-line"></i><span>الأصول الثابتة</span></button>
       <button class="nav-item" data-view="reports"><i class="ri-bar-chart-box-line"></i><span>التقارير</span></button>
       <button class="nav-item" data-view="accounts"><i class="ri-book-2-line"></i><span>دليل الحسابات</span></button>
+      <button class="nav-item" data-view="settings"><i class="ri-settings-3-line"></i><span>إعدادات المنشأة</span></button>
     </nav>
     <button id="logout-btn" class="logout"><i class="ri-logout-box-r-line"></i><span>تسجيل الخروج</span></button>
   </aside>
@@ -111,12 +113,21 @@
     <section id="view-customers" class="view" hidden>
       <div class="panel">
         <h3>إضافة عميل</h3>
-        <form id="customer-form" class="inline-form">
-          <input type="text" id="customer-name" placeholder="اسم العميل" required />
+        <form id="customer-form" class="settings-grid">
+          <input type="text" id="customer-name" placeholder="اسم العميل أو المنشأة" required />
+          <input type="text" id="customer-vat" placeholder="الرقم الضريبي" />
+          <input type="text" id="customer-cr" placeholder="السجل التجاري" />
+          <input type="tel" id="customer-phone" placeholder="الجوال" />
+          <input type="email" id="customer-email" placeholder="البريد الإلكتروني" />
+          <input type="text" id="customer-city" placeholder="المدينة" />
+          <input type="text" id="customer-district" placeholder="الحي" />
+          <input type="text" id="customer-street" placeholder="الشارع" />
+          <input type="text" id="customer-building" placeholder="رقم المبنى" />
+          <input type="text" id="customer-postal" placeholder="الرمز البريدي" />
           <button type="submit" class="primary-btn">إضافة</button>
         </form>
         <table class="ledger-table">
-          <thead><tr><th>الاسم</th><th>المعرّف</th></tr></thead>
+          <thead><tr><th>الاسم</th><th>الرقم الضريبي</th><th>الجوال</th><th>المدينة</th></tr></thead>
           <tbody id="customers-table-body"></tbody>
         </table>
       </div>
@@ -157,6 +168,7 @@
           <div class="cart-header"><div><span class="eyebrow">عملية بيع جديدة</span><h3 id="cart-title">سلة المبيعات <b id="cart-count">0</b></h3></div><button id="clear-cart" class="icon-btn danger" aria-label="إفراغ السلة" title="إفراغ السلة"><i class="ri-delete-bin-6-line"></i></button></div>
           <div id="pos-cart-lines" class="cart-lines"></div>
           <div id="pos-empty-cart" class="cart-empty"><i class="ri-shopping-basket-line"></i><strong>السلة فارغة</strong><span>اختر صنفًا من القائمة لبدء البيع</span></div>
+          <label class="pos-customer-label">العميل <select id="pos-customer"><option value="">عميل نقدي</option></select></label>
           <div class="cart-summary">
             <div><span>المجموع قبل الضريبة</span><strong id="pos-subtotal">0.00 ر.س</strong></div>
             <div><span>ضريبة القيمة المضافة (15%)</span><strong id="pos-tax-total">0.00 ر.س</strong></div>
@@ -168,6 +180,37 @@
           <button id="hold-sale" class="hold-btn" disabled><i class="ri-bookmark-line"></i>تعليق الفاتورة</button>
           <p id="pos-result" class="form-result" role="status"></p>
         </aside>
+      </div>
+    </section>
+
+    <section id="view-pos-invoices" class="view" hidden>
+      <div class="panel">
+        <div class="archive-head"><div><h3>سجل فواتير نقطة البيع</h3><p>ابحث برقم الفاتورة أو العميل أو الصنف</p></div><input id="pos-invoice-search" type="search" placeholder="بحث سريع..." /></div>
+        <table class="ledger-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody id="pos-invoices-body"></tbody></table>
+        <div id="pos-invoices-empty" class="empty-state" hidden><h4>لا توجد فواتير</h4><p>ستظهر المبيعات المحفوظة هنا تلقائيًا.</p></div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <div class="panel settings-panel">
+        <h3>بيانات المنشأة والفاتورة</h3><p class="panel-help">تظهر هذه البيانات في الفاتورة الضريبية ورمز QR.</p>
+        <form id="organization-settings-form" class="settings-grid">
+          <input id="org-legal-name" placeholder="الاسم القانوني بالعربية" required />
+          <input id="org-commercial-name" placeholder="الاسم التجاري" />
+          <input id="org-vat" placeholder="الرقم الضريبي (15 رقمًا)" />
+          <input id="org-cr" placeholder="السجل التجاري" />
+          <input id="org-phone" placeholder="الهاتف" />
+          <input id="org-email" type="email" placeholder="البريد الإلكتروني" />
+          <input id="org-city" placeholder="المدينة" />
+          <input id="org-district" placeholder="الحي" />
+          <input id="org-street" placeholder="الشارع" />
+          <input id="org-building" placeholder="رقم المبنى" />
+          <input id="org-postal" placeholder="الرمز البريدي" />
+          <select id="org-template"><option value="thermal">حراري 80مم</option><option value="a4">A4</option><option value="simple">مبسّط</option></select>
+          <textarea id="org-footer" class="wide" placeholder="تذييل الفاتورة أو سياسة الاستبدال"></textarea>
+          <label class="check-row wide"><input id="org-require-shift" type="checkbox" /> إلزام فتح وردية قبل البيع</label>
+          <button class="primary-btn" type="submit">حفظ إعدادات المنشأة</button><span id="organization-settings-result"></span>
+        </form>
       </div>
     </section>
 
