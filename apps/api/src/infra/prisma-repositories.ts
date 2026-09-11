@@ -25,6 +25,7 @@ import type { AuthUserLookup, UserCredentialsRow, OrganizationMembershipRow } fr
 import type { CustomersRepository, CustomerRow, CreateCustomerInput } from "../modules/customers/customers.service";
 import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../modules/suppliers/suppliers.service";
 import type { ProductsRepository, ProductRow, CreateProductInput } from "../modules/inventory/products.service";
+import type { RolePermissionLookup } from "../modules/common/permissions.guard";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
 function toAccountRow(row: any): AccountRow {
@@ -320,5 +321,33 @@ export class PrismaProductsRepository implements ProductsRepository {
   async listForOrganization(organizationId: string): Promise<ProductRow[]> {
     const rows = await (this.prisma as any).product.findMany({ where: { organizationId } });
     return rows.map(toProductRow);
+  }
+}
+
+/**
+ * Sprint 37 — the FIFTH repository found still bound to the empty
+ * in-memory store while USE_REAL_PRISMA_DB is on, and the exact same
+ * class of bug as PrismaAuthUserLookup in Sprint 34. Found the same way:
+ * a real user hitting a real deployed endpoint, getting
+ * "Missing required permission(s): reports.pnl.view" even though the
+ * Owner role genuinely HAS that permission in Postgres — because
+ * PermissionsGuard was reading role permissions from InMemoryDatabase,
+ * which the real-Prisma boot path never populates.
+ *
+ * The lesson from Sprint 34 was recorded but not fully applied: the fix
+ * then covered only the repositories that sprint happened to touch,
+ * rather than auditing every remaining in-memory-only provider. The
+ * remaining ones are now listed in docs/MVP_ROADMAP.md so this doesn't
+ * happen a third time.
+ */
+export class PrismaRolePermissionLookup implements RolePermissionLookup {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getPermissionCodesForRole(roleId: string): Promise<string[]> {
+    const rolePermissions = await (this.prisma as any).rolePermission.findMany({
+      where: { roleId },
+      include: { permission: true },
+    });
+    return rolePermissions.map((rp: any) => rp.permission.code);
   }
 }

@@ -11,6 +11,18 @@
 
 * { box-sizing: border-box; }
 
+/* Sprint 37 — found via a real user unable to log in on the deployed site.
+   `.receipt-overlay` and `.app-shell` set `display: flex`, which OVERRIDES
+   the HTML `hidden` attribute (hidden is only `display: none` via the UA
+   stylesheet, which any author `display` rule beats). The result: the
+   receipt overlay rendered permanently as a full-screen fixed layer at
+   z-index 100 over everything, swallowing every click — including the
+   login button — so the app looked broken with no visible error. This
+   rule restores `hidden`'s meaning for every element, so `hidden` can be
+   trusted throughout the UI rather than each component needing its own
+   `.is-open` class. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);

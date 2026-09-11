@@ -1,4 +1,4 @@
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup } from "./prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup } from "./prisma-repositories";
 
 describe("PrismaAccountsRepository", () => {
   function makeFakePrisma() {
@@ -385,5 +385,49 @@ describe("PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRe
 
     const created = await repo.create({ organizationId: "org-1", sku: "SKU-1", name: "X", unit: "PCS", sellingPrice: 45.5, taxCode: "STANDARD" });
     expect(created.sellingPrice).toBe(45.5);
+  });
+});
+
+describe("PrismaRolePermissionLookup — the fifth repository, found via a real 403 on the deployed site (Sprint 37)", () => {
+  function makeFakePrisma() {
+    return {
+      rolePermission: {
+        findMany: jest.fn().mockImplementation(async ({ where }: any) => {
+          if (where.roleId !== "role-owner") return [];
+          return [
+            { roleId: "role-owner", permission: { code: "reports.pnl.view" } },
+            { roleId: "role-owner", permission: { code: "pos.sell" } },
+          ];
+        }),
+      },
+    };
+  }
+
+  test("returns the permission CODES (not the join rows) for a role", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaRolePermissionLookup(prisma as any);
+
+    const codes = await lookup.getPermissionCodesForRole("role-owner");
+
+    expect(codes).toEqual(["reports.pnl.view", "pos.sell"]);
+  });
+
+  test("includes the related permission so codes are actually resolvable, not undefined", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaRolePermissionLookup(prisma as any);
+
+    await lookup.getPermissionCodesForRole("role-owner");
+
+    expect(prisma.rolePermission.findMany).toHaveBeenCalledWith({
+      where: { roleId: "role-owner" },
+      include: { permission: true },
+    });
+  });
+
+  test("returns an empty array for a role with no permissions, not null or a throw", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaRolePermissionLookup(prisma as any);
+
+    expect(await lookup.getPermissionCodesForRole("role-cashier")).toEqual([]);
   });
 });

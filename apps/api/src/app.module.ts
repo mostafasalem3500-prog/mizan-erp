@@ -76,7 +76,7 @@ import {
   InMemoryAccountingQueryRepository,
   InMemoryPrismaClient,
 } from "./infra/in-memory-repositories";
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository } from "./infra/prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository } from "./infra/prisma-repositories";
 
 /** Logs to stdout — the Phase 0 stand-in for a real `audit_logs` table writer. */
 class ConsoleAuditSink implements AuditSink {
@@ -128,7 +128,12 @@ class ConsoleAuditSink implements AuditSink {
     },
     { provide: AuthService, useFactory: (jwt: JwtService, lookup: any) => new AuthService(jwt, lookup), inject: [JwtService, "AuthUserLookup"] },
 
-    { provide: "RolePermissionLookup", useFactory: (db: InMemoryDatabase) => new InMemoryRolePermissionLookup(db), inject: [InMemoryDatabase] },
+    {
+      provide: "RolePermissionLookup",
+      useFactory: (db: InMemoryDatabase, realPrisma: any) =>
+        realPrisma ? new PrismaRolePermissionLookup(realPrisma) : new InMemoryRolePermissionLookup(db),
+      inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
+    },
     PermissionsGuard,
 
     {
