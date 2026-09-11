@@ -22,6 +22,9 @@ import type {
 } from "../modules/organizations/organizations.service";
 import type { PeriodsRepository, PeriodRow, CreatePeriodInput } from "../modules/periods/periods.service";
 import type { AuthUserLookup, UserCredentialsRow, OrganizationMembershipRow } from "../modules/auth/auth.service";
+import type { CustomersRepository, CustomerRow, CreateCustomerInput } from "../modules/customers/customers.service";
+import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../modules/suppliers/suppliers.service";
+import type { ProductsRepository, ProductRow, CreateProductInput } from "../modules/inventory/products.service";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
 function toAccountRow(row: any): AccountRow {
@@ -240,5 +243,77 @@ export class PrismaPeriodsRepository implements PeriodsRepository {
       startDate: input.startDate,
       endDate: input.endDate,
     };
+  }
+}
+
+function toCustomerRow(row: any): CustomerRow {
+  return { id: row.id, organizationId: row.organizationId, name: row.name, vatNumber: row.vatNumber ?? undefined, phone: row.phone ?? undefined, email: row.email ?? undefined };
+}
+
+export class PrismaCustomersRepository implements CustomersRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async create(input: CreateCustomerInput): Promise<CustomerRow> {
+    const row = await (this.prisma as any).customer.create({ data: input });
+    return toCustomerRow(row);
+  }
+
+  async findById(organizationId: string, customerId: string): Promise<CustomerRow | null> {
+    const row = await (this.prisma as any).customer.findUnique({ where: { id: customerId } });
+    if (!row || row.organizationId !== organizationId) return null;
+    return toCustomerRow(row);
+  }
+
+  async listForOrganization(organizationId: string): Promise<CustomerRow[]> {
+    const rows = await (this.prisma as any).customer.findMany({ where: { organizationId } });
+    return rows.map(toCustomerRow);
+  }
+}
+
+function toSupplierRow(row: any): SupplierRow {
+  return { id: row.id, organizationId: row.organizationId, name: row.name, vatNumber: row.vatNumber ?? undefined, phone: row.phone ?? undefined, email: row.email ?? undefined };
+}
+
+export class PrismaSuppliersRepository implements SuppliersRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async create(input: CreateSupplierInput): Promise<SupplierRow> {
+    const row = await (this.prisma as any).supplier.create({ data: input });
+    return toSupplierRow(row);
+  }
+
+  async findById(organizationId: string, supplierId: string): Promise<SupplierRow | null> {
+    const row = await (this.prisma as any).supplier.findUnique({ where: { id: supplierId } });
+    if (!row || row.organizationId !== organizationId) return null;
+    return toSupplierRow(row);
+  }
+
+  async listForOrganization(organizationId: string): Promise<SupplierRow[]> {
+    const rows = await (this.prisma as any).supplier.findMany({ where: { organizationId } });
+    return rows.map(toSupplierRow);
+  }
+}
+
+function toProductRow(row: any): ProductRow {
+  return { id: row.id, organizationId: row.organizationId, sku: row.sku, name: row.name, unit: row.unit, sellingPrice: Number(row.sellingPrice), taxCode: row.taxCode };
+}
+
+export class PrismaProductsRepository implements ProductsRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async create(input: CreateProductInput): Promise<ProductRow> {
+    const row = await (this.prisma as any).product.create({ data: input });
+    return toProductRow(row);
+  }
+
+  async findById(organizationId: string, productId: string): Promise<ProductRow | null> {
+    const row = await (this.prisma as any).product.findUnique({ where: { id: productId } });
+    if (!row || row.organizationId !== organizationId) return null;
+    return toProductRow(row);
+  }
+
+  async listForOrganization(organizationId: string): Promise<ProductRow[]> {
+    const rows = await (this.prisma as any).product.findMany({ where: { organizationId } });
+    return rows.map(toProductRow);
   }
 }

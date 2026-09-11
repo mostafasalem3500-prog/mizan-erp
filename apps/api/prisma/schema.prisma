@@ -43,6 +43,9 @@ model Organization {
   accounts        Account[]
   fiscalYears     FiscalYear[]
   journalEntries  JournalEntry[]
+  customers       Customer[]
+  suppliers       Supplier[]
+  products        Product[]
 
   @@map("organizations")
 }
@@ -170,6 +173,62 @@ model Account {
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("accounts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MASTER DATA (Sprint 35) — the first models beyond Security Foundation +
+// Accounting Core, added as the starting point for moving the operational
+// layer (Sales/Purchases/Inventory/POS) to real Prisma. These three are
+// simple, non-transactional entities with no posting logic of their own —
+// a deliberately low-risk starting point before the more complex
+// transactional models (SalesInvoice, PurchaseBill, PosSale) that
+// reference them. Field names match CustomerRow/SupplierRow/ProductRow in
+// their respective services exactly, so the eventual Prisma repositories
+// need no field-name translation layer.
+// ─────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  vatNumber      String?
+  phone          String?
+  email          String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("customers")
+}
+
+model Supplier {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  vatNumber      String?
+  phone          String?
+  email          String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("suppliers")
+}
+
+model Product {
+  id             String  @id @default(uuid())
+  organizationId String
+  sku            String
+  name           String
+  unit           String
+  sellingPrice   Decimal @db.Decimal(18, 4)
+  taxCode        String // "STANDARD" | "ZERO" | "EXEMPT" | "OUT_OF_SCOPE" — kept as a plain string, not a Prisma enum, matching the TS union already used in ProductRow (see products.service.ts) rather than introducing a second source of truth for this list
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, sku])
+  @@index([organizationId])
+  @@map("products")
 }
 
 enum PeriodStatus {

@@ -292,3 +292,98 @@ describe("PrismaAuthUserLookup — the fourth repository, missed in the original
     expect(await lookup.findMembership("u1", "org-OTHER")).toBeNull();
   });
 });
+
+describe("PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository (Sprint 35 master data)", () => {
+  const { PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository } = require("./prisma-repositories");
+
+  function makeFakeMasterDataPrisma() {
+    const customers = new Map<string, any>();
+    const suppliers = new Map<string, any>();
+    const products = new Map<string, any>();
+    let seq = { c: 0, s: 0, p: 0 };
+    return {
+      customer: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => {
+          const row = { id: `cust-${++seq.c}`, ...data };
+          customers.set(row.id, row);
+          return row;
+        }),
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => customers.get(where.id) ?? null),
+        findMany: jest.fn().mockImplementation(async ({ where }: any) => [...customers.values()].filter((c) => c.organizationId === where.organizationId)),
+      },
+      supplier: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => {
+          const row = { id: `sup-${++seq.s}`, ...data };
+          suppliers.set(row.id, row);
+          return row;
+        }),
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => suppliers.get(where.id) ?? null),
+        findMany: jest.fn().mockImplementation(async ({ where }: any) => [...suppliers.values()].filter((s) => s.organizationId === where.organizationId)),
+      },
+      product: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => {
+          const row = { id: `prod-${++seq.p}`, ...data };
+          products.set(row.id, row);
+          return row;
+        }),
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => products.get(where.id) ?? null),
+        findMany: jest.fn().mockImplementation(async ({ where }: any) => [...products.values()].filter((p) => p.organizationId === where.organizationId)),
+      },
+    };
+  }
+
+  test("PrismaCustomersRepository: create + tenant-isolated findById + listForOrganization", async () => {
+    const prisma = makeFakeMasterDataPrisma();
+    const repo = new PrismaCustomersRepository(prisma as any);
+
+    const created = await repo.create({ organizationId: "org-1", name: "شركة الاختبار", email: "a@b.com" });
+    expect(created.name).toBe("شركة الاختبار");
+
+    expect(await repo.findById("org-OTHER", created.id)).toBeNull();
+    expect((await repo.findById("org-1", created.id))?.id).toBe(created.id);
+
+    await repo.create({ organizationId: "org-2", name: "Other org customer" });
+    const list = await repo.listForOrganization("org-1");
+    expect(list).toHaveLength(1);
+  });
+
+  test("PrismaSuppliersRepository: create + tenant-isolated findById + listForOrganization", async () => {
+    const prisma = makeFakeMasterDataPrisma();
+    const repo = new PrismaSuppliersRepository(prisma as any);
+
+    const created = await repo.create({ organizationId: "org-1", name: "مورد الاختبار" });
+    expect(await repo.findById("org-OTHER", created.id)).toBeNull();
+    expect((await repo.findById("org-1", created.id))?.name).toBe("مورد الاختبار");
+  });
+
+  test("PrismaProductsRepository: create + findById + listForOrganization, sellingPrice returned as a number", async () => {
+    const prisma = makeFakeMasterDataPrisma();
+    const repo = new PrismaProductsRepository(prisma as any);
+
+    const created = await repo.create({ organizationId: "org-1", sku: "SKU-1", name: "منتج", unit: "PCS", sellingPrice: 45.5, taxCode: "STANDARD" });
+    expect(created.sellingPrice).toBe(45.5);
+    expect(typeof created.sellingPrice).toBe("number");
+
+    const list = await repo.listForOrganization("org-1");
+    expect(list).toHaveLength(1);
+  });
+
+  test("PrismaProductsRepository: converts a real Prisma Decimal-like object (with toString) back to a plain number", async () => {
+    const prisma = makeFakeMasterDataPrisma();
+    // Simulate what real Prisma actually returns for a Decimal(18,4) column —
+    // an object whose Number() conversion works via valueOf/toString, not a plain JS number.
+    prisma.product.create = jest.fn().mockResolvedValue({
+      id: "prod-1",
+      organizationId: "org-1",
+      sku: "SKU-1",
+      name: "X",
+      unit: "PCS",
+      sellingPrice: { toString: () => "45.5000" },
+      taxCode: "STANDARD",
+    });
+    const repo = new PrismaProductsRepository(prisma as any);
+
+    const created = await repo.create({ organizationId: "org-1", sku: "SKU-1", name: "X", unit: "PCS", sellingPrice: 45.5, taxCode: "STANDARD" });
+    expect(created.sellingPrice).toBe(45.5);
+  });
+});
