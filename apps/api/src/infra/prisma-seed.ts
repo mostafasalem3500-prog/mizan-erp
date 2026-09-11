@@ -69,36 +69,56 @@ export interface PrismaSeedResult {
   accountIdsByCode: Record<string, string>;
 }
 
-const DEMO_VAT_NUMBER = "300000000000003";
-
 export async function seedDemoOrganizationWithPrisma(
   prisma: PrismaClient,
   ownerEmail: string,
   ownerPasswordHash: string,
 ): Promise<PrismaSeedResult> {
-  // The API container restarts on every redeploy, but this seed writes into
-  // the SAME persistent Postgres database each time — without this check,
-  // the second boot's organization.create() collides on vatNumber's unique
-  // constraint and crashes before the server ever starts listening (seen
-  // live on Railway: P2002 on `vatNumber`). If the demo org from an earlier
-  // boot is already there, reuse it instead of re-seeding.
+  const DEMO_VAT_NUMBER = "300000000000003";
+
+  // Sprint 34 hotfix #2 — found live via a crashed deployment, not
+  // guessed: every server boot previously called this function
+  // unconditionally, and Organization.vatNumber is @unique. The first
+  // real-Prisma boot succeeded; every boot after that crashed the whole
+  // process on startup with a P2002 unique-constraint violation before
+  // the server ever started listening — worse than the in-memory seed's
+  // behavior, which is naturally idempotent since it just resets. This
+  // function is now genuinely idempotent: if a demo organization already
+  // exists (by its fixed vatNumber), reuse it and everything under it
+  // instead of re-creating, so repeated boots against the same database
+  // are safe.
   const existingOrganization = await prisma.organization.findUnique({ where: { vatNumber: DEMO_VAT_NUMBER } });
+
   if (existingOrganization) {
-    const user = await prisma.user.findUniqueOrThrow({ where: { email: ownerEmail } });
-    const membership = await prisma.organizationUser.findUniqueOrThrow({
-      where: { organizationId_userId: { organizationId: existingOrganization.id, userId: user.id } },
-    });
-    const period = await prisma.accountingPeriod.findFirstOrThrow({
-      where: { fiscalYear: { organizationId: existingOrganization.id }, status: "OPEN" },
-    });
-    const accounts = await prisma.account.findMany({ where: { organizationId: existingOrganization.id } });
-    return {
-      organizationId: existingOrganization.id,
-      roleId: membership.roleId,
-      userId: user.id,
-      periodId: period.id,
-      accountIdsByCode: Object.fromEntries(accounts.map((a) => [a.code, a.id])),
-    };
+    const existingUser = await prisma.user.findUnique({ where: { email: ownerEmail } });
+    const existingMembership = existingUser
+      ? await prisma.organizationUser.findFirst({ where: { organizationId: existingOrganization.id, userId: existingUser.id } })
+      : null;
+    const existingFiscalYear = await prisma.fiscalYear.findFirst({ where: { organizationId: existingOrganization.id } });
+    const existingPeriod = existingFiscalYear
+      ? await prisma.accountingPeriod.findFirst({ where: { fiscalYearId: existingFiscalYear.id } })
+      : null;
+    const existingAccounts = await prisma.account.findMany({ where: { organizationId: existingOrganization.id } });
+
+    if (existingUser && existingMembership && existingPeriod && existingAccounts.length > 0) {
+      const accountIdsByCode: Record<string, string> = {};
+      for (const account of existingAccounts) accountIdsByCode[account.code] = account.id;
+
+      return {
+        organizationId: existingOrganization.id,
+        roleId: existingMembership.roleId,
+        userId: existingUser.id,
+        periodId: existingPeriod.id,
+        accountIdsByCode,
+      };
+    }
+    // An organization with this VAT number exists but is missing one of
+    // its expected parts (a partial/failed prior seed) — falling through
+    // to re-create everything else would still collide on vatNumber, so
+    // this is a genuine inconsistent-state case, not silently recoverable.
+    throw new Error(
+      `A demo organization with VAT number ${DEMO_VAT_NUMBER} exists but is missing expected related data (user/membership/period/accounts) — manual cleanup required, refusing to guess.`,
+    );
   }
 
   const organization = await prisma.organization.create({

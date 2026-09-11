@@ -20,12 +20,15 @@ function makeFakePrisma() {
   let periodSeq = 0;
   let accountSeq = 0;
 
+  // Real, queryable state — needed so findUnique/findFirst/findMany
+  // (added for the idempotency fix) behave like a real database instead
+  // of always returning nothing.
   const organizations = new Map<string, any>();
   const users = new Map<string, any>();
-  const memberships = new Map<string, any>();
+  const organizationUsers: any[] = [];
   const fiscalYears = new Map<string, any>();
-  const periods = new Map<string, any>();
-  const accounts = new Map<string, any>();
+  const accountingPeriods = new Map<string, any>();
+  const accounts: any[] = [];
 
   const prisma = {
     organization: {
@@ -35,8 +38,6 @@ function makeFakePrisma() {
         organizations.set(row.id, row);
         return row;
       }),
-      // Defaults to "no existing demo org" so every pre-existing test below
-      // (which never seeds `organizations`) still takes the create path.
       findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
         if (where.vatNumber) return [...organizations.values()].find((o) => o.vatNumber === where.vatNumber) ?? null;
         return organizations.get(where.id) ?? null;
@@ -67,23 +68,19 @@ function makeFakePrisma() {
         users.set(row.id, row);
         return row;
       }),
-      findUniqueOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
-        const row = where.email ? [...users.values()].find((u) => u.email === where.email) : users.get(where.id);
-        if (!row) throw new Error("NotFoundError: user");
-        return row;
+      findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
+        if (where.email) return [...users.values()].find((u) => u.email === where.email) ?? null;
+        return users.get(where.id) ?? null;
       }),
     },
     organizationUser: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.organizationUserCreate.push(data);
-        memberships.set(`${data.organizationId}:${data.userId}`, data);
+        organizationUsers.push(data);
         return data;
       }),
-      findUniqueOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
-        const key = `${where.organizationId_userId.organizationId}:${where.organizationId_userId.userId}`;
-        const row = memberships.get(key);
-        if (!row) throw new Error("NotFoundError: organizationUser");
-        return row;
+      findFirst: jest.fn().mockImplementation(async ({ where }: any) => {
+        return organizationUsers.find((m) => m.organizationId === where.organizationId && m.userId === where.userId) ?? null;
       }),
     },
     fiscalYear: {
@@ -93,36 +90,35 @@ function makeFakePrisma() {
         fiscalYears.set(row.id, row);
         return row;
       }),
+      findFirst: jest.fn().mockImplementation(async ({ where }: any) => {
+        return [...fiscalYears.values()].find((fy) => fy.organizationId === where.organizationId) ?? null;
+      }),
     },
     accountingPeriod: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.accountingPeriodCreate.push(data);
         const row = { id: `period-${++periodSeq}`, ...data };
-        periods.set(row.id, row);
+        accountingPeriods.set(row.id, row);
         return row;
       }),
-      findFirstOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
-        const orgId = where.fiscalYear.organizationId;
-        const row = [...periods.values()].find(
-          (p) => fiscalYears.get(p.fiscalYearId)?.organizationId === orgId && p.status === where.status,
-        );
-        if (!row) throw new Error("NotFoundError: accountingPeriod");
-        return row;
+      findFirst: jest.fn().mockImplementation(async ({ where }: any) => {
+        return [...accountingPeriods.values()].find((p) => p.fiscalYearId === where.fiscalYearId) ?? null;
       }),
     },
     account: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.accountCreate.push(data);
         const row = { id: `acct-${++accountSeq}`, ...data };
-        accounts.set(row.id, row);
+        accounts.push(row);
         return row;
       }),
-      findMany: jest.fn().mockImplementation(async ({ where }: any) => [...accounts.values()].filter((a) => a.organizationId === where.organizationId)),
+      findMany: jest.fn().mockImplementation(async ({ where }: any) => accounts.filter((a) => a.organizationId === where.organizationId)),
     },
   };
 
-  return { prisma, calls, organizations, periods };
+  return { prisma, calls };
 }
+
 
 describe("seedDemoOrganizationWithPrisma", () => {
   test("creates exactly one organization, role, user, fiscal year, and period", async () => {
@@ -203,15 +199,50 @@ describe("seedDemoOrganizationWithPrisma", () => {
     expect(calls.userCreate[0].email).toBe("specific-owner@mizan.sa");
     expect(calls.userCreate[0].passwordHash).toBe("specific-hash-value");
   });
+});
 
-  test("second call (simulating a redeploy) reuses the existing demo org instead of colliding on vatNumber", async () => {
-    const { prisma, calls } = makeFakePrisma();
+describe("seedDemoOrganizationWithPrisma — idempotency (Sprint 34 hotfix #2)", () => {
+  test("calling it twice against the SAME prisma instance does NOT throw a unique-constraint error", async () => {
+    const { prisma } = makeFakePrisma();
 
     const first = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
     const second = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
 
+    expect(second.organizationId).toBe(first.organizationId);
+  });
+
+  test("the second call does NOT create a second organization, role, user, or set of accounts", async () => {
+    const { prisma, calls } = makeFakePrisma();
+
+    await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+    await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+
     expect(calls.organizationCreate).toHaveLength(1);
     expect(calls.userCreate).toHaveLength(1);
-    expect(second).toEqual(first);
+    expect(calls.accountCreate).toHaveLength(22);
+  });
+
+  test("the second call returns the SAME roleId, userId, periodId, and accountIdsByCode as the first", async () => {
+    const { prisma } = makeFakePrisma();
+
+    const first = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+    const second = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+
+    expect(second.roleId).toBe(first.roleId);
+    expect(second.userId).toBe(first.userId);
+    expect(second.periodId).toBe(first.periodId);
+    expect(second.accountIdsByCode["1000"]).toBe(first.accountIdsByCode["1000"]);
+  });
+
+  test("throws a clear error (rather than guessing) if the organization exists but is missing expected related data", async () => {
+    const { prisma } = makeFakePrisma();
+    // Simulate a partial prior seed: organization exists, but nothing else was ever created for it.
+    await (prisma as any).organization.create({
+      data: { legalNameAr: "X", vatNumber: "300000000000003" },
+    });
+
+    await expect(seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password")).rejects.toThrow(
+      /missing expected related data/,
+    );
   });
 });
