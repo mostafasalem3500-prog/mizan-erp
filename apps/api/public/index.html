@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ميزان</title>
+<title>ميزان | إدارة أعمالك بتوازن</title>
+<meta name="theme-color" content="#073f3e" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="/assets/remixicon/remixicon.css" rel="stylesheet" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -14,8 +16,8 @@
 <section id="login-screen" class="login-screen">
   <div class="login-card">
     <div class="brand">
-      <span class="brand-mark">م</span>
-      <h1>ميزان</h1>
+      <span class="brand-mark" aria-hidden="true"><i class="ri-scales-3-line"></i></span>
+      <div><h1>ميزان</h1><span class="brand-tagline">إدارة أعمالك بتوازن</span></div>
     </div>
     <p class="login-sub">منصة محاسبية سعودية — سجّل الدخول للمتابعة</p>
     <form id="login-form">
@@ -25,7 +27,7 @@
       <label>كلمة المرور
         <input type="password" id="login-password" value="DemoPass123!" required />
       </label>
-      <button type="submit">دخول</button>
+      <button type="submit"><span>دخول آمن</span><i class="ri-arrow-left-line" aria-hidden="true"></i></button>
       <p class="login-error" id="login-error" hidden></p>
     </form>
   </div>
@@ -35,29 +37,29 @@
 <div id="app-shell" class="app-shell" hidden>
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <span class="brand-mark small">م</span>
-      <span>ميزان</span>
+      <span class="brand-mark small" aria-hidden="true"><i class="ri-scales-3-line"></i></span>
+      <span><strong>ميزان</strong><small>إدارة أعمالك بتوازن</small></span>
     </div>
     <nav>
-      <button class="nav-item active" data-view="dashboard">الرئيسية</button>
-      <button class="nav-item" data-view="invoices">فواتير المبيعات</button>
-      <button class="nav-item" data-view="pos">نقطة البيع</button>
-      <button class="nav-item" data-view="shift">الوردية</button>
-      <button class="nav-item" data-view="returns">الإرجاع</button>
-      <button class="nav-item" data-view="customers">العملاء</button>
-      <button class="nav-item" data-view="inventory">المخزون</button>
-      <button class="nav-item" data-view="purchases">المشتريات</button>
-      <button class="nav-item" data-view="assets">الأصول الثابتة</button>
-      <button class="nav-item" data-view="reports">التقارير</button>
-      <button class="nav-item" data-view="accounts">دليل الحسابات</button>
+      <button class="nav-item active" data-view="dashboard"><i class="ri-layout-grid-line"></i><span>الرئيسية</span></button>
+      <button class="nav-item pos-nav" data-view="pos"><i class="ri-shopping-cart-2-line"></i><span>نقطة البيع</span></button>
+      <button class="nav-item" data-view="invoices"><i class="ri-file-list-3-line"></i><span>فواتير المبيعات</span></button>
+      <button class="nav-item" data-view="shift"><i class="ri-time-line"></i><span>الوردية</span></button>
+      <button class="nav-item" data-view="returns"><i class="ri-arrow-go-back-line"></i><span>الإرجاع</span></button>
+      <button class="nav-item" data-view="customers"><i class="ri-group-line"></i><span>العملاء</span></button>
+      <button class="nav-item" data-view="inventory"><i class="ri-archive-stack-line"></i><span>المخزون</span></button>
+      <button class="nav-item" data-view="purchases"><i class="ri-store-2-line"></i><span>المشتريات</span></button>
+      <button class="nav-item" data-view="assets"><i class="ri-building-2-line"></i><span>الأصول الثابتة</span></button>
+      <button class="nav-item" data-view="reports"><i class="ri-bar-chart-box-line"></i><span>التقارير</span></button>
+      <button class="nav-item" data-view="accounts"><i class="ri-book-2-line"></i><span>دليل الحسابات</span></button>
     </nav>
-    <button id="logout-btn" class="logout">تسجيل الخروج</button>
+    <button id="logout-btn" class="logout"><i class="ri-logout-box-r-line"></i><span>تسجيل الخروج</span></button>
   </aside>
 
   <main class="main">
     <header class="topbar">
-      <h2 id="view-title">نظرة عامة</h2>
-      <button id="quick-create" class="quick-create">+ جديد</button>
+      <div class="topbar-title"><button id="mobile-menu" class="icon-btn mobile-menu" aria-label="فتح القائمة"><i class="ri-menu-line"></i></button><div><p>مؤسسة الأفق للتجارة <span class="status-dot">متصل</span></p><h2 id="view-title">نظرة عامة</h2></div></div>
+      <div class="topbar-actions"><span class="demo-chip">بيانات تجريبية</span><button id="quick-create" class="quick-create"><i class="ri-add-line"></i><span>فاتورة جديدة</span></button></div>
     </header>
 
     <!-- الرئيسية -->
@@ -132,15 +134,40 @@
     </section>
 
     <!-- نقطة البيع -->
-    <section id="view-pos" class="view" hidden>
-      <div class="panel">
-        <h3>بيع نقدي سريع</h3>
-        <form id="pos-form" class="stacked-form">
-          <div id="pos-lines"></div>
-          <button type="button" id="pos-add-line" class="ghost-btn">+ إضافة سطر</button>
-          <button type="submit" class="primary-btn">إتمام البيع (نقدًا)</button>
-        </form>
-        <p id="pos-result"></p>
+    <section id="view-pos" class="view pos-view" hidden>
+      <div class="pos-workspace">
+        <section class="catalog-panel" aria-labelledby="catalog-title">
+          <div class="pos-search-row">
+            <label class="pos-search" for="pos-search-input"><i class="ri-search-line"></i><input id="pos-search-input" type="search" placeholder="ابحث باسم الصنف أو امسح الباركود..." autocomplete="off" /><kbd>F2</kbd></label>
+            <button id="quick-product" class="secondary-btn"><i class="ri-add-box-line"></i><span>إضافة صنف سريع</span></button>
+          </div>
+          <div class="category-row" role="group" aria-label="تصفية الأقسام">
+            <button class="category-pill active" data-category="all">الكل</button>
+            <button class="category-pill" data-category="drinks">المشروبات</button>
+            <button class="category-pill" data-category="food">الأغذية</button>
+            <button class="category-pill" data-category="home">المواد المنزلية</button>
+            <button class="category-pill" data-category="care">العناية الشخصية</button>
+          </div>
+          <div class="catalog-heading"><div><h3 id="catalog-title">الأصناف السريعة</h3><p>انقر للإضافة، واسحب البطاقات لترتيب المفضلة</p></div><span id="catalog-count">0 صنف</span></div>
+          <div id="pos-product-grid" class="product-grid" aria-live="polite"></div>
+          <div id="pos-empty-products" class="empty-state" hidden><i class="ri-search-eye-line"></i><h4>لا توجد نتائج</h4><p>جرّب اسمًا آخر أو أضف صنفًا جديدًا.</p></div>
+        </section>
+
+        <aside class="cart-panel" aria-labelledby="cart-title">
+          <div class="cart-header"><div><span class="eyebrow">عملية بيع جديدة</span><h3 id="cart-title">سلة المبيعات <b id="cart-count">0</b></h3></div><button id="clear-cart" class="icon-btn danger" aria-label="إفراغ السلة" title="إفراغ السلة"><i class="ri-delete-bin-6-line"></i></button></div>
+          <div id="pos-cart-lines" class="cart-lines"></div>
+          <div id="pos-empty-cart" class="cart-empty"><i class="ri-shopping-basket-line"></i><strong>السلة فارغة</strong><span>اختر صنفًا من القائمة لبدء البيع</span></div>
+          <div class="cart-summary">
+            <div><span>المجموع قبل الضريبة</span><strong id="pos-subtotal">0.00 ر.س</strong></div>
+            <div><span>ضريبة القيمة المضافة (15%)</span><strong id="pos-tax-total">0.00 ر.س</strong></div>
+            <div class="cart-total"><span>الإجمالي</span><strong id="pos-grand-total">0.00 ر.س</strong></div>
+          </div>
+          <fieldset class="choice-group"><legend>طريقة الدفع</legend><div class="segmented" id="payment-methods"><button class="active" data-payment="CASH"><i class="ri-money-riyal-circle-line"></i>نقدي</button><button data-payment="MADA"><i class="ri-bank-card-line"></i>مدى</button><button data-payment="CARD"><i class="ri-visa-line"></i>بطاقة</button></div></fieldset>
+          <fieldset class="choice-group"><legend>قالب الفاتورة</legend><div class="segmented receipt-choices" id="receipt-templates"><button class="active" data-template="thermal"><i class="ri-receipt-line"></i>حراري 80مم</button><button data-template="a4"><i class="ri-file-paper-2-line"></i>A4</button><button data-template="simple"><i class="ri-file-text-line"></i>مبسّط</button></div></fieldset>
+          <button id="pos-checkout" class="checkout-btn" disabled><span><i class="ri-printer-line"></i>إتمام الدفع والطباعة</span><kbd>F5</kbd></button>
+          <button id="hold-sale" class="hold-btn" disabled><i class="ri-bookmark-line"></i>تعليق الفاتورة</button>
+          <p id="pos-result" class="form-result" role="status"></p>
+        </aside>
       </div>
     </section>
 
@@ -313,12 +340,32 @@
 </div>
 
 <!-- نافذة عرض الفاتورة/الإيصال -->
-<div id="receipt-overlay" class="receipt-overlay" hidden>
-  <div class="receipt-box">
-    <button id="receipt-close" class="receipt-close">×</button>
+<div id="receipt-overlay" class="receipt-overlay" hidden aria-hidden="true">
+  <div class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-dialog-title">
+    <div class="receipt-toolbar"><div><span>معاينة قبل الطباعة</span><strong id="receipt-dialog-title">فاتورة ضريبية</strong></div><div><button id="receipt-print" class="primary-btn"><i class="ri-printer-line"></i>طباعة</button><button id="receipt-close" class="icon-btn" aria-label="إغلاق"><i class="ri-close-line"></i></button></div></div>
+    <div class="receipt-box thermal" id="receipt-paper">
     <div id="receipt-content"></div>
+    </div>
   </div>
 </div>
+
+<div id="quick-product-overlay" class="receipt-overlay" hidden aria-hidden="true">
+  <div class="quick-product-modal" role="dialog" aria-modal="true" aria-labelledby="quick-product-title">
+    <div class="modal-heading"><div><span class="eyebrow">المخزون</span><h3 id="quick-product-title">إضافة صنف سريع</h3></div><button id="quick-product-close" class="icon-btn" aria-label="إغلاق"><i class="ri-close-line"></i></button></div>
+    <form id="quick-product-form" class="product-form-grid">
+      <label class="wide">اسم الصنف<input id="quick-product-name" type="text" placeholder="مثال: مياه 600 مل" required /></label>
+      <label>كود الصنف<input id="quick-product-sku" type="text" placeholder="SKU-001" required /></label>
+      <label>سعر البيع<input id="quick-product-price" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
+      <label>الوحدة<select id="quick-product-unit"><option value="PCS">حبة</option><option value="BOX">كرتون</option><option value="KG">كيلوجرام</option><option value="LTR">لتر</option></select></label>
+      <label>الضريبة<select id="quick-product-tax"><option value="STANDARD">خاضع 15%</option><option value="ZERO">نسبة صفر</option><option value="EXEMPT">معفى</option></select></label>
+      <button type="submit" class="primary-btn wide"><i class="ri-save-line"></i>حفظ وإضافته إلى السلة</button>
+      <p id="quick-product-result" class="form-result wide" role="status"></p>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+<div id="mobile-backdrop" class="mobile-backdrop" hidden></div>
 
 <script src="/app.js"></script>
 </body>

@@ -62,8 +62,12 @@ async function bootstrap() {
     await accountsService.seedDefaultChartOfAccounts(seeded.organizationId);
   }
 
-  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
-  await app.listen(port);
+  const portArgIndex = process.argv.indexOf("--port");
+  const cliPort = portArgIndex >= 0 ? Number(process.argv[portArgIndex + 1]) : undefined;
+  const hostArgIndex = process.argv.indexOf("--host");
+  const cliHost = hostArgIndex >= 0 ? process.argv[hostArgIndex + 1] : undefined;
+  const port = cliPort || (process.env.PORT ? Number(process.env.PORT) : 3000);
+  await app.listen(port, cliHost || "0.0.0.0");
 
   console.log(`Mizan ERP API (Phase 0) listening on http://localhost:${port}`);
   console.log(`Web UI: http://localhost:${port}/index.html`);
