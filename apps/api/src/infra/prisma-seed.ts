@@ -69,16 +69,43 @@ export interface PrismaSeedResult {
   accountIdsByCode: Record<string, string>;
 }
 
+const DEMO_VAT_NUMBER = "300000000000003";
+
 export async function seedDemoOrganizationWithPrisma(
   prisma: PrismaClient,
   ownerEmail: string,
   ownerPasswordHash: string,
 ): Promise<PrismaSeedResult> {
+  // The API container restarts on every redeploy, but this seed writes into
+  // the SAME persistent Postgres database each time — without this check,
+  // the second boot's organization.create() collides on vatNumber's unique
+  // constraint and crashes before the server ever starts listening (seen
+  // live on Railway: P2002 on `vatNumber`). If the demo org from an earlier
+  // boot is already there, reuse it instead of re-seeding.
+  const existingOrganization = await prisma.organization.findUnique({ where: { vatNumber: DEMO_VAT_NUMBER } });
+  if (existingOrganization) {
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: ownerEmail } });
+    const membership = await prisma.organizationUser.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: existingOrganization.id, userId: user.id } },
+    });
+    const period = await prisma.accountingPeriod.findFirstOrThrow({
+      where: { fiscalYear: { organizationId: existingOrganization.id }, status: "OPEN" },
+    });
+    const accounts = await prisma.account.findMany({ where: { organizationId: existingOrganization.id } });
+    return {
+      organizationId: existingOrganization.id,
+      roleId: membership.roleId,
+      userId: user.id,
+      periodId: period.id,
+      accountIdsByCode: Object.fromEntries(accounts.map((a) => [a.code, a.id])),
+    };
+  }
+
   const organization = await prisma.organization.create({
     data: {
       legalNameAr: "مؤسسة الأفق للتجارة",
       legalNameEn: "Al-Ufuq Trading Est.",
-      vatNumber: "300000000000003",
+      vatNumber: DEMO_VAT_NUMBER,
       crNumber: "1010010000",
     },
   });

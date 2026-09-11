@@ -20,11 +20,26 @@ function makeFakePrisma() {
   let periodSeq = 0;
   let accountSeq = 0;
 
+  const organizations = new Map<string, any>();
+  const users = new Map<string, any>();
+  const memberships = new Map<string, any>();
+  const fiscalYears = new Map<string, any>();
+  const periods = new Map<string, any>();
+  const accounts = new Map<string, any>();
+
   const prisma = {
     organization: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.organizationCreate.push(data);
-        return { id: `org-${++orgSeq}`, ...data };
+        const row = { id: `org-${++orgSeq}`, ...data };
+        organizations.set(row.id, row);
+        return row;
+      }),
+      // Defaults to "no existing demo org" so every pre-existing test below
+      // (which never seeds `organizations`) still takes the create path.
+      findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
+        if (where.vatNumber) return [...organizations.values()].find((o) => o.vatNumber === where.vatNumber) ?? null;
+        return organizations.get(where.id) ?? null;
       }),
     },
     role: {
@@ -48,36 +63,65 @@ function makeFakePrisma() {
     user: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.userCreate.push(data);
-        return { id: `user-${++userSeq}`, ...data };
+        const row = { id: `user-${++userSeq}`, ...data };
+        users.set(row.id, row);
+        return row;
+      }),
+      findUniqueOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
+        const row = where.email ? [...users.values()].find((u) => u.email === where.email) : users.get(where.id);
+        if (!row) throw new Error("NotFoundError: user");
+        return row;
       }),
     },
     organizationUser: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.organizationUserCreate.push(data);
+        memberships.set(`${data.organizationId}:${data.userId}`, data);
         return data;
+      }),
+      findUniqueOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
+        const key = `${where.organizationId_userId.organizationId}:${where.organizationId_userId.userId}`;
+        const row = memberships.get(key);
+        if (!row) throw new Error("NotFoundError: organizationUser");
+        return row;
       }),
     },
     fiscalYear: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.fiscalYearCreate.push(data);
-        return { id: `fy-${++fiscalYearSeq}`, ...data };
+        const row = { id: `fy-${++fiscalYearSeq}`, ...data };
+        fiscalYears.set(row.id, row);
+        return row;
       }),
     },
     accountingPeriod: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.accountingPeriodCreate.push(data);
-        return { id: `period-${++periodSeq}`, ...data };
+        const row = { id: `period-${++periodSeq}`, ...data };
+        periods.set(row.id, row);
+        return row;
+      }),
+      findFirstOrThrow: jest.fn().mockImplementation(async ({ where }: any) => {
+        const orgId = where.fiscalYear.organizationId;
+        const row = [...periods.values()].find(
+          (p) => fiscalYears.get(p.fiscalYearId)?.organizationId === orgId && p.status === where.status,
+        );
+        if (!row) throw new Error("NotFoundError: accountingPeriod");
+        return row;
       }),
     },
     account: {
       create: jest.fn().mockImplementation(async ({ data }: any) => {
         calls.accountCreate.push(data);
-        return { id: `acct-${++accountSeq}`, ...data };
+        const row = { id: `acct-${++accountSeq}`, ...data };
+        accounts.set(row.id, row);
+        return row;
       }),
+      findMany: jest.fn().mockImplementation(async ({ where }: any) => [...accounts.values()].filter((a) => a.organizationId === where.organizationId)),
     },
   };
 
-  return { prisma, calls };
+  return { prisma, calls, organizations, periods };
 }
 
 describe("seedDemoOrganizationWithPrisma", () => {
@@ -158,5 +202,16 @@ describe("seedDemoOrganizationWithPrisma", () => {
 
     expect(calls.userCreate[0].email).toBe("specific-owner@mizan.sa");
     expect(calls.userCreate[0].passwordHash).toBe("specific-hash-value");
+  });
+
+  test("second call (simulating a redeploy) reuses the existing demo org instead of colliding on vatNumber", async () => {
+    const { prisma, calls } = makeFakePrisma();
+
+    const first = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+    const second = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
+
+    expect(calls.organizationCreate).toHaveLength(1);
+    expect(calls.userCreate).toHaveLength(1);
+    expect(second).toEqual(first);
   });
 });
