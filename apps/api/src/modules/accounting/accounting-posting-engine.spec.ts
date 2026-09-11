@@ -16,6 +16,7 @@ function makePrismaMock(overrides: Partial<Record<string, any>> = {}) {
   const state = {
     period: { id: "period-1", status: "OPEN" },
     createdEntries: [] as any[],
+    lastCreateData: null as any,
     idempotencyKeys: new Map<string, { journalEntryId: string }>(),
     ...overrides,
   };
@@ -35,6 +36,7 @@ function makePrismaMock(overrides: Partial<Record<string, any>> = {}) {
     },
     journalEntry: {
       create: async ({ data }: any) => {
+        state.lastCreateData = data;
         // Mirror real Prisma behavior: a nested `lines: { create: [...] }`
         // input resolves to a plain `lines: [...]` array on the returned row.
         const { lines, ...rest } = data;
@@ -44,8 +46,8 @@ function makePrismaMock(overrides: Partial<Record<string, any>> = {}) {
           isReversal: rest.isReversal ?? false,
           lines: (lines?.create ?? []).map((l: any) => ({
             accountId: l.accountId,
-            debit: l.debit instanceof Object ? Number(l.debit.toString()) : l.debit,
-            credit: l.credit instanceof Object ? Number(l.credit.toString()) : l.credit,
+            debit: Number(l.debit.toString()),
+            credit: Number(l.credit.toString()),
             costCenterId: l.costCenterId,
             description: l.description,
           })),
@@ -105,6 +107,29 @@ describe("AccountingPostingEngine — mandatory invariants (band 114)", () => {
     });
 
     expect(entry.lines).toHaveLength(3);
+  });
+
+  test("passes Decimal scalars to real Prisma instead of the internal fixed-point object", async () => {
+    const prisma = makePrismaMock();
+    prismaTx = prisma;
+    const engine = new AccountingPostingEngine(prisma);
+
+    await engine.post({
+      organizationId: "org-1",
+      periodId: "period-1",
+      sourceEvent: "POS_SALE_COMPLETED",
+      lines: [
+        { accountId: "cash", debit: 2.3 },
+        { accountId: "sales", credit: 2 },
+        { accountId: "vat", credit: 0.3 },
+      ],
+    });
+
+    expect(prisma.__state.lastCreateData.lines.create).toEqual([
+      expect.objectContaining({ debit: "2.3000", credit: "0.0000" }),
+      expect.objectContaining({ debit: "0.0000", credit: "2.0000" }),
+      expect.objectContaining({ debit: "0.0000", credit: "0.3000" }),
+    ]);
   });
 
   test("blocks posting into a CLOSED period", async () => {

@@ -251,8 +251,13 @@ export class AccountingPostingEngine {
           lines: {
             create: request.lines.map((line) => ({
               accountId: line.accountId,
-              debit: new Decimal(line.debit ?? 0),
-              credit: new Decimal(line.credit ?? 0),
+              // Pass a Prisma-compatible scalar across the repository boundary.
+              // The fixed-point Decimal above is deliberately an internal
+              // arithmetic type; passing the object itself makes Prisma see
+              // `{ scaled: bigint }` instead of a Decimal input and rejects
+              // every real PostgreSQL posting.
+              debit: new Decimal(line.debit ?? 0).toString(),
+              credit: new Decimal(line.credit ?? 0).toString(),
               costCenterId: line.costCenterId,
               description: line.description,
             })),
