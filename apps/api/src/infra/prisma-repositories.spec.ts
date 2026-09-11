@@ -1,4 +1,4 @@
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository } from "./prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup } from "./prisma-repositories";
 
 describe("PrismaAccountsRepository", () => {
   function makeFakePrisma() {
@@ -231,5 +231,64 @@ describe("PrismaPeriodsRepository — bridges the FiscalYear/AccountingPeriod sc
     const list = await repo.listForOrganization("org-1");
     expect(list).toHaveLength(1);
     expect(list[0].organizationId).toBe("org-1");
+  });
+});
+
+describe("PrismaAuthUserLookup — the fourth repository, missed in the original Sprint 34 commit", () => {
+  function makeFakePrisma() {
+    const users = new Map<string, any>([["u1", { id: "u1", email: "owner@test.sa", passwordHash: "hash", isActive: true }]]);
+    const memberships = new Map<string, any>([
+      ["org-1:u1", { organizationId: "org-1", userId: "u1", roleId: "role-1", branchId: null }],
+    ]);
+    return {
+      user: {
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
+          if (where.email) return [...users.values()].find((u) => u.email === where.email) ?? null;
+          return users.get(where.id) ?? null;
+        }),
+      },
+      organizationUser: {
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
+          const key = `${where.organizationId_userId.organizationId}:${where.organizationId_userId.userId}`;
+          return memberships.get(key) ?? null;
+        }),
+      },
+    };
+  }
+
+  test("findCredentialsByEmail() finds a real user by email and maps the shape AuthService expects", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaAuthUserLookup(prisma as any);
+
+    const credentials = await lookup.findCredentialsByEmail("owner@test.sa");
+
+    expect(credentials?.userId).toBe("u1");
+    expect(credentials?.passwordHash).toBe("hash");
+  });
+
+  test("findCredentialsByEmail() returns null for an unknown email (not undefined, not a throw)", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaAuthUserLookup(prisma as any);
+
+    expect(await lookup.findCredentialsByEmail("nobody@test.sa")).toBeNull();
+  });
+
+  test("findMembership() uses the real compound-unique-key shape (organizationId_userId)", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaAuthUserLookup(prisma as any);
+
+    const membership = await lookup.findMembership("u1", "org-1");
+
+    expect(membership?.roleId).toBe("role-1");
+    expect(prisma.organizationUser.findUnique).toHaveBeenCalledWith({
+      where: { organizationId_userId: { organizationId: "org-1", userId: "u1" } },
+    });
+  });
+
+  test("findMembership() returns null when the user has no membership in that specific organization", async () => {
+    const prisma = makeFakePrisma();
+    const lookup = new PrismaAuthUserLookup(prisma as any);
+
+    expect(await lookup.findMembership("u1", "org-OTHER")).toBeNull();
   });
 });

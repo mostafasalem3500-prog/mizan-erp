@@ -21,6 +21,7 @@ import type {
   CreateOrganizationResult,
 } from "../modules/organizations/organizations.service";
 import type { PeriodsRepository, PeriodRow, CreatePeriodInput } from "../modules/periods/periods.service";
+import type { AuthUserLookup, UserCredentialsRow, OrganizationMembershipRow } from "../modules/auth/auth.service";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
 function toAccountRow(row: any): AccountRow {
@@ -152,6 +153,39 @@ export class PrismaOrganizationsRepository implements OrganizationsRepository {
       data: settings,
     });
     return toOrganizationRow(row);
+  }
+}
+
+export class PrismaAuthUserLookup implements AuthUserLookup {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  /**
+   * Sprint 34 hotfix — found live via a real login attempt on Railway,
+   * not caught beforehand: this repository is the FOURTH one that had
+   * to move alongside Accounts/Organizations/Periods, and was missed in
+   * the original Sprint 34 commit. Without it, seedDemoOrganizationWithPrisma()
+   * writes the user into real Postgres, but AuthService's login was still
+   * reading from the (empty, in this mode) in-memory users store —
+   * findCredentialsByEmail() returned null for every login attempt,
+   * surfacing as "Invalid credentials" even with the exact right password.
+   * Confirmed against auth.service.ts's actual two distinct error paths
+   * (401 "Invalid credentials" vs 401 "User is not a member of this
+   * organization") before writing this fix — the error message actually
+   * returned ruled out a stale-organization-id mismatch and pointed
+   * specifically at findCredentialsByEmail() returning null.
+   */
+  async findCredentialsByEmail(email: string): Promise<UserCredentialsRow | null> {
+    const user = await (this.prisma as any).user.findUnique({ where: { email } });
+    if (!user) return null;
+    return { userId: user.id, passwordHash: user.passwordHash, isActive: user.isActive };
+  }
+
+  async findMembership(userId: string, organizationId: string): Promise<OrganizationMembershipRow | null> {
+    const membership = await (this.prisma as any).organizationUser.findUnique({
+      where: { organizationId_userId: { organizationId, userId } },
+    });
+    if (!membership) return null;
+    return { organizationId: membership.organizationId, roleId: membership.roleId, branchId: membership.branchId ?? undefined };
   }
 }
 
