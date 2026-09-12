@@ -1057,6 +1057,7 @@ document.getElementById("quick-product-overlay").addEventListener("click", (even
 document.getElementById("quick-product-form").addEventListener("input", saveQuickProductDraft);
 document.getElementById("quick-product-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   const result = document.getElementById("quick-product-result");
   const submit = event.submitter;
   submit.disabled = true;
@@ -1076,7 +1077,7 @@ document.getElementById("quick-product-form").addEventListener("submit", async (
     state.posCatalog.unshift(normalized);
     addProductToCart(normalized.id);
     renderProductGrid();
-    event.currentTarget.reset();
+    form.reset();
     localStorage.removeItem("mizan_quick_product_draft");
     closeQuickProduct();
     showToast("تم حفظ الصنف وإضافته إلى السلة");
