@@ -338,7 +338,7 @@ if (state.token && state.orgId) {
 
 // ---------- نقطة البيع — تجربة تشغيلية كاملة ----------
 const DEMO_POS_PRODUCTS = [
-  { id: "demo-water", sku: "DEMO-001", name: "مياه نقية 600 مل", unit: "حبة", sellingPrice: 2, taxCode: "STANDARD", category: "drinks", image: "/assets/products/water.webp", isDemo: true },
+  { id: "demo-water", sku: "DEMO-001", name: "مياه نقية 600 مل", unit: "حبة", sellingPrice: 2, taxCode: "STANDARD", category: "drinks", image: "/assets/products/water.webp", isDemo: true, tracksInventory: false },
   { id: "demo-coffee", sku: "DEMO-002", name: "قهوة عربية وسط 250 جم", unit: "كيس", sellingPrice: 18, taxCode: "STANDARD", category: "drinks", image: "/assets/products/coffee.webp", isDemo: true },
   { id: "demo-tea", sku: "DEMO-003", name: "شاي أسود فاخر 100 كيس", unit: "علبة", sellingPrice: 14, taxCode: "STANDARD", category: "drinks", image: "/assets/products/tea.webp", isDemo: true },
   { id: "demo-yogurt", sku: "DEMO-004", name: "زبادي كامل الدسم 170 جم", unit: "حبة", sellingPrice: 3, taxCode: "STANDARD", category: "food", image: "/assets/products/yogurt.webp", isDemo: true },
@@ -384,6 +384,9 @@ async function loadPosView() {
         category: demoReference?.category || "all",
         image: demoReference?.image || productImage(p, index),
         isDemo: Boolean(demoReference),
+        // Product inventory/service typing is not modeled in the API yet. Do not
+        // reject a valid service sale by assuming every quick product has stock.
+        tracksInventory: false,
       };
     });
     state.posCatalog = orderedCatalog(normalized.length ? normalized : DEMO_POS_PRODUCTS);
@@ -530,7 +533,7 @@ document.getElementById("pos-checkout").addEventListener("click", async () => {
     return;
   }
 
-  const lines = state.posCart.map((line) => ({ description: line.name, quantity: line.quantity, unitPrice: Number(line.sellingPrice), taxCode: line.taxCode, ...(line.isDemo ? {} : { productId: line.id }) }));
+  const lines = state.posCart.map((line) => ({ description: line.name, quantity: line.quantity, unitPrice: Number(line.sellingPrice), taxCode: line.taxCode, ...(line.tracksInventory ? { productId: line.id } : {}) }));
 
   const rateByCode = { STANDARD: 0.15, ZERO: 0, EXEMPT: 0 };
   const total = lines.reduce((sum, l) => {
@@ -1069,7 +1072,7 @@ document.getElementById("quick-product-form").addEventListener("submit", async (
         taxCode: document.getElementById("quick-product-tax").value,
       }),
     });
-    const normalized = { ...product, sellingPrice: Number(product.sellingPrice), unit: unitLabel(product.unit), category: "all", image: productImage(product, state.posCatalog.length), isDemo: false };
+    const normalized = { ...product, sellingPrice: Number(product.sellingPrice), unit: unitLabel(product.unit), category: "all", image: productImage(product, state.posCatalog.length), isDemo: false, tracksInventory: false };
     state.posCatalog.unshift(normalized);
     addProductToCart(normalized.id);
     renderProductGrid();
