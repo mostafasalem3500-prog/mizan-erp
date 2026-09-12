@@ -10,6 +10,7 @@ const state = {
   posPayment: "CASH",
   receiptTemplate: "thermal",
   organization: null,
+  sessionExpired: false,
 };
 
 const DEFAULT_INVOICE_TEMPLATE_CONFIG = {
@@ -54,6 +55,12 @@ async function api(path, options = {}) {
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 401 && path !== "/api/v1/auth/login") {
+      handleExpiredSession();
+      const error = new Error("انتهت الجلسة؛ سجّل الدخول مرة أخرى. احتفظنا بمسودة الصنف والسلة.");
+      error.code = "SESSION_EXPIRED";
+      throw error;
+    }
     const message = (body && body.message) || `HTTP ${res.status}`;
     throw new Error(Array.isArray(message) ? message.join(", ") : message);
   }
@@ -74,6 +81,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       body: JSON.stringify({ email, password }),
     });
     state.token = result.accessToken;
+    state.sessionExpired = false;
     // Sprint 36 — the organization is no longer typed in by the user; the
     // server resolves it and encodes it in the JWT, so read it back from
     // there. This is the same value the server will enforce on every
@@ -85,6 +93,16 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     localStorage.setItem("mizan_token", state.token);
     localStorage.setItem("mizan_org", state.orgId);
     await enterApp();
+    const recoveredCart = JSON.parse(localStorage.getItem("mizan_recovery_cart") || "null");
+    if (Array.isArray(recoveredCart) && recoveredCart.length) {
+      state.posCart = recoveredCart;
+      localStorage.removeItem("mizan_recovery_cart");
+      showToast("تمت استعادة سلة البيع");
+    }
+    if (restoreQuickProductDraft()) {
+      openQuickProduct();
+      showToast("تمت استعادة مسودة الصنف");
+    }
   } catch (err) {
     errorEl.textContent = "فشل تسجيل الدخول: " + err.message;
     errorEl.hidden = false;
@@ -149,6 +167,7 @@ async function enterApp() {
   try {
     await loadDashboard();
   } catch (err) {
+    if (err.code === "SESSION_EXPIRED") return;
     alert("تعذّر تحميل البيانات: " + err.message);
   }
 }
@@ -312,7 +331,9 @@ async function loadAccounts() {
 
 // ---------- الإقلاع ----------
 if (state.token && state.orgId) {
-  enterApp();
+  const payload = decodeJwtPayload(state.token);
+  if (!payload || (payload.exp && Date.now() >= payload.exp * 1000)) handleExpiredSession();
+  else enterApp();
 }
 
 // ---------- نقطة البيع — تجربة تشغيلية كاملة ----------
@@ -333,6 +354,10 @@ function productImage(product, index = 0) {
   return `/assets/products/${images[index % images.length]}.webp`;
 }
 
+function unitLabel(unit) {
+  return ({ PCS: "حبة", BOX: "كرتون", BAG: "كيس", KG: "كيلوجرام", LTR: "لتر" })[unit] || unit || "حبة";
+}
+
 function orderedCatalog(products) {
   const saved = JSON.parse(localStorage.getItem("mizan_pos_order") || "[]");
   return [...products].sort((a, b) => {
@@ -350,14 +375,17 @@ async function loadPosView() {
   try {
     const realProducts = await api(`/api/v1/organizations/${state.orgId}/products`);
     state.products = realProducts;
-    const normalized = realProducts.map((p, index) => ({
-      ...p,
-      sellingPrice: Number(p.sellingPrice),
-      unit: p.unit || "حبة",
-      category: "all",
-      image: productImage(p, index),
-      isDemo: false,
-    }));
+    const normalized = realProducts.map((p, index) => {
+      const demoReference = DEMO_POS_PRODUCTS.find((item) => item.sku === p.sku);
+      return {
+        ...p,
+        sellingPrice: Number(p.sellingPrice),
+        unit: unitLabel(p.unit),
+        category: demoReference?.category || "all",
+        image: demoReference?.image || productImage(p, index),
+        isDemo: Boolean(demoReference),
+      };
+    });
     state.posCatalog = orderedCatalog(normalized.length ? normalized : DEMO_POS_PRODUCTS);
   } catch (err) {
     state.posCatalog = orderedCatalog(DEMO_POS_PRODUCTS);
@@ -772,6 +800,55 @@ function closeQuickProduct() {
   overlay.setAttribute("aria-hidden", "true");
 }
 
+function quickProductDraft() {
+  return {
+    name: document.getElementById("quick-product-name").value,
+    sku: document.getElementById("quick-product-sku").value,
+    price: document.getElementById("quick-product-price").value,
+    unit: document.getElementById("quick-product-unit").value,
+    taxCode: document.getElementById("quick-product-tax").value,
+  };
+}
+
+function saveQuickProductDraft() {
+  const draft = quickProductDraft();
+  if (draft.name || draft.sku || draft.price) localStorage.setItem("mizan_quick_product_draft", JSON.stringify(draft));
+}
+
+function restoreQuickProductDraft() {
+  const raw = localStorage.getItem("mizan_quick_product_draft");
+  if (!raw) return false;
+  try {
+    const draft = JSON.parse(raw);
+    document.getElementById("quick-product-name").value = draft.name || "";
+    document.getElementById("quick-product-sku").value = draft.sku || "";
+    document.getElementById("quick-product-price").value = draft.price || "";
+    document.getElementById("quick-product-unit").value = draft.unit || "PCS";
+    document.getElementById("quick-product-tax").value = draft.taxCode || "STANDARD";
+    return true;
+  } catch {
+    localStorage.removeItem("mizan_quick_product_draft");
+    return false;
+  }
+}
+
+function handleExpiredSession() {
+  if (state.sessionExpired) return;
+  state.sessionExpired = true;
+  saveQuickProductDraft();
+  if (state.posCart.length) localStorage.setItem("mizan_recovery_cart", JSON.stringify(state.posCart));
+  state.token = null;
+  localStorage.removeItem("mizan_token");
+  closeReceipt();
+  closeQuickProduct();
+  document.getElementById("app-shell").hidden = true;
+  document.getElementById("login-screen").hidden = false;
+  const error = document.getElementById("login-error");
+  error.textContent = "انتهت جلسة العمل. سجّل الدخول مرة أخرى، ولن تفقد مسودة الصنف أو سلة البيع.";
+  error.hidden = false;
+  document.getElementById("login-email").focus();
+}
+
 document.getElementById("receipt-close").addEventListener("click", closeReceipt);
 document.getElementById("receipt-print").addEventListener("click", () => window.print());
 document.getElementById("receipt-overlay").addEventListener("click", (event) => { if (event.target.id === "receipt-overlay") closeReceipt(); });
@@ -965,14 +1042,16 @@ async function openInvoiceReceipt(invoiceId) {
 }
 
 // ---------- إضافة صنف سريع ----------
-document.getElementById("quick-product").addEventListener("click", () => {
+function openQuickProduct() {
   const overlay = document.getElementById("quick-product-overlay");
   overlay.hidden = false;
   overlay.setAttribute("aria-hidden", "false");
   document.getElementById("quick-product-name").focus();
-});
+}
+document.getElementById("quick-product").addEventListener("click", openQuickProduct);
 document.getElementById("quick-product-close").addEventListener("click", closeQuickProduct);
 document.getElementById("quick-product-overlay").addEventListener("click", (event) => { if (event.target.id === "quick-product-overlay") closeQuickProduct(); });
+document.getElementById("quick-product-form").addEventListener("input", saveQuickProductDraft);
 document.getElementById("quick-product-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const result = document.getElementById("quick-product-result");
@@ -990,14 +1069,16 @@ document.getElementById("quick-product-form").addEventListener("submit", async (
         taxCode: document.getElementById("quick-product-tax").value,
       }),
     });
-    const normalized = { ...product, sellingPrice: Number(product.sellingPrice), category: "all", image: productImage(product, state.posCatalog.length), isDemo: false };
+    const normalized = { ...product, sellingPrice: Number(product.sellingPrice), unit: unitLabel(product.unit), category: "all", image: productImage(product, state.posCatalog.length), isDemo: false };
     state.posCatalog.unshift(normalized);
     addProductToCart(normalized.id);
     renderProductGrid();
     event.currentTarget.reset();
+    localStorage.removeItem("mizan_quick_product_draft");
     closeQuickProduct();
     showToast("تم حفظ الصنف وإضافته إلى السلة");
   } catch (err) {
+    if (err.code === "SESSION_EXPIRED") return;
     result.style.color = "#b54837";
     result.textContent = "تعذّر حفظ الصنف: " + err.message;
   } finally {

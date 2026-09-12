@@ -13,7 +13,7 @@ export class ProductsController {
     @Param("organizationId") organizationId: string,
     @Body() body: Omit<CreateProductInput, "organizationId">,
   ) {
-    return this.productsService.createProduct({ organizationId, ...body });
+    return this.productsService.createProduct({ ...body, organizationId });
   }
 
   @Get()

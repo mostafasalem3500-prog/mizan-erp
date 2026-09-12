@@ -333,6 +333,11 @@ export class PrismaProductsRepository implements ProductsRepository {
     return toProductRow(row);
   }
 
+  async findBySku(organizationId: string, sku: string): Promise<ProductRow | null> {
+    const row = await (this.prisma as any).product.findUnique({ where: { organizationId_sku: { organizationId, sku } } });
+    return row ? toProductRow(row) : null;
+  }
+
   async listForOrganization(organizationId: string): Promise<ProductRow[]> {
     const rows = await (this.prisma as any).product.findMany({ where: { organizationId } });
     return rows.map(toProductRow);

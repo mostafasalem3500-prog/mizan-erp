@@ -61,6 +61,28 @@ const DEFAULT_COA: Array<{ code: string; nameAr: string; nameEn: string; type: A
   { code: "6200", nameAr: "مصروف الإهلاك", nameEn: "Depreciation Expense", type: "EXPENSE", parentCode: "6000", isPostable: true },
 ];
 
+/** Persistent sample catalog. DEMO-* is intentionally reserved so the UI can label it clearly. */
+export const DEMO_PRODUCTS = [
+  { sku: "DEMO-001", name: "مياه نقية 600 مل", unit: "PCS", sellingPrice: 2, taxCode: "STANDARD" },
+  { sku: "DEMO-002", name: "قهوة عربية وسط 250 جم", unit: "BAG", sellingPrice: 18, taxCode: "STANDARD" },
+  { sku: "DEMO-003", name: "شاي أسود فاخر 100 كيس", unit: "BOX", sellingPrice: 14, taxCode: "STANDARD" },
+  { sku: "DEMO-004", name: "زبادي كامل الدسم 170 جم", unit: "PCS", sellingPrice: 3, taxCode: "STANDARD" },
+  { sku: "DEMO-005", name: "شوكولاتة بالحليب 45 جم", unit: "PCS", sellingPrice: 7.5, taxCode: "STANDARD" },
+  { sku: "DEMO-006", name: "منظف أسطح 1 لتر", unit: "LTR", sellingPrice: 12, taxCode: "STANDARD" },
+  { sku: "DEMO-007", name: "مياه نقية 1.5 لتر", unit: "PCS", sellingPrice: 3, taxCode: "STANDARD" },
+  { sku: "DEMO-008", name: "منظف ملابس 3 لتر", unit: "PCS", sellingPrice: 32, taxCode: "STANDARD" },
+] as const;
+
+async function ensureDemoProducts(prisma: PrismaClient, organizationId: string): Promise<void> {
+  for (const product of DEMO_PRODUCTS) {
+    await prisma.product.upsert({
+      where: { organizationId_sku: { organizationId, sku: product.sku } },
+      update: {},
+      create: { organizationId, ...product },
+    });
+  }
+}
+
 export interface PrismaSeedResult {
   organizationId: string;
   roleId: string;
@@ -101,6 +123,7 @@ export async function seedDemoOrganizationWithPrisma(
     const existingAccounts = await prisma.account.findMany({ where: { organizationId: existingOrganization.id } });
 
     if (existingUser && existingMembership && existingPeriod && existingAccounts.length > 0) {
+      await ensureDemoProducts(prisma, existingOrganization.id);
       const accountIdsByCode: Record<string, string> = {};
       for (const account of existingAccounts) accountIdsByCode[account.code] = account.id;
 
@@ -186,6 +209,8 @@ export async function seedDemoOrganizationWithPrisma(
     });
     accountIdsByCode[def.code] = account.id;
   }
+
+  await ensureDemoProducts(prisma, organization.id);
 
   return {
     organizationId: organization.id,

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 
 export interface CreateProductInput {
   organizationId: string;
@@ -29,6 +29,7 @@ export interface ProductRow {
 export interface ProductsRepository {
   create(input: CreateProductInput): Promise<ProductRow>;
   findById(organizationId: string, productId: string): Promise<ProductRow | null>;
+  findBySku(organizationId: string, sku: string): Promise<ProductRow | null>;
   listForOrganization(organizationId: string): Promise<ProductRow[]>;
 }
 
@@ -37,7 +38,12 @@ export class ProductsService {
   constructor(private readonly repo: ProductsRepository) {}
 
   async createProduct(input: CreateProductInput): Promise<ProductRow> {
-    return this.repo.create(input);
+    const cleaned = { ...input, sku: input.sku?.trim().toUpperCase(), name: input.name?.trim(), unit: input.unit?.trim() };
+    if (!cleaned.sku || !cleaned.name || !cleaned.unit) throw new BadRequestException("اسم الصنف والكود والوحدة مطلوبة");
+    if (!Number.isFinite(cleaned.sellingPrice) || cleaned.sellingPrice <= 0) throw new BadRequestException("سعر البيع يجب أن يكون أكبر من صفر");
+    if (!(["STANDARD", "ZERO", "EXEMPT", "OUT_OF_SCOPE"] as string[]).includes(cleaned.taxCode)) throw new BadRequestException("تصنيف الضريبة غير صحيح");
+    if (await this.repo.findBySku(cleaned.organizationId, cleaned.sku)) throw new ConflictException("كود الصنف مستخدم مسبقًا");
+    return this.repo.create(cleaned);
   }
 
   async getProduct(organizationId: string, productId: string): Promise<ProductRow | null> {

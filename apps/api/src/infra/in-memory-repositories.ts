@@ -506,6 +506,11 @@ export class InMemoryProductsRepository implements ProductsRepository {
     return row && row.organizationId === organizationId ? { ...row } : null;
   }
 
+  async findBySku(organizationId: string, sku: string): Promise<ProductRow | null> {
+    const row = [...this.db.products.values()].find((p) => p.organizationId === organizationId && p.sku === sku);
+    return row ? { ...row } : null;
+  }
+
   async listForOrganization(organizationId: string): Promise<ProductRow[]> {
     return [...this.db.products.values()].filter((p) => p.organizationId === organizationId);
   }

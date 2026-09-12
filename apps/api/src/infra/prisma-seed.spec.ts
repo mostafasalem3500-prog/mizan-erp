@@ -11,6 +11,7 @@ function makeFakePrisma() {
     fiscalYearCreate: [],
     accountingPeriodCreate: [],
     accountCreate: [],
+    productUpsert: [],
   };
   let orgSeq = 0;
   let roleSeq = 0;
@@ -29,6 +30,7 @@ function makeFakePrisma() {
   const fiscalYears = new Map<string, any>();
   const accountingPeriods = new Map<string, any>();
   const accounts: any[] = [];
+  const products: any[] = [];
 
   const prisma = {
     organization: {
@@ -114,6 +116,16 @@ function makeFakePrisma() {
       }),
       findMany: jest.fn().mockImplementation(async ({ where }: any) => accounts.filter((a) => a.organizationId === where.organizationId)),
     },
+    product: {
+      upsert: jest.fn().mockImplementation(async ({ where, create }: any) => {
+        calls.productUpsert.push({ where, create });
+        const existing = products.find((p) => p.organizationId === where.organizationId_sku.organizationId && p.sku === where.organizationId_sku.sku);
+        if (existing) return existing;
+        const row = { id: `product-${products.length + 1}`, ...create };
+        products.push(row);
+        return row;
+      }),
+    },
   };
 
   return { prisma, calls };
@@ -132,6 +144,7 @@ describe("seedDemoOrganizationWithPrisma", () => {
     expect(calls.fiscalYearCreate).toHaveLength(1);
     expect(calls.accountingPeriodCreate).toHaveLength(1);
     expect(calls.organizationUserCreate).toHaveLength(1);
+    expect(calls.productUpsert).toHaveLength(8);
   });
 
   test("the returned result shape matches what main.ts expects (organizationId, roleId, userId, periodId)", async () => {
@@ -220,6 +233,11 @@ describe("seedDemoOrganizationWithPrisma — idempotency (Sprint 34 hotfix #2)",
     expect(calls.organizationCreate).toHaveLength(1);
     expect(calls.userCreate).toHaveLength(1);
     expect(calls.accountCreate).toHaveLength(22);
+    expect(calls.productUpsert).toHaveLength(16);
+    expect(calls.productUpsert.map((call) => call.where.organizationId_sku.sku)).toEqual([
+      "DEMO-001", "DEMO-002", "DEMO-003", "DEMO-004", "DEMO-005", "DEMO-006", "DEMO-007", "DEMO-008",
+      "DEMO-001", "DEMO-002", "DEMO-003", "DEMO-004", "DEMO-005", "DEMO-006", "DEMO-007", "DEMO-008",
+    ]);
   });
 
   test("the second call returns the SAME roleId, userId, periodId, and accountIdsByCode as the first", async () => {
