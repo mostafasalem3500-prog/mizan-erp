@@ -145,4 +145,49 @@ describe("OrganizationsService — updateSettings (Sprint 29)", () => {
     await expect(service.updateSettings("org-1", settings)).rejects.toThrow(message);
     expect(repo.updateSettings).not.toHaveBeenCalled();
   });
+
+  test("normalizes and persists a valid invoice template configuration", async () => {
+    const repo: OrganizationsRepository = {
+      vatNumberExists: jest.fn(),
+      createOrganizationWithOwner: jest.fn(),
+      findById: jest.fn().mockResolvedValue({ id: "org-1", legalNameAr: "شركة الاختبار" }),
+      updateSettings: jest.fn().mockImplementation(async (_id, settings) => ({ id: "org-1", legalNameAr: "شركة الاختبار", ...settings })),
+    };
+    const service = new OrganizationsService(repo);
+
+    const updated = await service.updateSettings("org-1", {
+      invoiceTemplateConfig: {
+        accentColor: "#123ABC",
+        documentTitle: "  فاتورة ضريبية  ",
+        showCommercialName: true,
+        showCrNumber: true,
+        showCustomerDetails: true,
+        showPaymentSummary: false,
+        showQr: true,
+        compactLines: false,
+      },
+    });
+
+    expect(updated.invoiceTemplateConfig?.documentTitle).toBe("فاتورة ضريبية");
+    expect(repo.updateSettings).toHaveBeenCalledWith("org-1", expect.objectContaining({
+      invoiceTemplateConfig: expect.objectContaining({ accentColor: "#123ABC", showPaymentSummary: false }),
+    }));
+  });
+
+  test("rejects unsafe invoice logo URLs", async () => {
+    const repo: OrganizationsRepository = {
+      vatNumberExists: jest.fn(),
+      createOrganizationWithOwner: jest.fn(),
+      findById: jest.fn().mockResolvedValue({ id: "org-1", legalNameAr: "شركة الاختبار" }),
+      updateSettings: jest.fn(),
+    };
+    const service = new OrganizationsService(repo);
+    await expect(service.updateSettings("org-1", {
+      invoiceTemplateConfig: {
+        accentColor: "#073f3e", documentTitle: "فاتورة", logoUrl: "javascript:alert(1)",
+        showCommercialName: true, showCrNumber: true, showCustomerDetails: true,
+        showPaymentSummary: true, showQr: true, compactLines: false,
+      },
+    })).rejects.toThrow("logo");
+  });
 });

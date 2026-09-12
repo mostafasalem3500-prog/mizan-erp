@@ -193,7 +193,7 @@
 
     <section id="view-settings" class="view" hidden>
       <div class="panel settings-panel">
-        <h3>بيانات المنشأة والفاتورة</h3><p class="panel-help">تظهر هذه البيانات في الفاتورة الضريبية ورمز QR.</p>
+        <div class="settings-heading"><div><span class="eyebrow">الهوية النظامية</span><h3>بيانات المنشأة والفاتورة</h3><p class="panel-help">تظهر هذه البيانات في الفاتورة الضريبية ورمز QR.</p></div><span class="save-state"><i class="ri-shield-check-line"></i> محفوظة في حساب المنشأة</span></div>
         <form id="organization-settings-form" class="settings-grid">
           <input id="org-legal-name" placeholder="الاسم القانوني بالعربية" required />
           <input id="org-commercial-name" placeholder="الاسم التجاري" />
@@ -206,10 +206,38 @@
           <input id="org-street" placeholder="الشارع" />
           <input id="org-building" placeholder="رقم المبنى" />
           <input id="org-postal" placeholder="الرمز البريدي" />
-          <select id="org-template"><option value="thermal">حراري 80مم</option><option value="a4">A4</option><option value="simple">مبسّط</option></select>
           <textarea id="org-footer" class="wide" placeholder="تذييل الفاتورة أو سياسة الاستبدال"></textarea>
           <label class="check-row wide"><input id="org-require-shift" type="checkbox" /> إلزام فتح وردية قبل البيع</label>
-          <button class="primary-btn" type="submit">حفظ إعدادات المنشأة</button><span id="organization-settings-result"></span>
+          <div class="invoice-studio wide" aria-labelledby="invoice-studio-title">
+            <section class="studio-controls">
+              <div class="studio-title"><div><span class="eyebrow">استوديو الفاتورة</span><h3 id="invoice-studio-title">اختر القالب واضبط شكله</h3></div><i class="ri-drag-move-2-line" aria-hidden="true"></i></div>
+              <div class="template-picker" id="settings-template-picker" role="radiogroup" aria-label="قالب الفاتورة الافتراضي">
+                <button type="button" class="template-option active" data-template="thermal" role="radio" aria-checked="true"><i class="ri-receipt-line"></i><span><strong>حراري 80مم</strong><small>سريع لنقاط البيع</small></span></button>
+                <button type="button" class="template-option" data-template="a4" role="radio" aria-checked="false"><i class="ri-file-paper-2-line"></i><span><strong>A4 احترافي</strong><small>مناسب للشركات</small></span></button>
+                <button type="button" class="template-option" data-template="simple" role="radio" aria-checked="false"><i class="ri-file-text-line"></i><span><strong>مختصر</strong><small>أقل حبر ومساحة</small></span></button>
+              </div>
+              <input id="org-template" type="hidden" value="thermal" />
+              <div class="studio-fields">
+                <label>عنوان المستند<input id="invoice-document-title" maxlength="80" value="فاتورة ضريبية مبسطة" /></label>
+                <label>لون الهوية<span class="color-control"><input id="invoice-accent" type="color" value="#073f3e" /><output id="invoice-accent-value">#073f3e</output></span></label>
+                <label class="wide">رابط شعار المنشأة<input id="invoice-logo-url" type="url" placeholder="https://example.sa/logo.png" /></label>
+              </div>
+              <div class="template-toggles">
+                <label><input id="invoice-show-commercial" type="checkbox" checked /> الاسم التجاري</label>
+                <label><input id="invoice-show-cr" type="checkbox" checked /> السجل التجاري</label>
+                <label><input id="invoice-show-customer" type="checkbox" checked /> تفاصيل العميل</label>
+                <label><input id="invoice-show-payment" type="checkbox" checked /> طريقة الدفع</label>
+                <label><input id="invoice-show-qr" type="checkbox" checked /> رمز QR</label>
+                <label><input id="invoice-compact-lines" type="checkbox" /> صفوف أصناف مدمجة</label>
+              </div>
+              <p class="studio-note"><i class="ri-history-line"></i> يُحفظ شكل القالب مع كل فاتورة، لذلك لن تتغير الفواتير القديمة عند تعديل الإعدادات لاحقًا.</p>
+            </section>
+            <section class="studio-preview" aria-label="معاينة فورية للقالب">
+              <div class="preview-label"><span>معاينة فورية</span><small id="preview-size-label">حراري 80مم</small></div>
+              <div class="receipt-box thermal preview-paper" id="invoice-template-preview"><div id="invoice-template-preview-content"></div></div>
+            </section>
+          </div>
+          <div class="settings-submit wide"><button class="primary-btn" type="submit"><i class="ri-save-3-line"></i> حفظ البيانات والقالب</button><span id="organization-settings-result" role="status"></span></div>
         </form>
       </div>
     </section>

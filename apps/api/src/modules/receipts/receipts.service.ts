@@ -1,7 +1,13 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import * as QRCode from "qrcode";
 import { randomUUID } from "crypto";
-import { OrganizationsService, OrganizationRow } from "../organizations/organizations.service";
+import {
+  DEFAULT_INVOICE_TEMPLATE_CONFIG,
+  InvoiceTemplateConfig,
+  OrganizationsService,
+  OrganizationRow,
+  ReceiptTemplate,
+} from "../organizations/organizations.service";
 import { PosService } from "../pos/pos.service";
 import { SalesService } from "../sales/sales.service";
 import { buildPhase1QR } from "../zatca/qr-encoder";
@@ -16,7 +22,9 @@ export interface ReceiptLine {
 
 export interface ReceiptData {
   sellerName: string;
+  sellerCommercialName?: string;
   sellerVatNumber?: string;
+  sellerCrNumber?: string;
   documentNumber: string;
   issuedAt: string;
   lines: ReceiptLine[];
@@ -35,11 +43,13 @@ export interface ReceiptData {
    * collect a full address yet, won't have these.
    */
   xmlInvoice?: string;
-  customer?: { name: string; vatNumber?: string; phone?: string; address?: string };
+  customer?: { name: string; vatNumber?: string; crNumber?: string; phone?: string; email?: string; address?: string };
   sellerAddress?: string;
   sellerPhone?: string;
   sellerEmail?: string;
   invoiceFooter?: string;
+  receiptTemplate: ReceiptTemplate;
+  templateConfig: InvoiceTemplateConfig;
 }
 
 const TAX_CODE_TO_ZATCA_CATEGORY: Record<string, ZatcaVatCategory> = {
@@ -98,7 +108,9 @@ export class ReceiptsService {
 
     return {
       sellerName: org?.legalNameAr ?? "منظمة غير معروفة",
+      sellerCommercialName: org?.commercialName,
       sellerVatNumber: org?.vatNumber,
+      sellerCrNumber: org?.crNumber,
       documentNumber: sale.invoiceNumber ?? sale.id.slice(0, 8),
       issuedAt: sale.soldAt,
       lines,
@@ -119,13 +131,17 @@ export class ReceiptsService {
       customer: customer ? {
         name: customer.name,
         vatNumber: customer.vatNumber,
+        crNumber: customer.crNumber,
         phone: customer.phone,
+        email: customer.email,
         address: [customer.buildingNumber, customer.streetName, customer.district, customer.city, customer.postalZone].filter(Boolean).join("، "),
       } : undefined,
       sellerAddress: org ? [org.buildingNumber, org.streetName, org.district, org.city, org.postalZone].filter(Boolean).join("، ") : undefined,
       sellerPhone: org?.phone,
       sellerEmail: org?.email,
       invoiceFooter: org?.invoiceFooter,
+      receiptTemplate: sale.receiptTemplate ?? org?.defaultReceiptTemplate ?? "thermal",
+      templateConfig: { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...(sale.invoiceTemplateSnapshot ?? org?.invoiceTemplateConfig ?? {}) },
     };
   }
 
@@ -135,6 +151,7 @@ export class ReceiptsService {
       throw new NotFoundException(`Invoice ${invoiceId} not found`);
     }
     const org = await this.organizationsService.getOrganization(organizationId);
+    const customer = invoice.customerId ? await this.posService.getCustomer(organizationId, invoice.customerId) : null;
 
     const lines: ReceiptLine[] = invoice.lines.map((l) => ({
       description: l.description,
@@ -145,7 +162,9 @@ export class ReceiptsService {
 
     return {
       sellerName: org?.legalNameAr ?? "منظمة غير معروفة",
+      sellerCommercialName: org?.commercialName,
       sellerVatNumber: org?.vatNumber,
+      sellerCrNumber: org?.crNumber,
       documentNumber: invoice.id.slice(0, 8),
       issuedAt: invoice.issueDate,
       lines,
@@ -163,6 +182,20 @@ export class ReceiptsService {
         invoice.taxTotal,
         invoice.total,
       ),
+      sellerAddress: org ? [org.buildingNumber, org.streetName, org.district, org.city, org.postalZone].filter(Boolean).join("، ") : undefined,
+      sellerPhone: org?.phone,
+      sellerEmail: org?.email,
+      invoiceFooter: org?.invoiceFooter,
+      receiptTemplate: org?.defaultReceiptTemplate ?? "a4",
+      templateConfig: { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...(org?.invoiceTemplateConfig ?? {}) },
+      customer: customer ? {
+        name: customer.name,
+        vatNumber: customer.vatNumber,
+        crNumber: customer.crNumber,
+        phone: customer.phone,
+        email: customer.email,
+        address: [customer.buildingNumber, customer.streetName, customer.district, customer.city, customer.postalZone].filter(Boolean).join("، "),
+      } : undefined,
     };
   }
 

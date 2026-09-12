@@ -4,6 +4,7 @@ import { InventoryService } from "../inventory/inventory.service";
 import { ShiftsService } from "./shifts.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { CustomersService } from "../customers/customers.service";
+import type { InvoiceTemplateConfig, ReceiptTemplate } from "../organizations/organizations.service";
 
 const TAX_RATE_BY_CODE: Record<string, number> = {
   STANDARD: 0.15,
@@ -35,6 +36,7 @@ export interface PosSellInput {
   lines: PosSaleLineInput[];
   tenders: PaymentTender[];
   idempotencyKey?: string;
+  receiptTemplate?: ReceiptTemplate;
   /**
    * Sprint 12 decision (documented, not assumed): linking a sale to a
    * shift is OPT-IN via this field, not mandatory for every POS sale.
@@ -73,6 +75,8 @@ export interface PosSaleRecord {
   invoiceNumber?: string;
   customerId?: string;
   customerName?: string;
+  receiptTemplate?: ReceiptTemplate;
+  invoiceTemplateSnapshot?: InvoiceTemplateConfig;
   /** Remaining (not-yet-returned) quantity per line, parallel to `lines` — spec band 41's partial-return support. */
   remainingQuantities: number[];
 }
@@ -142,8 +146,13 @@ export class PosService {
     // (undefined organizationsService, or the setting itself unset/false)
     // preserves every existing behavior exactly; an organization must
     // explicitly opt in via updateSettings() before this can reject a sale.
+    const org = this.organizationsService
+      ? await this.organizationsService.getOrganization(input.organizationId)
+      : null;
+    if (input.receiptTemplate && !["thermal", "a4", "simple"].includes(input.receiptTemplate)) {
+      throw new BadRequestException("Unsupported receipt template");
+    }
     if (!input.shiftId && this.organizationsService) {
-      const org = await this.organizationsService.getOrganization(input.organizationId);
       if (org?.requireShiftForPosSale) {
         throw new BadRequestException(
           "This organization requires an open shift for every POS sale — open a shift before selling",
@@ -257,6 +266,8 @@ export class PosService {
       soldAt: new Date().toISOString(),
       invoiceNumber: `POS-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${saleEntry.id.slice(0, 8).toUpperCase()}`,
       customerId: input.customerId,
+      receiptTemplate: input.receiptTemplate ?? org?.defaultReceiptTemplate ?? "thermal",
+      invoiceTemplateSnapshot: org?.invoiceTemplateConfig,
       remainingQuantities: input.lines.map((l) => l.quantity),
     });
   }

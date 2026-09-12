@@ -103,6 +103,7 @@ function toOrganizationRow(row: any): OrganizationRow {
     email: row.email ?? undefined,
     invoiceFooter: row.invoiceFooter ?? undefined,
     defaultReceiptTemplate: row.defaultReceiptTemplate ?? "thermal",
+    invoiceTemplateConfig: row.invoiceTemplateConfig ?? undefined,
   };
 }
 
@@ -384,6 +385,8 @@ function toPosSaleRecord(row: any): PosSaleRecord {
     inventoryEffects: row.inventoryEffects,
     status: row.status,
     shiftId: row.shiftId ?? undefined,
+    receiptTemplate: row.receiptTemplate ?? "thermal",
+    invoiceTemplateSnapshot: row.invoiceTemplateSnapshot ?? undefined,
     soldAt: new Date(row.soldAt).toISOString(),
     remainingQuantities: row.remainingQuantities,
   };
@@ -421,6 +424,8 @@ export class PrismaPosRepository implements PosRepository {
       remainingQuantities: record.remainingQuantities,
       status: record.status,
       shiftId: record.shiftId,
+      receiptTemplate: record.receiptTemplate,
+      invoiceTemplateSnapshot: record.invoiceTemplateSnapshot,
       soldAt: new Date(record.soldAt),
     };
     const row = await (this.prisma as any).posSale.upsert({ where: { id: record.id }, create: { id: record.id, ...data }, update: data });

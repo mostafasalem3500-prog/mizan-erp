@@ -18,6 +18,31 @@ export interface CreateOrganizationResult {
   ownerRoleId: string;
 }
 
+export type ReceiptTemplate = "thermal" | "a4" | "simple";
+
+export interface InvoiceTemplateConfig {
+  accentColor: string;
+  documentTitle: string;
+  logoUrl?: string;
+  showCommercialName: boolean;
+  showCrNumber: boolean;
+  showCustomerDetails: boolean;
+  showPaymentSummary: boolean;
+  showQr: boolean;
+  compactLines: boolean;
+}
+
+export const DEFAULT_INVOICE_TEMPLATE_CONFIG: InvoiceTemplateConfig = {
+  accentColor: "#073f3e",
+  documentTitle: "فاتورة ضريبية مبسطة",
+  showCommercialName: true,
+  showCrNumber: true,
+  showCustomerDetails: true,
+  showPaymentSummary: true,
+  showQr: true,
+  compactLines: false,
+};
+
 export interface OrganizationRow {
   id: string;
   legalNameAr: string;
@@ -35,7 +60,8 @@ export interface OrganizationRow {
   phone?: string;
   email?: string;
   invoiceFooter?: string;
-  defaultReceiptTemplate?: "thermal" | "a4" | "simple";
+  defaultReceiptTemplate?: ReceiptTemplate;
+  invoiceTemplateConfig?: InvoiceTemplateConfig;
 }
 
 /**
@@ -151,6 +177,30 @@ export class OrganizationsService {
     if (settings.defaultReceiptTemplate && !["thermal", "a4", "simple"].includes(settings.defaultReceiptTemplate)) {
       throw new BadRequestException("Unsupported receipt template");
     }
+    if (settings.invoiceTemplateConfig) {
+      settings.invoiceTemplateConfig = validateInvoiceTemplateConfig(settings.invoiceTemplateConfig);
+    }
     return this.repo.updateSettings(organizationId, settings);
   }
+}
+
+function validateInvoiceTemplateConfig(input: InvoiceTemplateConfig): InvoiceTemplateConfig {
+  const config = { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...input };
+  if (!/^#[0-9A-Fa-f]{6}$/.test(config.accentColor)) {
+    throw new BadRequestException("Invoice accent color must be a six-digit hex color");
+  }
+  config.documentTitle = String(config.documentTitle ?? "").trim();
+  if (!config.documentTitle || config.documentTitle.length > 80) {
+    throw new BadRequestException("Invoice document title must contain 1 to 80 characters");
+  }
+  if (config.logoUrl) {
+    config.logoUrl = String(config.logoUrl).trim();
+    if (config.logoUrl.length > 500 || !/^(https?:\/\/|\/)/.test(config.logoUrl)) {
+      throw new BadRequestException("Invoice logo must be a valid HTTPS/HTTP or site-relative URL");
+    }
+  }
+  for (const key of ["showCommercialName", "showCrNumber", "showCustomerDetails", "showPaymentSummary", "showQr", "compactLines"] as const) {
+    if (typeof config[key] !== "boolean") throw new BadRequestException(`Invoice template option ${key} must be boolean`);
+  }
+  return config;
 }

@@ -12,6 +12,18 @@ const state = {
   organization: null,
 };
 
+const DEFAULT_INVOICE_TEMPLATE_CONFIG = {
+  accentColor: "#073f3e",
+  documentTitle: "فاتورة ضريبية مبسطة",
+  logoUrl: "",
+  showCommercialName: true,
+  showCrNumber: true,
+  showCustomerDetails: true,
+  showPaymentSummary: true,
+  showQr: true,
+  compactLines: false,
+};
+
 const money = new Intl.NumberFormat("ar-SA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function escapeHtml(value) {
@@ -507,6 +519,7 @@ document.getElementById("pos-checkout").addEventListener("click", async () => {
         lines,
         tenders: [{ method: state.posPayment, amount: Number(total.toFixed(2)) }],
         idempotencyKey: `web-pos-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        receiptTemplate: state.receiptTemplate,
         ...(document.getElementById("pos-customer").value ? { customerId: document.getElementById("pos-customer").value } : {}),
         ...(state.shiftId ? { shiftId: state.shiftId } : {}),
       }),
@@ -764,21 +777,28 @@ document.getElementById("receipt-print").addEventListener("click", () => window.
 document.getElementById("receipt-overlay").addEventListener("click", (event) => { if (event.target.id === "receipt-overlay") closeReceipt(); });
 
 function renderReceiptHtml(r) {
+  const config = { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...(r.templateConfig || {}) };
+  const accent = /^#[0-9a-f]{6}$/i.test(config.accentColor) ? config.accentColor : DEFAULT_INVOICE_TEMPLATE_CONFIG.accentColor;
+  const logoUrl = /^(https?:\/\/|\/)/.test(config.logoUrl || "") ? config.logoUrl : "";
   const rows = r.lines
     .map(
       (l) => `<tr><td>${escapeHtml(l.description)}</td><td class="num">${escapeHtml(l.quantity)}</td><td class="num">${Number(l.unitPrice).toFixed(2)}</td><td class="num">${escapeHtml(l.lineTotal)}</td></tr>`,
     )
     .join("");
   const dt = new Date(r.issuedAt).toLocaleString("ar-SA", { hour12: true });
-  return `
-    <div class="rcpt-biz-name">${escapeHtml(r.sellerName)}</div>
-    <div class="rcpt-biz-meta">${r.sellerVatNumber ? "الرقم الضريبي: " + escapeHtml(r.sellerVatNumber) : ""}</div>
+  return `<div class="invoice-document${config.compactLines ? " compact-lines" : ""}" style="--invoice-accent:${accent}">
+    <div class="rcpt-brand">
+      ${logoUrl ? `<img class="rcpt-logo" src="${escapeHtml(logoUrl)}" alt="شعار ${escapeHtml(r.sellerName)}" />` : `<span class="rcpt-logo-placeholder" aria-hidden="true"><i class="ri-scales-3-line"></i></span>`}
+      <div><div class="rcpt-biz-name">${escapeHtml(r.sellerName)}</div>
+      ${config.showCommercialName && r.sellerCommercialName ? `<div class="rcpt-commercial-name">${escapeHtml(r.sellerCommercialName)}</div>` : ""}</div>
+    </div>
+    <div class="rcpt-biz-meta">${r.sellerVatNumber ? "الرقم الضريبي: " + escapeHtml(r.sellerVatNumber) : ""}${config.showCrNumber && r.sellerCrNumber ? ` · السجل التجاري: ${escapeHtml(r.sellerCrNumber)}` : ""}</div>
     ${r.sellerAddress ? `<div class="rcpt-biz-meta">${escapeHtml(r.sellerAddress)}</div>` : ""}
     ${r.sellerPhone || r.sellerEmail ? `<div class="rcpt-biz-meta">${escapeHtml([r.sellerPhone, r.sellerEmail].filter(Boolean).join(" · "))}</div>` : ""}
-    <div class="rcpt-title-band">فاتورة ضريبية</div>
+    <div class="rcpt-title-band">${escapeHtml(config.documentTitle)}</div>
     <div class="rcpt-meta-row"><span>رقم المستند</span><span class="val">${escapeHtml(r.documentNumber)}</span></div>
     <div class="rcpt-meta-row"><span>التاريخ والوقت</span><span class="val">${dt}</span></div>
-    ${r.customer ? `<div class="rcpt-customer"><strong>بيانات العميل</strong><span>${escapeHtml(r.customer.name)}</span>${r.customer.vatNumber ? `<span>الرقم الضريبي: ${escapeHtml(r.customer.vatNumber)}</span>` : ""}${r.customer.address ? `<span>${escapeHtml(r.customer.address)}</span>` : ""}</div>` : ""}
+    ${config.showCustomerDetails && r.customer ? `<div class="rcpt-customer"><strong>بيانات العميل</strong><span>${escapeHtml(r.customer.name)}</span>${r.customer.vatNumber ? `<span>الرقم الضريبي: ${escapeHtml(r.customer.vatNumber)}</span>` : ""}${r.customer.crNumber ? `<span>السجل التجاري: ${escapeHtml(r.customer.crNumber)}</span>` : ""}${r.customer.address ? `<span>${escapeHtml(r.customer.address)}</span>` : ""}${r.customer.phone || r.customer.email ? `<span>${escapeHtml([r.customer.phone, r.customer.email].filter(Boolean).join(" · "))}</span>` : ""}</div>` : ""}
     <table class="rcpt-table">
       <thead><tr><th>الصنف</th><th class="num">كمية</th><th class="num">سعر</th><th class="num">الإجمالي</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -786,13 +806,13 @@ function renderReceiptHtml(r) {
     <div class="rcpt-totals-row"><span>الإجمالي قبل الضريبة</span><span class="amt">${escapeHtml(r.subtotal)} ر.س</span></div>
     <div class="rcpt-totals-row"><span>ضريبة القيمة المضافة</span><span class="amt">${escapeHtml(r.taxTotal)} ر.س</span></div>
     <div class="rcpt-totals-row grand"><span>الإجمالي المستحق</span><span class="amt">${escapeHtml(r.total)} ر.س</span></div>
-    <div class="rcpt-payment">${escapeHtml(r.paymentSummary)}</div>
-    <div class="rcpt-qr-wrap">
-      <img src="${escapeHtml(r.qrCodeDataUrl)}" alt="رمز الاستجابة السريعة للفاتورة الضريبية" />
+    ${config.showPaymentSummary ? `<div class="rcpt-payment">${escapeHtml(r.paymentSummary)}</div>` : ""}
+    ${config.showQr ? `<div class="rcpt-qr-wrap">
+      ${r.qrCodeDataUrl ? `<img src="${escapeHtml(r.qrCodeDataUrl)}" alt="رمز الاستجابة السريعة للفاتورة الضريبية" />` : `<span class="qr-placeholder" aria-hidden="true"><i class="ri-qr-code-line"></i></span>`}
       <div class="rcpt-qr-caption">رمز الاستجابة السريعة لضريبة القيمة المضافة — نموذج المرحلة الأولى</div>
-    </div>
+    </div>` : ""}
     ${r.invoiceFooter ? `<div class="rcpt-footer">${escapeHtml(r.invoiceFooter)}</div>` : ""}
-  `;
+  </div>`;
 }
 
 // ---------- سجل فواتير نقطة البيع ----------
@@ -827,7 +847,81 @@ async function loadOrganizationSettings() {
   Object.entries(fields).forEach(([id, value]) => { document.getElementById(id).value = value || ""; });
   document.getElementById("org-template").value = o.defaultReceiptTemplate || "thermal";
   document.getElementById("org-require-shift").checked = Boolean(o.requireShiftForPosSale);
+  hydrateInvoiceTemplateControls(o.invoiceTemplateConfig || {});
+  selectSettingsTemplate(o.defaultReceiptTemplate || "thermal");
+  renderInvoiceTemplatePreview();
 }
+
+function readInvoiceTemplateControls() {
+  return {
+    accentColor: document.getElementById("invoice-accent").value,
+    documentTitle: document.getElementById("invoice-document-title").value.trim(),
+    logoUrl: document.getElementById("invoice-logo-url").value.trim() || undefined,
+    showCommercialName: document.getElementById("invoice-show-commercial").checked,
+    showCrNumber: document.getElementById("invoice-show-cr").checked,
+    showCustomerDetails: document.getElementById("invoice-show-customer").checked,
+    showPaymentSummary: document.getElementById("invoice-show-payment").checked,
+    showQr: document.getElementById("invoice-show-qr").checked,
+    compactLines: document.getElementById("invoice-compact-lines").checked,
+  };
+}
+
+function hydrateInvoiceTemplateControls(saved) {
+  const config = { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...saved };
+  document.getElementById("invoice-document-title").value = config.documentTitle;
+  document.getElementById("invoice-accent").value = config.accentColor;
+  document.getElementById("invoice-accent-value").textContent = config.accentColor;
+  document.getElementById("invoice-logo-url").value = config.logoUrl || "";
+  document.getElementById("invoice-show-commercial").checked = config.showCommercialName;
+  document.getElementById("invoice-show-cr").checked = config.showCrNumber;
+  document.getElementById("invoice-show-customer").checked = config.showCustomerDetails;
+  document.getElementById("invoice-show-payment").checked = config.showPaymentSummary;
+  document.getElementById("invoice-show-qr").checked = config.showQr;
+  document.getElementById("invoice-compact-lines").checked = config.compactLines;
+}
+
+function selectSettingsTemplate(template) {
+  document.getElementById("org-template").value = template;
+  document.querySelectorAll("#settings-template-picker .template-option").forEach((button) => {
+    const selected = button.dataset.template === template;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-checked", String(selected));
+  });
+}
+
+function renderInvoiceTemplatePreview() {
+  const template = document.getElementById("org-template").value;
+  const org = state.organization || {};
+  const sample = {
+    sellerName: document.getElementById("org-legal-name").value || org.legalNameAr || "اسم المنشأة",
+    sellerCommercialName: document.getElementById("org-commercial-name").value || org.commercialName,
+    sellerVatNumber: document.getElementById("org-vat").value || "300000000000003",
+    sellerCrNumber: document.getElementById("org-cr").value || "1010010000",
+    sellerAddress: [document.getElementById("org-building").value, document.getElementById("org-street").value, document.getElementById("org-district").value, document.getElementById("org-city").value, document.getElementById("org-postal").value].filter(Boolean).join("، ") || "1234، طريق الملك فهد، الرياض، 12345",
+    sellerPhone: document.getElementById("org-phone").value,
+    sellerEmail: document.getElementById("org-email").value,
+    documentNumber: "POS-20260912-0001",
+    issuedAt: new Date().toISOString(),
+    lines: [{ description: "منتج تجريبي", quantity: 2, unitPrice: 10, lineTotal: "20.00" }, { description: "خدمة تجريبية", quantity: 1, unitPrice: 50, lineTotal: "50.00" }],
+    subtotal: "70.00", taxTotal: "10.50", total: "80.50", paymentSummary: "مدى — 80.50 ر.س", qrCodeDataUrl: "",
+    customer: { name: "عميل تجريبي", vatNumber: "300000000000003", address: "جدة، المملكة العربية السعودية" },
+    invoiceFooter: document.getElementById("org-footer").value || "شكرًا لتعاملكم معنا",
+    templateConfig: readInvoiceTemplateControls(),
+  };
+  const paper = document.getElementById("invoice-template-preview");
+  paper.className = `receipt-box ${template} preview-paper`;
+  document.getElementById("preview-size-label").textContent = { thermal: "حراري 80مم", a4: "A4 احترافي", simple: "مختصر" }[template];
+  document.getElementById("invoice-template-preview-content").innerHTML = renderReceiptHtml(sample);
+}
+
+document.querySelectorAll("#settings-template-picker .template-option").forEach((button) => button.addEventListener("click", () => {
+  selectSettingsTemplate(button.dataset.template);
+  renderInvoiceTemplatePreview();
+}));
+document.querySelectorAll("#organization-settings-form input, #organization-settings-form textarea").forEach((control) => control.addEventListener("input", () => {
+  if (control.id === "invoice-accent") document.getElementById("invoice-accent-value").textContent = control.value;
+  renderInvoiceTemplatePreview();
+}));
 
 document.getElementById("organization-settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -841,6 +935,7 @@ document.getElementById("organization-settings-form").addEventListener("submit",
       streetName: document.getElementById("org-street").value.trim() || undefined, buildingNumber: document.getElementById("org-building").value.trim() || undefined,
       postalZone: document.getElementById("org-postal").value.trim() || undefined, countryCode: "SA",
       invoiceFooter: document.getElementById("org-footer").value.trim() || undefined, defaultReceiptTemplate: document.getElementById("org-template").value,
+      invoiceTemplateConfig: readInvoiceTemplateControls(),
       requireShiftForPosSale: document.getElementById("org-require-shift").checked,
     };
     state.organization = await api(`/api/v1/organizations/${state.orgId}/settings`, { method: "PATCH", body: JSON.stringify(body) });
@@ -853,7 +948,7 @@ async function openPosReceipt(saleId) {
   const receipt = await api(`/api/v1/organizations/${state.orgId}/pos/sales/${saleId}/receipt`);
   document.getElementById("receipt-content").innerHTML = renderReceiptHtml(receipt);
   const paper = document.getElementById("receipt-paper");
-  paper.className = `receipt-box ${state.receiptTemplate}`;
+  paper.className = `receipt-box ${receipt.receiptTemplate || state.receiptTemplate}`;
   const overlay = document.getElementById("receipt-overlay");
   overlay.hidden = false;
   overlay.setAttribute("aria-hidden", "false");
@@ -864,7 +959,7 @@ async function openInvoiceReceipt(invoiceId) {
   const receipt = await api(`/api/v1/organizations/${state.orgId}/sales/invoices/${invoiceId}/receipt`);
   document.getElementById("receipt-content").innerHTML = renderReceiptHtml(receipt);
   const overlay = document.getElementById("receipt-overlay");
-  document.getElementById("receipt-paper").className = "receipt-box a4";
+  document.getElementById("receipt-paper").className = `receipt-box ${receipt.receiptTemplate || "a4"}`;
   overlay.hidden = false;
   overlay.setAttribute("aria-hidden", "false");
 }

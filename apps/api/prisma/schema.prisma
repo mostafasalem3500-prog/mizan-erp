@@ -38,6 +38,7 @@ model Organization {
   email           String?
   invoiceFooter   String?
   defaultReceiptTemplate String @default("thermal")
+  invoiceTemplateConfig Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -231,6 +232,8 @@ model PosSale {
   remainingQuantities Json
   status              String
   shiftId             String?
+  receiptTemplate     String   @default("thermal")
+  invoiceTemplateSnapshot Json?
   soldAt              DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])

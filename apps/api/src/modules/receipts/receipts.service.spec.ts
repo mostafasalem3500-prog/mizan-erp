@@ -58,6 +58,24 @@ describe("ReceiptsService — POS receipt", () => {
     expect(receipt.paymentSummary).toContain("مختلط");
   });
 
+  test("returns the historical template snapshot saved with the POS sale", async () => {
+    const pos = {
+      getSale: jest.fn().mockResolvedValue({
+        id: "sale-template", lines: [{ description: "Item", quantity: 1, unitPrice: 100, taxCode: "ZERO" }],
+        tenders: [{ method: "CARD", amount: 100 }], subtotal: "100.00", taxTotal: "0.00", total: "100.00",
+        soldAt: "2026-09-12T01:00:00.000Z", receiptTemplate: "a4",
+        invoiceTemplateSnapshot: { accentColor: "#123456", documentTitle: "فاتورة بيع", showQr: false },
+      }),
+    } as unknown as PosService;
+    const service = new ReceiptsService(makeOrgService(), pos, {} as unknown as SalesService);
+
+    const receipt = await service.getPosReceipt("org-1", "sale-template");
+
+    expect(receipt.receiptTemplate).toBe("a4");
+    expect(receipt.templateConfig).toEqual(expect.objectContaining({ accentColor: "#123456", documentTitle: "فاتورة بيع", showQr: false }));
+    expect(receipt.templateConfig.showCustomerDetails).toBe(true);
+  });
+
   test("throws NotFoundException for a sale that doesn't exist", async () => {
     const pos = { getSale: jest.fn().mockResolvedValue(null) } as unknown as PosService;
     const service = new ReceiptsService(makeOrgService(), pos, {} as unknown as SalesService);
