@@ -371,6 +371,7 @@ function toPosSaleRecord(row: any): PosSaleRecord {
     id: row.id,
     organizationId: row.organizationId,
     customerId: row.customerId ?? undefined,
+    customerName: row.customer?.name ?? undefined,
     invoiceNumber: row.invoiceNumber,
     terminalId: row.terminalId,
     periodId: row.periodId,
@@ -434,12 +435,13 @@ export class PrismaPosRepository implements PosRepository {
   async searchSales(organizationId: string, query = ""): Promise<PosSaleRecord[]> {
     const rows = await (this.prisma as any).posSale.findMany({
       where: { organizationId },
+      include: { customer: true },
       orderBy: { soldAt: "desc" },
       take: 200,
     });
     const needle = query.toLowerCase();
     return rows.map(toPosSaleRecord).filter((sale: PosSaleRecord) =>
-      !needle || sale.id.toLowerCase().includes(needle) || sale.invoiceNumber?.toLowerCase().includes(needle) || sale.customerId?.toLowerCase().includes(needle) || sale.lines.some((line) => line.description.toLowerCase().includes(needle)),
+      !needle || sale.id.toLowerCase().includes(needle) || sale.invoiceNumber?.toLowerCase().includes(needle) || sale.customerId?.toLowerCase().includes(needle) || sale.customerName?.toLowerCase().includes(needle) || sale.lines.some((line) => line.description.toLowerCase().includes(needle)),
     );
   }
 }

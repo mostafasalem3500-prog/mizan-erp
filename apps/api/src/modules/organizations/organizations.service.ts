@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { AuthService } from "../auth/auth.service";
 
 export interface CreateOrganizationInput {
@@ -135,6 +135,21 @@ export class OrganizationsService {
     const org = await this.repo.findById(organizationId);
     if (!org) {
       throw new NotFoundException(`Organization ${organizationId} not found`);
+    }
+    if (settings.vatNumber && !/^3\d{13}3$/.test(settings.vatNumber)) {
+      throw new BadRequestException("VAT number must contain 15 digits and start and end with 3");
+    }
+    if (settings.buildingNumber && !/^\d{4}$/.test(settings.buildingNumber)) {
+      throw new BadRequestException("National address building number must contain 4 digits");
+    }
+    if (settings.postalZone && !/^\d{5}$/.test(settings.postalZone)) {
+      throw new BadRequestException("National address postal code must contain 5 digits");
+    }
+    if (settings.countryCode && !/^[A-Z]{2}$/.test(settings.countryCode)) {
+      throw new BadRequestException("Country code must use two uppercase ISO letters");
+    }
+    if (settings.defaultReceiptTemplate && !["thermal", "a4", "simple"].includes(settings.defaultReceiptTemplate)) {
+      throw new BadRequestException("Unsupported receipt template");
     }
     return this.repo.updateSettings(organizationId, settings);
   }

@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { OrganizationsService, OrganizationsRepository, DEFAULT_SEEDED_ROLES } from "./organizations.service";
 
 describe("OrganizationsService", () => {
@@ -124,6 +124,25 @@ describe("OrganizationsService — updateSettings (Sprint 29)", () => {
     const service = new OrganizationsService(repo);
 
     await expect(service.updateSettings("ghost", { requireShiftForPosSale: true })).rejects.toThrow(NotFoundException);
+    expect(repo.updateSettings).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    [{ vatNumber: "123" }, "VAT number"],
+    [{ buildingNumber: "12" }, "building number"],
+    [{ postalZone: "1234" }, "postal code"],
+    [{ defaultReceiptTemplate: "poster" as any }, "receipt template"],
+  ])("rejects invalid Saudi invoice settings: %s", async (settings, message) => {
+    const repo: OrganizationsRepository = {
+      vatNumberExists: jest.fn(),
+      createOrganizationWithOwner: jest.fn(),
+      findById: jest.fn().mockResolvedValue({ id: "org-1", legalNameAr: "شركة الاختبار" }),
+      updateSettings: jest.fn(),
+    };
+    const service = new OrganizationsService(repo);
+
+    await expect(service.updateSettings("org-1", settings)).rejects.toThrow(BadRequestException);
+    await expect(service.updateSettings("org-1", settings)).rejects.toThrow(message);
     expect(repo.updateSettings).not.toHaveBeenCalled();
   });
 });

@@ -805,7 +805,7 @@ async function loadPosInvoices(query = "") {
   body.innerHTML = sales.map((sale) => `<tr>
     <td class="num">${escapeHtml(sale.invoiceNumber || sale.id.slice(0, 8))}</td>
     <td>${new Date(sale.soldAt).toLocaleString("ar-SA")}</td>
-    <td>${escapeHtml(customerNames.get(sale.customerId) || "عميل نقدي")}</td>
+    <td>${escapeHtml(sale.customerName || customerNames.get(sale.customerId) || "عميل نقدي")}</td>
     <td>${escapeHtml(sale.lines.map((line) => line.description).join("، "))}</td>
     <td class="num">${escapeHtml(sale.total)} ر.س</td><td>${sale.status === "COMPLETED" ? "مكتملة" : "مرتجعة"}</td>
     <td><button class="ghost-btn view-pos-invoice" data-sale-id="${escapeHtml(sale.id)}">عرض وطباعة</button></td>

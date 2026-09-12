@@ -72,6 +72,7 @@ export interface PosSaleRecord {
   soldAt: string;
   invoiceNumber?: string;
   customerId?: string;
+  customerName?: string;
   /** Remaining (not-yet-returned) quantity per line, parallel to `lines` — spec band 41's partial-return support. */
   remainingQuantities: number[];
 }
