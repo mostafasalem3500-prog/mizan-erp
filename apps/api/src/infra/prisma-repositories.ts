@@ -29,6 +29,15 @@ import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../m
 import type { ProductsRepository, ProductRow, CreateProductInput } from "../modules/inventory/products.service";
 import type { RolePermissionLookup } from "../modules/common/permissions.guard";
 import type { PosRepository, PosGLAccountMapping, PosSaleRecord } from "../modules/pos/pos.service";
+import type { SalesRepository, SalesGLAccountMapping, SalesInvoiceRecord } from "../modules/sales/sales.service";
+import type { PurchasesRepository, PurchasesGLAccountMapping, PurchaseBillRecord } from "../modules/purchases/purchases.service";
+import type { InventoryRepository, InventoryGLAccountMapping, StockLevel } from "../modules/inventory/inventory.service";
+import type { ExpensesRepository, ExpenseRecord } from "../modules/expenses/expenses.service";
+import type { AssetsRepository, AssetRecord } from "../modules/assets/assets.service";
+import type { PaymentsRepository, PaymentRecord } from "../modules/payments/payments.service";
+import type { BranchesRepository, BranchRow, CreateBranchInput } from "../modules/branches/branches.service";
+import type { ShiftsRepository, ShiftRecord } from "../modules/pos/shifts.service";
+import type { AuditLogEntry, AuditSink } from "../modules/common/audit.interceptor";
 import { AccountsService } from "../modules/accounts/accounts.service";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
@@ -167,6 +176,24 @@ export class PrismaOrganizationsRepository implements OrganizationsRepository {
       data: settings,
     });
     return toOrganizationRow(row);
+  }
+}
+
+function toBranchRow(row: any): BranchRow {
+  return { id: row.id, organizationId: row.organizationId, code: row.code, name: row.name, address: row.address ?? undefined, isActive: row.isActive };
+}
+
+export class PrismaBranchesRepository implements BranchesRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+  async codeExistsForOrganization(organizationId: string, code: string): Promise<boolean> {
+    return (await (this.prisma as any).branch.findUnique({ where: { organizationId_code: { organizationId, code } } })) !== null;
+  }
+  async create(input: CreateBranchInput): Promise<BranchRow> {
+    return toBranchRow(await (this.prisma as any).branch.create({ data: input }));
+  }
+  async listForOrganization(organizationId: string): Promise<BranchRow[]> {
+    const rows = await (this.prisma as any).branch.findMany({ where: { organizationId }, orderBy: { code: "asc" } });
+    return rows.map(toBranchRow);
   }
 }
 
@@ -447,6 +474,263 @@ export class PrismaProductsRepository implements ProductsRepository {
   async listForOrganization(organizationId: string): Promise<ProductRow[]> {
     const rows = await (this.prisma as any).product.findMany({ where: { organizationId } });
     return rows.map(toProductRow);
+  }
+}
+
+function money2(value: any): string {
+  return Number(value ?? 0).toFixed(2);
+}
+
+function toSalesInvoiceRecord(row: any): SalesInvoiceRecord {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    customerId: row.customerId,
+    lines: row.lines,
+    subtotal: money2(row.subtotal),
+    taxTotal: money2(row.taxTotal),
+    total: money2(row.total),
+    paidAmount: money2(row.paidAmount),
+    journalEntryId: row.journalEntryId,
+    issueDate: new Date(row.issueDate).toISOString(),
+  };
+}
+
+export class PrismaSalesRepository implements SalesRepository {
+  constructor(private readonly prisma: PrismaClient, private readonly accounts: AccountsService) {}
+
+  async getGLAccountMapping(organizationId: string): Promise<SalesGLAccountMapping> {
+    return {
+      accountsReceivableAccountId: await this.accounts.getAccountIdByCode(organizationId, "1200"),
+      salesRevenueAccountId: await this.accounts.getAccountIdByCode(organizationId, "4100"),
+      vatOutputAccountId: await this.accounts.getAccountIdByCode(organizationId, "2200"),
+    };
+  }
+
+  async saveInvoice(record: SalesInvoiceRecord): Promise<SalesInvoiceRecord> {
+    const data = {
+      organizationId: record.organizationId,
+      customerId: record.customerId,
+      lines: record.lines,
+      subtotal: record.subtotal,
+      taxTotal: record.taxTotal,
+      total: record.total,
+      paidAmount: record.paidAmount,
+      journalEntryId: record.journalEntryId,
+      issueDate: new Date(record.issueDate),
+    };
+    const row = await (this.prisma as any).salesInvoice.upsert({ where: { id: record.id }, create: { id: record.id, ...data }, update: data });
+    return toSalesInvoiceRecord(row);
+  }
+
+  async findInvoice(organizationId: string, invoiceId: string): Promise<SalesInvoiceRecord | null> {
+    const row = await (this.prisma as any).salesInvoice.findFirst({ where: { id: invoiceId, organizationId } });
+    return row ? toSalesInvoiceRecord(row) : null;
+  }
+
+  async listInvoicesForCustomer(organizationId: string, customerId: string): Promise<SalesInvoiceRecord[]> {
+    const rows = await (this.prisma as any).salesInvoice.findMany({ where: { organizationId, customerId }, orderBy: { issueDate: "desc" } });
+    return rows.map(toSalesInvoiceRecord);
+  }
+
+  async listAllInvoices(organizationId: string): Promise<SalesInvoiceRecord[]> {
+    const rows = await (this.prisma as any).salesInvoice.findMany({ where: { organizationId }, orderBy: { issueDate: "desc" } });
+    return rows.map(toSalesInvoiceRecord);
+  }
+}
+
+function toPurchaseBillRecord(row: any): PurchaseBillRecord {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    supplierId: row.supplierId,
+    lines: row.lines,
+    subtotal: money2(row.subtotal),
+    taxTotal: money2(row.taxTotal),
+    total: money2(row.total),
+    paidAmount: money2(row.paidAmount),
+    journalEntryId: row.journalEntryId,
+    issueDate: new Date(row.issueDate).toISOString(),
+  };
+}
+
+export class PrismaPurchasesRepository implements PurchasesRepository {
+  constructor(private readonly prisma: PrismaClient, private readonly accounts: AccountsService) {}
+
+  async getGLAccountMapping(organizationId: string): Promise<PurchasesGLAccountMapping> {
+    return {
+      inventoryAccountId: await this.accounts.getAccountIdByCode(organizationId, "1300"),
+      vatInputAccountId: await this.accounts.getAccountIdByCode(organizationId, "1400"),
+      accountsPayableAccountId: await this.accounts.getAccountIdByCode(organizationId, "2100"),
+      generalExpenseAccountId: await this.accounts.getAccountIdByCode(organizationId, "6100"),
+    };
+  }
+
+  async saveBill(record: PurchaseBillRecord): Promise<PurchaseBillRecord> {
+    const data = {
+      organizationId: record.organizationId,
+      supplierId: record.supplierId,
+      lines: record.lines,
+      subtotal: record.subtotal,
+      taxTotal: record.taxTotal,
+      total: record.total,
+      paidAmount: record.paidAmount,
+      journalEntryId: record.journalEntryId,
+      issueDate: new Date(record.issueDate),
+    };
+    const row = await (this.prisma as any).purchaseBill.upsert({ where: { id: record.id }, create: { id: record.id, ...data }, update: data });
+    return toPurchaseBillRecord(row);
+  }
+
+  async findBill(organizationId: string, billId: string): Promise<PurchaseBillRecord | null> {
+    const row = await (this.prisma as any).purchaseBill.findFirst({ where: { id: billId, organizationId } });
+    return row ? toPurchaseBillRecord(row) : null;
+  }
+
+  async listBillsForSupplier(organizationId: string, supplierId: string): Promise<PurchaseBillRecord[]> {
+    const rows = await (this.prisma as any).purchaseBill.findMany({ where: { organizationId, supplierId }, orderBy: { issueDate: "desc" } });
+    return rows.map(toPurchaseBillRecord);
+  }
+
+  async listAllBills(organizationId: string): Promise<PurchaseBillRecord[]> {
+    const rows = await (this.prisma as any).purchaseBill.findMany({ where: { organizationId }, orderBy: { issueDate: "desc" } });
+    return rows.map(toPurchaseBillRecord);
+  }
+}
+
+export class PrismaInventoryRepository implements InventoryRepository {
+  constructor(private readonly prisma: PrismaClient, private readonly accounts: AccountsService) {}
+
+  async getGLAccountMapping(organizationId: string): Promise<InventoryGLAccountMapping> {
+    return {
+      inventoryAccountId: await this.accounts.getAccountIdByCode(organizationId, "1300"),
+      cogsAccountId: await this.accounts.getAccountIdByCode(organizationId, "5100"),
+      openingBalanceEquityAccountId: await this.accounts.getAccountIdByCode(organizationId, "3100"),
+    };
+  }
+
+  async getStockLevel(organizationId: string, productId: string): Promise<StockLevel | null> {
+    const row = await (this.prisma as any).stockLevel.findUnique({ where: { organizationId_productId: { organizationId, productId } } });
+    return row ? { organizationId: row.organizationId, productId: row.productId, quantityOnHand: Number(row.quantityOnHand), averageCost: money2(row.averageCost) } : null;
+  }
+
+  async saveStockLevel(level: StockLevel): Promise<void> {
+    const data = { quantityOnHand: level.quantityOnHand, averageCost: level.averageCost };
+    await (this.prisma as any).stockLevel.upsert({
+      where: { organizationId_productId: { organizationId: level.organizationId, productId: level.productId } },
+      create: { organizationId: level.organizationId, productId: level.productId, ...data },
+      update: data,
+    });
+  }
+}
+
+function toExpenseRecord(row: any): ExpenseRecord {
+  return { id: row.id, organizationId: row.organizationId, expenseAccountCode: row.expenseAccountCode, paymentAccountCode: row.paymentAccountCode, amount: money2(row.amount), taxAmount: money2(row.taxAmount), total: money2(row.total), description: row.description, journalEntryId: row.journalEntryId };
+}
+
+export class PrismaExpensesRepository implements ExpensesRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+  async save(record: ExpenseRecord): Promise<ExpenseRecord> {
+    const { id, ...data } = record;
+    const row = await (this.prisma as any).expense.upsert({ where: { id }, create: { id, ...data }, update: data });
+    return toExpenseRecord(row);
+  }
+  async findById(organizationId: string, expenseId: string): Promise<ExpenseRecord | null> {
+    const row = await (this.prisma as any).expense.findFirst({ where: { id: expenseId, organizationId } });
+    return row ? toExpenseRecord(row) : null;
+  }
+}
+
+function toAssetRecord(row: any): AssetRecord {
+  return { id: row.id, organizationId: row.organizationId, name: row.name, cost: money2(row.cost), residualValue: money2(row.residualValue), usefulLifeMonths: row.usefulLifeMonths, accumulatedDepreciation: money2(row.accumulatedDepreciation), acquisitionJournalEntryId: row.acquisitionJournalEntryId };
+}
+
+export class PrismaAssetsRepository implements AssetsRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+  async save(record: AssetRecord): Promise<AssetRecord> {
+    const { id, ...data } = record;
+    const row = await (this.prisma as any).asset.upsert({ where: { id }, create: { id, ...data }, update: data });
+    return toAssetRecord(row);
+  }
+  async findById(organizationId: string, assetId: string): Promise<AssetRecord | null> {
+    const row = await (this.prisma as any).asset.findFirst({ where: { id: assetId, organizationId } });
+    return row ? toAssetRecord(row) : null;
+  }
+}
+
+function toPaymentRecord(row: any): PaymentRecord {
+  return { id: row.id, organizationId: row.organizationId, type: row.type, partyId: row.partyId, amount: money2(row.amount), journalEntryId: row.journalEntryId };
+}
+
+export class PrismaPaymentsRepository implements PaymentsRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+  async save(record: PaymentRecord): Promise<PaymentRecord> {
+    const { id, ...data } = record;
+    const row = await (this.prisma as any).payment.upsert({ where: { id }, create: { id, ...data }, update: data });
+    return toPaymentRecord(row);
+  }
+  async listForCustomer(organizationId: string, customerId: string): Promise<PaymentRecord[]> {
+    const rows = await (this.prisma as any).payment.findMany({ where: { organizationId, type: "CUSTOMER", partyId: customerId }, orderBy: { createdAt: "desc" } });
+    return rows.map(toPaymentRecord);
+  }
+  async listForSupplier(organizationId: string, supplierId: string): Promise<PaymentRecord[]> {
+    const rows = await (this.prisma as any).payment.findMany({ where: { organizationId, type: "SUPPLIER", partyId: supplierId }, orderBy: { createdAt: "desc" } });
+    return rows.map(toPaymentRecord);
+  }
+}
+
+function toShiftRecord(row: any): ShiftRecord {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    terminalId: row.terminalId,
+    cashierUserId: row.cashierUserId,
+    openingCash: money2(row.openingCash),
+    cashSalesTotal: money2(row.cashSalesTotal),
+    cashReturnsTotal: money2(row.cashReturnsTotal),
+    status: row.status,
+    actualCash: row.actualCash == null ? undefined : money2(row.actualCash),
+    expectedCash: row.expectedCash == null ? undefined : money2(row.expectedCash),
+    cashDifference: row.cashDifference == null ? undefined : money2(row.cashDifference),
+  };
+}
+
+export class PrismaShiftsRepository implements ShiftsRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+  async create(record: Omit<ShiftRecord, "id">): Promise<ShiftRecord> {
+    return toShiftRecord(await (this.prisma as any).posShift.create({ data: record }));
+  }
+  async findById(organizationId: string, shiftId: string): Promise<ShiftRecord | null> {
+    const row = await (this.prisma as any).posShift.findFirst({ where: { id: shiftId, organizationId } });
+    return row ? toShiftRecord(row) : null;
+  }
+  async findOpenShiftForTerminal(organizationId: string, terminalId: string): Promise<ShiftRecord | null> {
+    const row = await (this.prisma as any).posShift.findFirst({ where: { organizationId, terminalId, status: "OPEN" }, orderBy: { openedAt: "desc" } });
+    return row ? toShiftRecord(row) : null;
+  }
+  async update(shiftId: string, patch: Partial<ShiftRecord>): Promise<ShiftRecord> {
+    const { id: _id, ...data } = patch;
+    if (data.status === "CLOSED") (data as any).closedAt = new Date();
+    return toShiftRecord(await (this.prisma as any).posShift.update({ where: { id: shiftId }, data }));
+  }
+}
+
+export class PrismaAuditSink implements AuditSink {
+  constructor(private readonly prisma: PrismaClient) {}
+  async record(entry: AuditLogEntry): Promise<void> {
+    await (this.prisma as any).auditLog.create({
+      data: {
+        action: entry.action,
+        userId: entry.userId,
+        organizationId: entry.organizationId,
+        branchId: entry.branchId,
+        entityPath: entry.entityPath,
+        requestBody: entry.requestBody == null ? null : entry.requestBody,
+        timestamp: new Date(entry.timestamp),
+        outcome: entry.outcome,
+        errorMessage: entry.errorMessage,
+      },
+    });
   }
 }
 

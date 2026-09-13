@@ -268,9 +268,9 @@
 
 **الدرس المُستخلَص (ولم يُطبَّق بالكامل بعد Sprint 34)**: إصلاح المستودعات "واحدًا واحدًا عند اكتشاف عطل" نمط فاشل. لتفادي تكراره ثالثة، هذه **القائمة الكاملة** للمزوّدات التي لا تزال مربوطة بالذاكرة فقط ولا تعمل عند تفعيل `USE_REAL_PRISMA_DB` — يجب نقلها كلها قبل اعتبار النظام جاهزًا لأي استخدام حقيقي:
 
-`BranchesRepository`, `AccountingQueryRepository`, `SalesRepository`, `InventoryRepository`, `PurchasesRepository`, `PosRepository`, `ShiftsRepository`, `AccountTypeLookup`, `GeneralLedgerRepository`, `ExpensesRepository`, `AssetsRepository`, `PaymentsRepository`, `AuditSink`.
+تم نقل `BranchesRepository` و`AccountingQueryRepository` و`SalesRepository` و`InventoryRepository` و`PurchasesRepository` و`PosRepository` و`ShiftsRepository` و`GeneralLedgerRepository` و`ExpensesRepository` و`AssetsRepository` و`PaymentsRepository` و`AuditSink` إلى Prisma. أما `AccountTypeLookup` فيقرأ من `AccountsService` الدائم ولا يخزن بيانات مستقلة.
 
-عمليًا: تسجيل الدخول والعملاء والموردون والمنتجات ودليل الحسابات تعمل على Postgres حقيقي؛ أما المبيعات وPOS والمشتريات والمخزون والتقارير فلا تزال تحتاج نقلًا (وستُظهر بيانات فارغة أو أخطاء عند تفعيل قاعدة البيانات الحقيقية).
+عمليًا: تسجيل الدخول والعملاء والموردون والمنتجات والفروع والورديات ودليل الحسابات والمبيعات وPOS والمشتريات والمخزون والمصروفات والأصول والمدفوعات والتقارير وسجل التدقيق تعمل على Postgres حقيقي.
 
 - **الإجمالي التراكمي: 28 Test Suites، 251 اختبارًا، كلها ناجحة + `tsc --noEmit` نظيف.**
 

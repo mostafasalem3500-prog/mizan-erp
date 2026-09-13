@@ -37,10 +37,9 @@ export interface AuditLogEntry {
  * @AuditAction to those handlers specifically rather than globally, since
  * logging every read would bury the entries that matter.
  *
- * The sink is injected so this interceptor is unit-testable and so the
- * real implementation can point at a Postgres `audit_logs` table (not yet
- * modeled in this Phase 0 schema — see docs/MVP_ROADMAP.md) without
- * touching this file.
+ * The sink is injected so this interceptor is unit-testable. Production
+ * writes to PostgreSQL `audit_logs`; local isolated tests can keep using
+ * the lightweight sink without changing request behavior.
  */
 export interface AuditSink {
   record(entry: AuditLogEntry): Promise<void>;

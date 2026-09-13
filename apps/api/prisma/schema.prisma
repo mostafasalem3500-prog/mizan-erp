@@ -1,8 +1,7 @@
-// Mizan ERP — Phase 0 schema
-// Scope: Security Foundation (Step 4) + Accounting Core (Step 5) ONLY.
-// Sales/Purchases/Inventory/POS/Invoice/ZATCA models are intentionally NOT
-// included yet — per docs/MVP_ROADMAP.md, no operational module is modeled
-// before the posting engine it depends on is implemented and tested.
+// Mizan ERP — production schema
+// Security, accounting core, master data, POS, and the operational documents
+// that feed automatic journal posting are persisted here. ZATCA phase-two
+// signing/clearance state remains intentionally outside this schema for now.
 
 generator client {
   provider = "prisma-client-js"
@@ -18,40 +17,48 @@ datasource db {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Organization {
-  id              String   @id @default(uuid())
-  legalNameAr     String
-  legalNameEn     String?
-  commercialName  String?
-  vatNumber       String?  @unique
-  crNumber        String?
+  id                     String   @id @default(uuid())
+  legalNameAr            String
+  legalNameEn            String?
+  commercialName         String?
+  vatNumber              String?  @unique
+  crNumber               String?
   // Sprint 34 — added to match fields OrganizationRow gained across
   // Sprint 29 (org settings) and Sprint 30 (ZATCA seller address for
   // XML generation), which schema.prisma had not been updated to carry.
-  requireShiftForPosSale Boolean @default(false)
-  streetName      String?
-  buildingNumber  String?
-  city            String?
-  postalZone      String?
-  district        String?
-  countryCode     String?
-  phone           String?
-  email           String?
-  invoiceFooter   String?
-  defaultReceiptTemplate String @default("thermal")
-  invoiceTemplateConfig Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  requireShiftForPosSale Boolean  @default(false)
+  streetName             String?
+  buildingNumber         String?
+  city                   String?
+  postalZone             String?
+  district               String?
+  countryCode            String?
+  phone                  String?
+  email                  String?
+  invoiceFooter          String?
+  defaultReceiptTemplate String   @default("thermal")
+  invoiceTemplateConfig  Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
-  branches        Branch[]
+  branches          Branch[]
   organizationUsers OrganizationUser[]
-  roles           Role[]
-  accounts        Account[]
-  fiscalYears     FiscalYear[]
-  journalEntries  JournalEntry[]
-  customers       Customer[]
-  suppliers       Supplier[]
-  products        Product[]
-  posSales        PosSale[]
+  roles             Role[]
+  accounts          Account[]
+  fiscalYears       FiscalYear[]
+  journalEntries    JournalEntry[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  products          Product[]
+  posSales          PosSale[]
+  salesInvoices     SalesInvoice[]
+  purchaseBills     PurchaseBill[]
+  expenses          Expense[]
+  assets            Asset[]
+  payments          Payment[]
+  stockLevels       StockLevel[]
+  posShifts         PosShift[]
+  auditLogs         AuditLog[]
 
   @@map("organizations")
 }
@@ -65,7 +72,7 @@ model Branch {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -95,9 +102,9 @@ model OrganizationUser {
   branchId       String?
   createdAt      DateTime @default(now())
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  user           User         @relation(fields: [userId], references: [id])
-  role           Role         @relation(fields: [roleId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  role         Role         @relation(fields: [roleId], references: [id])
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -111,9 +118,9 @@ model Role {
   isSystem       Boolean  @default(false) // seeded default roles (Owner, Accountant, Cashier, ...)
   createdAt      DateTime @default(now())
 
-  organization       Organization @relation(fields: [organizationId], references: [id])
-  organizationUsers  OrganizationUser[]
-  rolePermissions    RolePermission[]
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  organizationUsers OrganizationUser[]
+  rolePermissions   RolePermission[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -123,9 +130,9 @@ model Role {
 // Global catalog — NOT tenant-scoped (the permission "invoice.post" exists
 // once; which roles have it is tenant-scoped via RolePermission).
 model Permission {
-  id          String   @id @default(uuid())
-  code        String   @unique // e.g. "invoice.post", "pos.overrideDiscount"
-  module      String   // e.g. "invoice", "pos", "journal"
+  id          String  @id @default(uuid())
+  code        String  @unique // e.g. "invoice.post", "pos.overrideDiscount"
+  module      String // e.g. "invoice", "pos", "journal"
   description String?
 
   rolePermissions RolePermission[]
@@ -171,10 +178,10 @@ model Account {
   isActive       Boolean     @default(true)
   currency       String      @default("SAR")
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  parent         Account?     @relation("AccountTree", fields: [parentId], references: [id])
-  children       Account[]    @relation("AccountTree")
-  journalLines   JournalEntryLine[]
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  parent       Account?           @relation("AccountTree", fields: [parentId], references: [id])
+  children     Account[]          @relation("AccountTree")
+  journalLines JournalEntryLine[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -182,15 +189,9 @@ model Account {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// MASTER DATA (Sprint 35) — the first models beyond Security Foundation +
-// Accounting Core, added as the starting point for moving the operational
-// layer (Sales/Purchases/Inventory/POS) to real Prisma. These three are
-// simple, non-transactional entities with no posting logic of their own —
-// a deliberately low-risk starting point before the more complex
-// transactional models (SalesInvoice, PurchaseBill, PosSale) that
-// reference them. Field names match CustomerRow/SupplierRow/ProductRow in
-// their respective services exactly, so the eventual Prisma repositories
-// need no field-name translation layer.
+// MASTER AND OPERATIONAL DATA
+// Field names intentionally match the service-layer records so Prisma
+// repositories remain thin persistence adapters rather than a second domain.
 // ─────────────────────────────────────────────────────────────────────────
 
 model Customer {
@@ -208,33 +209,34 @@ model Customer {
   district       String?
   countryCode    String? @default("SA")
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  posSales       PosSale[]
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  posSales      PosSale[]
+  salesInvoices SalesInvoice[]
 
   @@index([organizationId])
   @@map("customers")
 }
 
 model PosSale {
-  id                  String   @id
-  organizationId      String
-  customerId          String?
-  invoiceNumber       String
-  terminalId          String
-  periodId            String
-  lines               Json
-  tenders             Json
-  subtotal            Decimal  @db.Decimal(18, 4)
-  taxTotal            Decimal  @db.Decimal(18, 4)
-  total               Decimal  @db.Decimal(18, 4)
-  saleJournalEntryId  String
-  inventoryEffects    Json
-  remainingQuantities Json
-  status              String
-  shiftId             String?
-  receiptTemplate     String   @default("thermal")
+  id                      String   @id
+  organizationId          String
+  customerId              String?
+  invoiceNumber           String
+  terminalId              String
+  periodId                String
+  lines                   Json
+  tenders                 Json
+  subtotal                Decimal  @db.Decimal(18, 4)
+  taxTotal                Decimal  @db.Decimal(18, 4)
+  total                   Decimal  @db.Decimal(18, 4)
+  saleJournalEntryId      String
+  inventoryEffects        Json
+  remainingQuantities     Json
+  status                  String
+  shiftId                 String?
+  receiptTemplate         String   @default("thermal")
   invoiceTemplateSnapshot Json?
-  soldAt              DateTime @default(now())
+  soldAt                  DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
   customer     Customer?    @relation(fields: [customerId], references: [id])
@@ -245,6 +247,26 @@ model PosSale {
   @@map("pos_sales")
 }
 
+model SalesInvoice {
+  id             String   @id
+  organizationId String
+  customerId     String
+  lines          Json
+  subtotal       Decimal  @db.Decimal(18, 4)
+  taxTotal       Decimal  @db.Decimal(18, 4)
+  total          Decimal  @db.Decimal(18, 4)
+  paidAmount     Decimal  @default(0) @db.Decimal(18, 4)
+  journalEntryId String   @unique
+  issueDate      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer     @relation(fields: [customerId], references: [id])
+
+  @@index([organizationId, issueDate])
+  @@index([organizationId, customerId])
+  @@map("sales_invoices")
+}
+
 model Supplier {
   id             String  @id @default(uuid())
   organizationId String
@@ -253,7 +275,8 @@ model Supplier {
   phone          String?
   email          String?
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  purchaseBills PurchaseBill[]
 
   @@index([organizationId])
   @@map("suppliers")
@@ -268,11 +291,138 @@ model Product {
   sellingPrice   Decimal @db.Decimal(18, 4)
   taxCode        String // "STANDARD" | "ZERO" | "EXEMPT" | "OUT_OF_SCOPE" — kept as a plain string, not a Prisma enum, matching the TS union already used in ProductRow (see products.service.ts) rather than introducing a second source of truth for this list
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  stockLevels  StockLevel[]
 
   @@unique([organizationId, sku])
   @@index([organizationId])
   @@map("products")
+}
+
+model PurchaseBill {
+  id             String   @id
+  organizationId String
+  supplierId     String
+  lines          Json
+  subtotal       Decimal  @db.Decimal(18, 4)
+  taxTotal       Decimal  @db.Decimal(18, 4)
+  total          Decimal  @db.Decimal(18, 4)
+  paidAmount     Decimal  @default(0) @db.Decimal(18, 4)
+  journalEntryId String   @unique
+  issueDate      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  supplier     Supplier     @relation(fields: [supplierId], references: [id])
+
+  @@index([organizationId, issueDate])
+  @@index([organizationId, supplierId])
+  @@map("purchase_bills")
+}
+
+model Expense {
+  id                 String   @id
+  organizationId     String
+  expenseAccountCode String
+  paymentAccountCode String
+  amount             Decimal  @db.Decimal(18, 4)
+  taxAmount          Decimal  @db.Decimal(18, 4)
+  total              Decimal  @db.Decimal(18, 4)
+  description        String
+  journalEntryId     String   @unique
+  createdAt          DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@map("expenses")
+}
+
+model Asset {
+  id                        String   @id
+  organizationId            String
+  name                      String
+  cost                      Decimal  @db.Decimal(18, 4)
+  residualValue             Decimal  @db.Decimal(18, 4)
+  usefulLifeMonths          Int
+  accumulatedDepreciation   Decimal  @default(0) @db.Decimal(18, 4)
+  acquisitionJournalEntryId String   @unique
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("assets")
+}
+
+model Payment {
+  id             String   @id
+  organizationId String
+  type           String
+  partyId        String
+  amount         Decimal  @db.Decimal(18, 4)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, type, partyId])
+  @@map("payments")
+}
+
+model StockLevel {
+  organizationId String
+  productId      String
+  quantityOnHand Decimal  @default(0) @db.Decimal(18, 4)
+  averageCost    Decimal  @default(0) @db.Decimal(18, 4)
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@id([organizationId, productId])
+  @@index([productId])
+  @@map("stock_levels")
+}
+
+model PosShift {
+  id               String    @id @default(uuid())
+  organizationId   String
+  terminalId       String
+  cashierUserId    String
+  openingCash      Decimal   @db.Decimal(18, 4)
+  cashSalesTotal   Decimal   @default(0) @db.Decimal(18, 4)
+  cashReturnsTotal Decimal   @default(0) @db.Decimal(18, 4)
+  status           String
+  actualCash       Decimal?  @db.Decimal(18, 4)
+  expectedCash     Decimal?  @db.Decimal(18, 4)
+  cashDifference   Decimal?  @db.Decimal(18, 4)
+  openedAt         DateTime  @default(now())
+  closedAt         DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, terminalId, status])
+  @@map("pos_shifts")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String?
+  userId         String?
+  branchId       String?
+  action         String
+  entityPath     String
+  requestBody    Json?
+  outcome        String
+  errorMessage   String?
+  timestamp      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, timestamp])
+  @@index([action, timestamp])
+  @@map("audit_logs")
 }
 
 enum PeriodStatus {
@@ -283,14 +433,14 @@ enum PeriodStatus {
 }
 
 model FiscalYear {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   startDate      DateTime
   endDate        DateTime
   status         PeriodStatus @default(OPEN)
 
-  organization   Organization      @relation(fields: [organizationId], references: [id])
-  periods        AccountingPeriod[]
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  periods      AccountingPeriod[]
 
   @@index([organizationId])
   @@map("fiscal_years")
@@ -303,7 +453,7 @@ model AccountingPeriod {
   endDate      DateTime
   status       PeriodStatus @default(OPEN)
 
-  fiscalYear   FiscalYear     @relation(fields: [fiscalYearId], references: [id])
+  fiscalYear     FiscalYear     @relation(fields: [fiscalYearId], references: [id])
   journalEntries JournalEntry[]
 
   @@index([fiscalYearId])
@@ -337,15 +487,15 @@ model JournalEntry {
   branchId       String?
   periodId       String
   sourceEvent    JournalSourceEvent
-  sourceDocId    String?            // e.g. invoice_documents.id, pos_sales.id — no FK yet, those tables don't exist in Phase 0
+  sourceDocId    String? // e.g. invoice_documents.id, pos_sales.id — no FK yet, those tables don't exist in Phase 0
   reference      String?
   postedAt       DateTime           @default(now())
   reversedById   String?            @unique // points to the reversing JournalEntry, if any
   isReversal     Boolean            @default(false)
 
-  organization   Organization      @relation(fields: [organizationId], references: [id])
-  period         AccountingPeriod  @relation(fields: [periodId], references: [id])
-  lines          JournalEntryLine[]
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  period       AccountingPeriod   @relation(fields: [periodId], references: [id])
+  lines        JournalEntryLine[]
 
   @@index([organizationId])
   @@index([periodId])
@@ -369,16 +519,16 @@ model IdempotencyKey {
 }
 
 model JournalEntryLine {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   journalEntryId String
   accountId      String
-  debit          Decimal  @default(0) @db.Decimal(18, 4)
-  credit         Decimal  @default(0) @db.Decimal(18, 4)
+  debit          Decimal @default(0) @db.Decimal(18, 4)
+  credit         Decimal @default(0) @db.Decimal(18, 4)
   costCenterId   String?
   description    String?
 
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id])
-  account        Account      @relation(fields: [accountId], references: [id])
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
