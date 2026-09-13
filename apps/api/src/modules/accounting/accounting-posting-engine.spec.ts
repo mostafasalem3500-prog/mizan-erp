@@ -150,6 +150,21 @@ describe("AccountingPostingEngine — mandatory invariants (band 114)", () => {
     ).rejects.toThrow(ClosedPeriodError);
   });
 
+  test("allows only the system period-closing entry in a SOFT_CLOSED period", async () => {
+    const prisma = makePrismaMock({ period: { id: "period-1", status: "SOFT_CLOSED" } });
+    prismaTx = prisma;
+    const engine = new AccountingPostingEngine(prisma);
+
+    await expect(engine.post({
+      organizationId: "org-1", periodId: "period-1", sourceEvent: "PERIOD_CLOSED",
+      lines: [{ accountId: "sales", debit: "100" }, { accountId: "retained", credit: "100" }],
+    })).resolves.toBeDefined();
+    await expect(engine.post({
+      organizationId: "org-1", periodId: "period-1", sourceEvent: "MANUAL_JOURNAL_POSTED",
+      lines: [{ accountId: "cash", debit: "1" }, { accountId: "sales", credit: "1" }],
+    })).rejects.toThrow(ClosedPeriodError);
+  });
+
   test("reverse() creates a counter-entry instead of mutating the original", async () => {
     const prisma = makePrismaMock();
     prismaTx = prisma;
@@ -171,6 +186,18 @@ describe("AccountingPostingEngine — mandatory invariants (band 114)", () => {
     expect(reversal.lines[0]).toMatchObject({ accountId: "cash", credit: 50, debit: 0 });
     // original row itself was never deleted/edited except to link reversedById
     expect(original.reversedById).toBeUndefined(); // pre-update snapshot — immutability of the fetched object
+  });
+
+  test("blocks reversal into a closed accounting period", async () => {
+    const prisma = makePrismaMock();
+    prismaTx = prisma;
+    const engine = new AccountingPostingEngine(prisma);
+    const original = await engine.post({
+      organizationId: "org-1", periodId: "period-1", sourceEvent: "MANUAL_JOURNAL_POSTED",
+      lines: [{ accountId: "cash", debit: 10 }, { accountId: "sales", credit: 10 }],
+    });
+    prisma.__state.period.status = "CLOSED";
+    await expect(engine.reverse(original.id, "late correction")).rejects.toThrow(ClosedPeriodError);
   });
 
   test("refuses to reverse the same entry twice", async () => {

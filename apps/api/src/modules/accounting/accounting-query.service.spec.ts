@@ -1,8 +1,17 @@
 import { AccountingQueryService, AccountingQueryRepository } from "./accounting-query.service";
 
 describe("AccountingQueryService — Trial Balance", () => {
+  test("exposes persisted journal summaries from the repository", async () => {
+    const entries = [{ id: "je-1", sourceEvent: "POS_SALE_COMPLETED", postedAt: "2026-09-13T10:00:00Z", isReversal: false, totalDebit: "115.0000", totalCredit: "115.0000" }];
+    const repo: AccountingQueryRepository = {
+      getTrialBalanceForPeriod: jest.fn().mockResolvedValue([]),
+      listJournalEntriesForPeriod: jest.fn().mockResolvedValue(entries),
+    };
+    await expect(new AccountingQueryService(repo).listJournalEntries("org-1", "p1")).resolves.toEqual(entries);
+  });
   test("sums debit and credit across accounts and reports balanced when they match", async () => {
     const repo: AccountingQueryRepository = {
+      listJournalEntriesForPeriod: jest.fn().mockResolvedValue([]),
       getTrialBalanceForPeriod: jest.fn().mockResolvedValue([
         { accountId: "cash", accountCode: "1100", accountName: "Cash", totalDebit: "1150.00", totalCredit: "0.00" },
         { accountId: "sales", accountCode: "4100", accountName: "Sales", totalDebit: "0.00", totalCredit: "1000.00" },
@@ -21,6 +30,7 @@ describe("AccountingQueryService — Trial Balance", () => {
 
   test("flags isBalanced=false without throwing when totals genuinely disagree (e.g. data corruption)", async () => {
     const repo: AccountingQueryRepository = {
+      listJournalEntriesForPeriod: jest.fn().mockResolvedValue([]),
       getTrialBalanceForPeriod: jest.fn().mockResolvedValue([
         { accountId: "cash", accountCode: "1100", accountName: "Cash", totalDebit: "100.00", totalCredit: "0.00" },
         { accountId: "sales", accountCode: "4100", accountName: "Sales", totalDebit: "0.00", totalCredit: "90.00" },
@@ -41,6 +51,7 @@ describe("AccountingQueryService — Trial Balance", () => {
       totalCredit: "0.00",
     }));
     const repo: AccountingQueryRepository = {
+      listJournalEntriesForPeriod: jest.fn().mockResolvedValue([]),
       getTrialBalanceForPeriod: jest.fn().mockResolvedValue(lines),
     };
     const service = new AccountingQueryService(repo);

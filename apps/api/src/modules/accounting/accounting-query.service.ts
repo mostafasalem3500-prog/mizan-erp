@@ -25,6 +25,19 @@ export interface AccountingQueryRepository {
    * not something this service re-derives from raw rows.
    */
   getTrialBalanceForPeriod(organizationId: string, periodId: string): Promise<TrialBalanceLine[]>;
+  listJournalEntriesForPeriod(organizationId: string, periodId: string): Promise<JournalEntrySummary[]>;
+}
+
+export interface JournalEntrySummary {
+  id: string;
+  sourceEvent: string;
+  sourceDocId?: string;
+  reference?: string;
+  postedAt: string;
+  isReversal: boolean;
+  reversedById?: string;
+  totalDebit: string;
+  totalCredit: string;
 }
 
 export interface TrialBalanceResult {
@@ -59,6 +72,10 @@ export class AccountingQueryService {
       // itself, not a substitute for that invariant.
       isBalanced: totalDebitCents === totalCreditCents,
     };
+  }
+
+  async listJournalEntries(organizationId: string, periodId: string): Promise<JournalEntrySummary[]> {
+    return this.repo.listJournalEntriesForPeriod(organizationId, periodId);
   }
 }
 

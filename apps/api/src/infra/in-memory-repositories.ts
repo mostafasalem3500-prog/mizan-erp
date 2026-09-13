@@ -31,10 +31,10 @@ import type { AssetsRepository, AssetRecord } from "../modules/assets/assets.ser
 import type { PaymentsRepository, PaymentRecord } from "../modules/payments/payments.service";
 import type { AccountTypeLookup, AccountType, GeneralLedgerRepository, LedgerLineRow } from "../modules/reporting/reporting.service";
 import type { AccountsRepository, AccountRow } from "../modules/accounts/accounts.service";
-import type { PeriodsRepository, PeriodRow, CreatePeriodInput } from "../modules/periods/periods.service";
+import type { PeriodsRepository, PeriodRow, CreatePeriodInput, PeriodStatus } from "../modules/periods/periods.service";
 import { AccountsService } from "../modules/accounts/accounts.service";
 import type { RolePermissionLookup } from "../modules/common/permissions.guard";
-import type { AccountingQueryRepository, TrialBalanceLine } from "../modules/accounting/accounting-query.service";
+import type { AccountingQueryRepository, JournalEntrySummary, TrialBalanceLine } from "../modules/accounting/accounting-query.service";
 import type {
   PrismaClientLike,
   JournalSourceEvent,
@@ -356,6 +356,26 @@ export class InMemoryAccountingQueryRepository implements AccountingQueryReposit
     }
     return lines;
   }
+
+  async listJournalEntriesForPeriod(organizationId: string, periodId: string): Promise<JournalEntrySummary[]> {
+    return [...this.db.journalEntries.values()]
+      .filter((entry) => entry.organizationId === organizationId && entry.periodId === periodId)
+      .map((entry) => ({
+        id: entry.id,
+        sourceEvent: entry.sourceEvent,
+        sourceDocId: entry.sourceDocId,
+        reference: entry.reference,
+        postedAt: "",
+        isReversal: entry.isReversal,
+        reversedById: entry.reversedById,
+        totalDebit: sumJournalSide(entry.lines, "debit"),
+        totalCredit: sumJournalSide(entry.lines, "credit"),
+      }));
+  }
+}
+
+function sumJournalSide(lines: StoredLine[], side: "debit" | "credit"): string {
+  return fromCents(lines.reduce((sum, line) => sum + toCents(line[side]), 0n));
 }
 
 /** Implements PrismaClientLike (the subset AccountingPostingEngine needs) over the in-memory store. */
@@ -645,6 +665,18 @@ export class InMemoryPeriodsRepository implements PeriodsRepository {
     const id = randomUUID();
     const row = { id, organizationId: input.organizationId, status: "OPEN" as const, startDate: input.startDate, endDate: input.endDate };
     this.db.periods.set(id, row);
+    return { ...row };
+  }
+
+  async findById(organizationId: string, periodId: string): Promise<PeriodRow | null> {
+    const row = this.db.periods.get(periodId);
+    return row && row.organizationId === organizationId ? { ...row } : null;
+  }
+
+  async updateStatus(organizationId: string, periodId: string, status: PeriodStatus): Promise<PeriodRow> {
+    const row = this.db.periods.get(periodId);
+    if (!row || row.organizationId !== organizationId) throw new Error(`Accounting period ${periodId} not found`);
+    row.status = status;
     return { ...row };
   }
 }

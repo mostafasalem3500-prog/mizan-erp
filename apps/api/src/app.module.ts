@@ -76,7 +76,7 @@ import {
   InMemoryAccountingQueryRepository,
   InMemoryPrismaClient,
 } from "./infra/in-memory-repositories";
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository, PrismaPosRepository } from "./infra/prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaCustomersRepository, PrismaSuppliersRepository, PrismaProductsRepository, PrismaPosRepository, PrismaAccountingQueryRepository, PrismaGeneralLedgerRepository } from "./infra/prisma-repositories";
 
 /** Logs to stdout — the Phase 0 stand-in for a real `audit_logs` table writer. */
 class ConsoleAuditSink implements AuditSink {
@@ -172,7 +172,7 @@ class ConsoleAuditSink implements AuditSink {
     },
     { provide: AccountingPostingEngine, useFactory: (prisma: any) => new AccountingPostingEngine(prisma), inject: ["PrismaClientLike"] },
 
-    { provide: "AccountingQueryRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService) => new InMemoryAccountingQueryRepository(db, accounts), inject: [InMemoryDatabase, AccountsService] },
+    { provide: "AccountingQueryRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService, realPrisma: any) => realPrisma ? new PrismaAccountingQueryRepository(realPrisma) : new InMemoryAccountingQueryRepository(db, accounts), inject: [InMemoryDatabase, AccountsService, "RealPrismaClientOrNull"] },
     { provide: AccountingQueryService, useFactory: (repo: any) => new AccountingQueryService(repo), inject: ["AccountingQueryRepository"] },
 
     {
@@ -243,7 +243,7 @@ class ConsoleAuditSink implements AuditSink {
     { provide: ShiftsService, useFactory: (repo: any) => new ShiftsService(repo), inject: ["ShiftsRepository"] },
 
     { provide: "AccountTypeLookup", useFactory: (accounts: AccountsService) => new InMemoryAccountTypeLookup(accounts), inject: [AccountsService] },
-    { provide: "GeneralLedgerRepository", useFactory: (db: InMemoryDatabase) => new InMemoryGeneralLedgerRepository(db), inject: [InMemoryDatabase] },
+    { provide: "GeneralLedgerRepository", useFactory: (db: InMemoryDatabase, realPrisma: any) => realPrisma ? new PrismaGeneralLedgerRepository(realPrisma) : new InMemoryGeneralLedgerRepository(db), inject: [InMemoryDatabase, "RealPrismaClientOrNull"] },
     {
       provide: ReportingService,
       useFactory: (accQuery: AccountingQueryService, typeLookup: any, ledgerRepo: any, accounts: AccountsService) =>
@@ -298,7 +298,11 @@ class ConsoleAuditSink implements AuditSink {
         realPrisma ? new PrismaPeriodsRepository(realPrisma) : new InMemoryPeriodsRepository(db),
       inject: [InMemoryDatabase, "RealPrismaClientOrNull"],
     },
-    { provide: PeriodsService, useFactory: (repo: any) => new PeriodsService(repo), inject: ["PeriodsRepository"] },
+    {
+      provide: PeriodsService,
+      useFactory: (repo: any, query: AccountingQueryService, accounts: AccountsService, engine: AccountingPostingEngine) => new PeriodsService(repo, query, accounts, engine),
+      inject: ["PeriodsRepository", AccountingQueryService, AccountsService, AccountingPostingEngine],
+    },
 
     {
       provide: ReceiptsService,

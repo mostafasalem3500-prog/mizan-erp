@@ -55,4 +55,13 @@ export class AccountingController {
   ) {
     return this.queryService.getTrialBalance(organizationId, periodId);
   }
+
+  @Get("periods/:periodId/journal-entries")
+  @RequirePermissions("reports.pnl.view")
+  async listJournalEntries(
+    @Param("organizationId") organizationId: string,
+    @Param("periodId") periodId: string,
+  ) {
+    return this.queryService.listJournalEntries(organizationId, periodId);
+  }
 }

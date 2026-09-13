@@ -326,6 +326,7 @@ enum JournalSourceEvent {
   ASSET_ACQUIRED
   ASSET_DEPRECIATED
   BANK_TRANSFER
+  PERIOD_CLOSED
 }
 
 // Written ONLY by the AccountingPostingEngine. No other module writes here

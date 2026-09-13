@@ -63,6 +63,7 @@ const DEFAULT_COA: Array<{ code: string; nameAr: string; nameEn: string; type: A
   { code: "2200", nameAr: "ضريبة القيمة المضافة - مخرجات", nameEn: "VAT Output", type: "LIABILITY", parentCode: "2000", isPostable: true },
   { code: "3000", nameAr: "حقوق الملكية", nameEn: "Equity", type: "EQUITY", isPostable: false },
   { code: "3100", nameAr: "رصيد افتتاحي", nameEn: "Opening Balance Equity", type: "EQUITY", parentCode: "3000", isPostable: true },
+  { code: "3200", nameAr: "الأرباح المبقاة", nameEn: "Retained Earnings", type: "EQUITY", parentCode: "3000", isPostable: true },
   { code: "4000", nameAr: "الإيرادات", nameEn: "Revenue", type: "REVENUE", isPostable: false },
   { code: "4100", nameAr: "المبيعات", nameEn: "Sales", type: "REVENUE", parentCode: "4000", isPostable: true },
   { code: "4200", nameAr: "مردودات المبيعات", nameEn: "Sales Returns", type: "REVENUE", parentCode: "4000", isPostable: true },

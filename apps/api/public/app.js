@@ -123,6 +123,7 @@ function showView(name) {
     assets: "الأصول الثابتة",
     reports: "التقارير",
     accounts: "دليل الحسابات",
+    "accounting-cycle": "الدورة المحاسبية",
     settings: "إعدادات المنشأة",
   };
   document.getElementById("view-title").textContent = titles[name];
@@ -134,6 +135,7 @@ function showView(name) {
   if (name === "shift") loadShiftView();
   if (name === "returns") loadReturnsView();
   if (name === "reports") loadReports();
+  if (name === "accounting-cycle") loadAccountingCycle();
   if (name === "inventory") loadInventoryView();
   if (name === "purchases") loadPurchasesView();
   if (name === "pos-invoices") loadPosInvoices();
@@ -576,6 +578,103 @@ document.getElementById("asset-form").addEventListener("submit", async (e) => {
   } catch (err) {
     resultEl.style.color = "#A3432F";
     resultEl.textContent = "فشل الاقتناء: " + err.message;
+  }
+});
+
+// ---------- الدورة المحاسبية ----------
+const JOURNAL_SOURCE_LABELS = {
+  MANUAL_JOURNAL_POSTED: "قيد يدوي",
+  SALE_INVOICE_POSTED: "فاتورة مبيعات",
+  POS_SALE_COMPLETED: "بيع نقطة بيع",
+  POS_RETURN_COMPLETED: "مرتجع نقطة بيع",
+  PURCHASE_BILL_POSTED: "فاتورة مشتريات",
+  PURCHASE_RETURN_COMPLETED: "مرتجع مشتريات",
+  PAYMENT_RECEIVED: "سند قبض",
+  PAYMENT_PAID: "سند صرف",
+  EXPENSE_POSTED: "مصروف",
+  INVENTORY_RECEIVED: "استلام مخزون",
+  INVENTORY_ISSUED: "صرف مخزون",
+  STOCK_ADJUSTED: "تسوية مخزون",
+  ASSET_ACQUIRED: "اقتناء أصل",
+  ASSET_DEPRECIATED: "إهلاك أصل",
+  BANK_TRANSFER: "تحويل بنكي",
+  PERIOD_CLOSED: "إقفال الفترة",
+};
+
+const PERIOD_STATUS_LABELS = { OPEN: "مفتوحة", SOFT_CLOSED: "مقفلة مرحليًا", CLOSED: "مقفلة نهائيًا", LOCKED: "مقفلة نظاميًا" };
+
+async function loadAccountingCycle(preferredPeriodId) {
+  const periods = await api(`/api/v1/organizations/${state.orgId}/periods`);
+  const select = document.getElementById("cycle-period");
+  const selected = preferredPeriodId || select.value || state.periodId || periods.find((period) => period.status === "OPEN")?.id || periods[0]?.id;
+  select.innerHTML = periods.map((period) => `<option value="${escapeHtml(period.id)}">${new Date(period.startDate).toLocaleDateString("ar-SA")} — ${new Date(period.endDate).toLocaleDateString("ar-SA")} · ${PERIOD_STATUS_LABELS[period.status] || period.status}</option>`).join("");
+  if (!selected) return;
+  select.value = selected;
+  await loadAccountingPeriod(selected, periods.find((period) => period.id === selected));
+}
+
+async function loadAccountingPeriod(periodId, period) {
+  const [trial, pnl, entries] = await Promise.all([
+    api(`/api/v1/organizations/${state.orgId}/accounting/periods/${periodId}/trial-balance`),
+    api(`/api/v1/organizations/${state.orgId}/reports/periods/${periodId}/profit-and-loss`),
+    api(`/api/v1/organizations/${state.orgId}/accounting/periods/${periodId}/journal-entries`),
+  ]);
+  const status = period?.status || "OPEN";
+  document.getElementById("cycle-status").textContent = PERIOD_STATUS_LABELS[status] || status;
+  document.getElementById("cycle-status").dataset.status = status;
+  document.getElementById("cycle-debit").textContent = `${Number(trial.totalDebit).toFixed(2)} ر.س`;
+  document.getElementById("cycle-credit").textContent = `${Number(trial.totalCredit).toFixed(2)} ر.س`;
+  document.getElementById("cycle-net-income").textContent = `${Number(pnl.netIncome).toFixed(2)} ر.س`;
+  document.getElementById("cycle-balanced").textContent = trial.isBalanced ? "متوازن ✓" : "غير متوازن";
+
+  document.getElementById("cycle-trial-body").innerHTML = trial.lines.length ? trial.lines
+    .sort((a, b) => a.accountCode.localeCompare(b.accountCode))
+    .map((line) => {
+      const balance = Number(line.totalDebit) - Number(line.totalCredit);
+      return `<tr><td class="num">${escapeHtml(line.accountCode)}</td><td>${escapeHtml(line.accountName)}</td><td class="num">${Number(line.totalDebit).toFixed(2)}</td><td class="num">${Number(line.totalCredit).toFixed(2)}</td><td class="num">${balance.toFixed(2)}</td></tr>`;
+    }).join("") : '<tr><td colspan="5" class="empty-cell">لا توجد قيود في هذه الفترة بعد.</td></tr>';
+
+  document.getElementById("cycle-entry-count").textContent = `${entries.length} قيد`;
+  document.getElementById("cycle-journal-body").innerHTML = entries.length ? entries.map((entry) => `<tr>
+    <td>${entry.postedAt ? new Date(entry.postedAt).toLocaleString("ar-SA") : "—"}</td>
+    <td><span class="source-badge">${escapeHtml(JOURNAL_SOURCE_LABELS[entry.sourceEvent] || entry.sourceEvent)}</span></td>
+    <td>${escapeHtml(entry.reference || entry.sourceDocId || "—")}</td>
+    <td class="num">${Number(entry.totalDebit).toFixed(2)}</td><td class="num">${Number(entry.totalCredit).toFixed(2)}</td>
+    <td>${entry.isReversal ? '<span class="status-reversed">قيد عكسي</span>' : entry.reversedById ? '<span class="status-reversed">تم عكسه</span>' : '<span class="status-posted">مرحّل</span>'}</td>
+  </tr>`).join("") : '<tr><td colspan="6" class="empty-cell">لا توجد قيود في هذه الفترة بعد.</td></tr>';
+
+  document.getElementById("cycle-soft-close").hidden = status !== "OPEN";
+  document.getElementById("cycle-reopen").hidden = status !== "SOFT_CLOSED";
+  document.getElementById("cycle-final-close").hidden = !["OPEN", "SOFT_CLOSED"].includes(status);
+}
+
+document.getElementById("cycle-period").addEventListener("change", (event) => loadAccountingCycle(event.target.value));
+
+async function runPeriodAction(action, successMessage) {
+  const result = document.getElementById("cycle-result");
+  const periodId = document.getElementById("cycle-period").value;
+  result.textContent = "جارٍ تنفيذ العملية المحاسبية…";
+  try {
+    await api(`/api/v1/organizations/${state.orgId}/periods/${periodId}/${action}`, { method: "POST", body: "{}" });
+    result.style.color = "#168a61";
+    result.textContent = successMessage;
+    if (action === "close" && state.periodId === periodId) {
+      state.periodId = null;
+      localStorage.removeItem("mizan_period_" + state.orgId);
+    }
+    await loadAccountingCycle(periodId);
+    await loadDashboard();
+  } catch (err) {
+    result.style.color = "#b54837";
+    result.textContent = "تعذّر تنفيذ العملية: " + err.message;
+  }
+}
+
+document.getElementById("cycle-soft-close").addEventListener("click", () => runPeriodAction("soft-close", "تم الإقفال المرحلي؛ أُوقف الترحيل على الفترة حتى إعادة فتحها أو إقفالها نهائيًا."));
+document.getElementById("cycle-reopen").addEventListener("click", () => runPeriodAction("reopen", "أُعيد فتح الفترة وأصبح الترحيل متاحًا."));
+document.getElementById("cycle-final-close").addEventListener("click", () => {
+  if (window.confirm("سيُنشأ قيد إقفال نهائي وتُرحّل نتيجة الفترة إلى الأرباح المبقاة، ولن يقبل النظام قيودًا جديدة عليها. هل تريد المتابعة؟")) {
+    runPeriodAction("close", "تم الإقفال النهائي وإنشاء قيد الإقفال وترحيل نتيجة الفترة إلى الأرباح المبقاة.");
   }
 });
 

@@ -20,7 +20,9 @@ import type {
   OrganizationRow,
   CreateOrganizationResult,
 } from "../modules/organizations/organizations.service";
-import type { PeriodsRepository, PeriodRow, CreatePeriodInput } from "../modules/periods/periods.service";
+import type { PeriodsRepository, PeriodRow, CreatePeriodInput, PeriodStatus } from "../modules/periods/periods.service";
+import type { AccountingQueryRepository, JournalEntrySummary, TrialBalanceLine } from "../modules/accounting/accounting-query.service";
+import type { GeneralLedgerRepository, LedgerLineRow } from "../modules/reporting/reporting.service";
 import type { AuthUserLookup, UserCredentialsRow, OrganizationMembershipRow } from "../modules/auth/auth.service";
 import type { CustomersRepository, CustomerRow, CreateCustomerInput } from "../modules/customers/customers.service";
 import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../modules/suppliers/suppliers.service";
@@ -257,6 +259,110 @@ export class PrismaPeriodsRepository implements PeriodsRepository {
       startDate: input.startDate,
       endDate: input.endDate,
     };
+  }
+
+  async findById(organizationId: string, periodId: string): Promise<PeriodRow | null> {
+    const row = await (this.prisma as any).accountingPeriod.findUnique({
+      where: { id: periodId },
+      include: { fiscalYear: true },
+    });
+    if (!row || row.fiscalYear.organizationId !== organizationId) return null;
+    return {
+      id: row.id,
+      organizationId,
+      status: row.status,
+      startDate: row.startDate.toISOString(),
+      endDate: row.endDate.toISOString(),
+    };
+  }
+
+  async updateStatus(organizationId: string, periodId: string, status: PeriodStatus): Promise<PeriodRow> {
+    const existing = await this.findById(organizationId, periodId);
+    if (!existing) throw new Error(`Accounting period ${periodId} not found for organization ${organizationId}`);
+    const row = await (this.prisma as any).accountingPeriod.update({ where: { id: periodId }, data: { status } });
+    return { ...existing, status: row.status };
+  }
+}
+
+function decimalString(value: any): string {
+  return value?.toFixed?.(4) ?? Number(value ?? 0).toFixed(4);
+}
+
+function decimalScaled(value: any): bigint {
+  const stringValue = decimalString(value);
+  const [whole, fraction = ""] = stringValue.split(".");
+  const sign = whole.startsWith("-") ? -1n : 1n;
+  return sign * (BigInt(whole.replace("-", "") || "0") * 10000n + BigInt((fraction + "0000").slice(0, 4)));
+}
+
+function scaledString(value: bigint): string {
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  return `${negative ? "-" : ""}${absolute / 10000n}.${(absolute % 10000n).toString().padStart(4, "0")}`;
+}
+
+export class PrismaAccountingQueryRepository implements AccountingQueryRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getTrialBalanceForPeriod(organizationId: string, periodId: string): Promise<TrialBalanceLine[]> {
+    const grouped = await (this.prisma as any).journalEntryLine.groupBy({
+      by: ["accountId"],
+      where: { journalEntry: { organizationId, periodId } },
+      _sum: { debit: true, credit: true },
+    });
+    const accounts = await (this.prisma as any).account.findMany({
+      where: { organizationId, id: { in: grouped.map((row: any) => row.accountId) } },
+    });
+    const byId = new Map(accounts.map((account: any) => [account.id, account]));
+    return grouped.map((row: any) => {
+      const account: any = byId.get(row.accountId);
+      return {
+        accountId: row.accountId,
+        accountCode: account?.code ?? row.accountId,
+        accountName: account?.nameAr ?? account?.nameEn ?? row.accountId,
+        totalDebit: decimalString(row._sum.debit),
+        totalCredit: decimalString(row._sum.credit),
+      };
+    });
+  }
+
+  async listJournalEntriesForPeriod(organizationId: string, periodId: string): Promise<JournalEntrySummary[]> {
+    const entries = await (this.prisma as any).journalEntry.findMany({
+      where: { organizationId, periodId },
+      include: { lines: { select: { debit: true, credit: true } } },
+      orderBy: { postedAt: "desc" },
+      take: 250,
+    });
+    return entries.map((entry: any) => ({
+      id: entry.id,
+      sourceEvent: entry.sourceEvent,
+      sourceDocId: entry.sourceDocId ?? undefined,
+      reference: entry.reference ?? undefined,
+      postedAt: entry.postedAt.toISOString(),
+      isReversal: entry.isReversal,
+      reversedById: entry.reversedById ?? undefined,
+      totalDebit: scaledString(entry.lines.reduce((sum: bigint, line: any) => sum + decimalScaled(line.debit), 0n)),
+      totalCredit: scaledString(entry.lines.reduce((sum: bigint, line: any) => sum + decimalScaled(line.credit), 0n)),
+    }));
+  }
+}
+
+export class PrismaGeneralLedgerRepository implements GeneralLedgerRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async getLedgerLines(organizationId: string, periodId: string, accountId: string): Promise<LedgerLineRow[]> {
+    const lines = await (this.prisma as any).journalEntryLine.findMany({
+      where: { accountId, journalEntry: { organizationId, periodId } },
+      include: { journalEntry: true },
+      orderBy: { journalEntry: { postedAt: "asc" } },
+    });
+    return lines.map((line: any) => ({
+      journalEntryId: line.journalEntryId,
+      sourceEvent: line.journalEntry.sourceEvent,
+      reference: line.journalEntry.reference ?? undefined,
+      debit: decimalString(line.debit),
+      credit: decimalString(line.credit),
+    }));
   }
 }
 

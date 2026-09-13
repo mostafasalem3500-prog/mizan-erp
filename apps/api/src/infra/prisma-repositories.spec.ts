@@ -1,4 +1,4 @@
-import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup } from "./prisma-repositories";
+import { PrismaAccountsRepository, PrismaOrganizationsRepository, PrismaPeriodsRepository, PrismaAuthUserLookup, PrismaRolePermissionLookup, PrismaAccountingQueryRepository, PrismaGeneralLedgerRepository } from "./prisma-repositories";
 
 describe("PrismaAccountsRepository", () => {
   function makeFakePrisma() {
@@ -206,6 +206,15 @@ describe("PrismaPeriodsRepository — bridges the FiscalYear/AccountingPeriod sc
             .filter((p) => fiscalYears.get(p.fiscalYearId)?.organizationId === orgId)
             .map((p) => ({ ...p, fiscalYear: fiscalYears.get(p.fiscalYearId) }));
         }),
+        findUnique: jest.fn().mockImplementation(async ({ where }: any) => {
+          const p = periods.get(where.id);
+          return p ? { ...p, fiscalYear: fiscalYears.get(p.fiscalYearId) } : null;
+        }),
+        update: jest.fn().mockImplementation(async ({ where, data }: any) => {
+          const p = periods.get(where.id);
+          Object.assign(p, data);
+          return p;
+        }),
       },
     };
   }
@@ -231,6 +240,38 @@ describe("PrismaPeriodsRepository — bridges the FiscalYear/AccountingPeriod sc
     const list = await repo.listForOrganization("org-1");
     expect(list).toHaveLength(1);
     expect(list[0].organizationId).toBe("org-1");
+  });
+
+  test("updates status only after resolving the period through its organization", async () => {
+    const prisma = makeFakePrisma();
+    const repo = new PrismaPeriodsRepository(prisma as any);
+    const period = await repo.create({ organizationId: "org-1", startDate: "2027-01-01T00:00:00.000Z", endDate: "2027-12-31T00:00:00.000Z" });
+    await expect(repo.findById("org-OTHER", period.id)).resolves.toBeNull();
+    await expect(repo.updateStatus("org-1", period.id, "SOFT_CLOSED")).resolves.toEqual(expect.objectContaining({ status: "SOFT_CLOSED" }));
+  });
+});
+
+describe("Prisma accounting read repositories", () => {
+  test("builds the trial balance from PostgreSQL aggregates with account names", async () => {
+    const prisma = {
+      journalEntryLine: { groupBy: jest.fn().mockResolvedValue([{ accountId: "cash", _sum: { debit: { toFixed: () => "115.0000" }, credit: { toFixed: () => "0.0000" } } }]) },
+      account: { findMany: jest.fn().mockResolvedValue([{ id: "cash", code: "1100", nameAr: "النقدية" }]) },
+      journalEntry: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const rows = await new PrismaAccountingQueryRepository(prisma as any).getTrialBalanceForPeriod("org-1", "p1");
+    expect(rows).toEqual([{ accountId: "cash", accountCode: "1100", accountName: "النقدية", totalDebit: "115.0000", totalCredit: "0.0000" }]);
+  });
+
+  test("lists journal summaries and ledger lines from persisted entries", async () => {
+    const postedAt = new Date("2026-09-13T10:00:00.000Z");
+    const prisma = {
+      journalEntry: { findMany: jest.fn().mockResolvedValue([{ id: "je1", sourceEvent: "POS_SALE_COMPLETED", postedAt, isReversal: false, lines: [{ debit: "115.0000", credit: "0" }, { debit: "0", credit: "115.0000" }] }]) },
+      journalEntryLine: { findMany: jest.fn().mockResolvedValue([{ journalEntryId: "je1", debit: "115", credit: "0", journalEntry: { sourceEvent: "POS_SALE_COMPLETED", reference: "POS sale" } }]) },
+    };
+    const summaries = await new PrismaAccountingQueryRepository(prisma as any).listJournalEntriesForPeriod("org-1", "p1");
+    const ledger = await new PrismaGeneralLedgerRepository(prisma as any).getLedgerLines("org-1", "p1", "cash");
+    expect(summaries[0]).toEqual(expect.objectContaining({ totalDebit: "115.0000", totalCredit: "115.0000", postedAt: postedAt.toISOString() }));
+    expect(ledger[0]).toEqual(expect.objectContaining({ debit: "115.0000", reference: "POS sale" }));
   });
 });
 

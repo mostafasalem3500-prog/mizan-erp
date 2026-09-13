@@ -180,13 +180,13 @@ describe("seedDemoOrganizationWithPrisma", () => {
     expect(codes).toContain("settings.manage");
   });
 
-  test("creates the full chart of accounts (22 accounts) and correctly resolves parent-child links by code", async () => {
+  test("creates the full chart of accounts (23 accounts) and correctly resolves parent-child links by code", async () => {
     const { prisma, calls } = makeFakePrisma();
 
     const result = await seedDemoOrganizationWithPrisma(prisma as any, "owner@test.sa", "hashed-password");
 
-    expect(calls.accountCreate).toHaveLength(22);
-    expect(Object.keys(result.accountIdsByCode)).toHaveLength(22);
+    expect(calls.accountCreate).toHaveLength(23);
+    expect(Object.keys(result.accountIdsByCode)).toHaveLength(23);
 
     const cashLine = calls.accountCreate.find((c) => c.code === "1100");
     const assetsId = result.accountIdsByCode["1000"];
@@ -232,7 +232,7 @@ describe("seedDemoOrganizationWithPrisma — idempotency (Sprint 34 hotfix #2)",
 
     expect(calls.organizationCreate).toHaveLength(1);
     expect(calls.userCreate).toHaveLength(1);
-    expect(calls.accountCreate).toHaveLength(22);
+    expect(calls.accountCreate).toHaveLength(23);
     expect(calls.productUpsert).toHaveLength(16);
     expect(calls.productUpsert.map((call) => call.where.organizationId_sku.sku)).toEqual([
       "DEMO-001", "DEMO-002", "DEMO-003", "DEMO-004", "DEMO-005", "DEMO-006", "DEMO-007", "DEMO-008",

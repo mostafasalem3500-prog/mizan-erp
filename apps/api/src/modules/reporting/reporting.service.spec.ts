@@ -29,6 +29,7 @@ function makeAccountTypeLookup(): AccountTypeLookup {
 
 function makeAccountingQueryService(lines: TrialBalanceLine[]) {
   const repo: AccountingQueryRepository = {
+    listJournalEntriesForPeriod: jest.fn().mockResolvedValue([]),
     getTrialBalanceForPeriod: jest.fn().mockResolvedValue(lines),
   };
   return new AccountingQueryService(repo);

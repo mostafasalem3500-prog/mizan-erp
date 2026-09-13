@@ -47,7 +47,8 @@ export type JournalSourceEvent =
   | "STOCK_ADJUSTED"
   | "ASSET_ACQUIRED"
   | "ASSET_DEPRECIATED"
-  | "BANK_TRANSFER";
+  | "BANK_TRANSFER"
+  | "PERIOD_CLOSED";
 
 interface AccountingPeriodRow {
   id: string;
@@ -236,7 +237,8 @@ export class AccountingPostingEngine {
         where: { id: request.periodId },
       });
 
-      if (period.status !== "OPEN") {
+      const isAuthorizedClosingEntry = request.sourceEvent === "PERIOD_CLOSED" && period.status === "SOFT_CLOSED";
+      if (period.status !== "OPEN" && !isAuthorizedClosingEntry) {
         throw new ClosedPeriodError(period.id, period.status);
       }
 
@@ -289,6 +291,11 @@ export class AccountingPostingEngine {
 
       if (original.reversedById) {
         throw new EntryAlreadyReversedError(journalEntryId);
+      }
+
+      const period = await tx.accountingPeriod.findUniqueOrThrow({ where: { id: original.periodId } });
+      if (period.status !== "OPEN") {
+        throw new ClosedPeriodError(period.id, period.status);
       }
 
       const reversal = await tx.journalEntry.create({
