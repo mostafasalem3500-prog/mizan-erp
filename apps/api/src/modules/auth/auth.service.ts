@@ -75,15 +75,30 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
+    const membership = await this.resolveMembership(credentials.userId, organizationId);
+
+    return this.issueToken(credentials.userId, membership);
+  }
+
+  async loginDemo(email: string): Promise<{ accessToken: string }> {
+    const credentials = await this.userLookup.findCredentialsByEmail(email);
+    if (!credentials || !credentials.isActive) {
+      throw new UnauthorizedException("Demo account is unavailable");
+    }
+    const membership = await this.resolveMembership(credentials.userId);
+    return this.issueToken(credentials.userId, membership, true);
+  }
+
+  private async resolveMembership(userId: string, organizationId?: string): Promise<OrganizationMembershipRow> {
     let membership: OrganizationMembershipRow | null;
 
     if (organizationId) {
-      membership = await this.userLookup.findMembership(credentials.userId, organizationId);
+      membership = await this.userLookup.findMembership(userId, organizationId);
       if (!membership) {
         throw new UnauthorizedException("User is not a member of this organization");
       }
     } else {
-      const memberships = await this.userLookup.listMemberships(credentials.userId);
+      const memberships = await this.userLookup.listMemberships(userId);
       if (memberships.length === 0) {
         throw new UnauthorizedException("User is not a member of any organization");
       }
@@ -99,11 +114,16 @@ export class AuthService {
       membership = memberships[0];
     }
 
+    return membership;
+  }
+
+  private async issueToken(userId: string, membership: OrganizationMembershipRow, demoMode = false): Promise<{ accessToken: string }> {
     const payload: AuthTokenPayload = {
-      userId: credentials.userId,
+      userId,
       organizationId: membership.organizationId,
       roleId: membership.roleId,
       branchId: membership.branchId,
+      ...(demoMode ? { demoMode: true } : {}),
     };
 
     const accessToken = await this.jwtService.signAsync(payload);

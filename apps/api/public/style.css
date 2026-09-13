@@ -116,6 +116,9 @@ h1, h2, h3 {
 }
 
 #login-form button[type="submit"]:hover { background: var(--petrol-dark); }
+.demo-access-status { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 14px 0; padding: 9px 12px; border-radius: 10px; color: var(--petrol); background: var(--petrol-soft); font-size: 11px; }
+.demo-access-status i.ri-loader-4-line { animation: demo-spin 1s linear infinite; }
+@keyframes demo-spin { to { transform: rotate(360deg); } }
 
 .login-error {
   color: var(--danger);
@@ -609,13 +612,23 @@ kbd { padding: 3px 7px; border: 1px solid #dfe4e1; border-radius: 6px; color: va
 .receipt-box { margin: 24px auto; border-radius: 2px; box-shadow: 0 12px 36px rgba(31,45,43,.12); }
 .receipt-box.a4 { width: min(92%, 620px); min-height: 760px; padding: 54px; }
 .receipt-box.simple .rcpt-payment, .receipt-box.simple .rcpt-qr-caption { display: none; }
-.invoice-document { --invoice-accent: var(--petrol); }
+.invoice-document { --invoice-accent: var(--petrol); --invoice-secondary: #c89b3c; }
+.invoice-document.font-plex { font-family: "IBM Plex Sans Arabic", sans-serif; }
+.invoice-document.font-cairo { font-family: "Cairo", sans-serif; }
+.invoice-document.font-system { font-family: system-ui, sans-serif; }
+.invoice-document.header-right .rcpt-brand { justify-content: flex-start; }
+.invoice-document.header-right .rcpt-biz-meta { text-align: right; }
+.invoice-document.header-right .rcpt-title-band { text-align: right; }
+.invoice-document.table-striped .rcpt-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--invoice-secondary) 12%, white); }
+.invoice-document.table-striped .rcpt-table td { padding-inline: 5px; }
+.invoice-document.table-minimal .rcpt-table th, .invoice-document.table-minimal .rcpt-table td { border-bottom: 0; }
+.invoice-document.qr-left .rcpt-qr-wrap { text-align: left; }
 .rcpt-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 6px; }
 .rcpt-logo { width: 48px; height: 48px; object-fit: contain; }
 .rcpt-logo-placeholder { display: inline-flex; width: 42px; height: 42px; align-items: center; justify-content: center; border-radius: 11px; color: #fff; background: var(--invoice-accent); font-size: 22px; }
 .rcpt-brand .rcpt-biz-name { margin: 0; text-align: right; color: var(--invoice-accent); }
 .rcpt-commercial-name { color: #777; font-size: 9px; }
-.invoice-document .rcpt-title-band { color: var(--invoice-accent); border-right: 3px solid var(--invoice-accent); }
+.invoice-document .rcpt-title-band { color: var(--invoice-accent); border-right: 3px solid var(--invoice-secondary); background: color-mix(in srgb, var(--invoice-secondary) 15%, white); }
 .invoice-document .rcpt-totals-row.grand { color: var(--invoice-accent); border-color: var(--invoice-accent); }
 .invoice-document.compact-lines .rcpt-table td { padding-block: 3px; }
 .qr-placeholder { display: inline-flex; width: 116px; height: 116px; align-items: center; justify-content: center; color: var(--invoice-accent); background: #f5f5f2; font-size: 92px; }

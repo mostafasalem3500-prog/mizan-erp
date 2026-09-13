@@ -158,9 +158,16 @@ describe("OrganizationsService — updateSettings (Sprint 29)", () => {
     const updated = await service.updateSettings("org-1", {
       invoiceTemplateConfig: {
         accentColor: "#123ABC",
+        secondaryColor: "#C89B3C",
         documentTitle: "  فاتورة ضريبية  ",
+        fontFamily: "cairo",
+        headerAlignment: "right",
+        tableStyle: "striped",
+        qrPosition: "left",
         showCommercialName: true,
         showCrNumber: true,
+        showSellerAddress: true,
+        showSellerContact: false,
         showCustomerDetails: true,
         showPaymentSummary: false,
         showQr: true,
@@ -170,7 +177,7 @@ describe("OrganizationsService — updateSettings (Sprint 29)", () => {
 
     expect(updated.invoiceTemplateConfig?.documentTitle).toBe("فاتورة ضريبية");
     expect(repo.updateSettings).toHaveBeenCalledWith("org-1", expect.objectContaining({
-      invoiceTemplateConfig: expect.objectContaining({ accentColor: "#123ABC", showPaymentSummary: false }),
+      invoiceTemplateConfig: expect.objectContaining({ accentColor: "#123ABC", secondaryColor: "#C89B3C", fontFamily: "cairo", showPaymentSummary: false }),
     }));
   });
 
@@ -185,9 +192,27 @@ describe("OrganizationsService — updateSettings (Sprint 29)", () => {
     await expect(service.updateSettings("org-1", {
       invoiceTemplateConfig: {
         accentColor: "#073f3e", documentTitle: "فاتورة", logoUrl: "javascript:alert(1)",
+        secondaryColor: "#c89b3c", fontFamily: "plex", headerAlignment: "center", tableStyle: "lines", qrPosition: "center",
         showCommercialName: true, showCrNumber: true, showCustomerDetails: true,
-        showPaymentSummary: true, showQr: true, compactLines: false,
+        showSellerAddress: true, showSellerContact: true, showPaymentSummary: true, showQr: true, compactLines: false,
       },
     })).rejects.toThrow("logo");
+  });
+
+  test("rejects unsupported invoice style controls", async () => {
+    const repo: OrganizationsRepository = {
+      vatNumberExists: jest.fn(),
+      createOrganizationWithOwner: jest.fn(),
+      findById: jest.fn().mockResolvedValue({ id: "org-1", legalNameAr: "شركة الاختبار" }),
+      updateSettings: jest.fn(),
+    };
+    await expect(new OrganizationsService(repo).updateSettings("org-1", {
+      invoiceTemplateConfig: { ...({} as any), ...{
+        accentColor: "#073f3e", secondaryColor: "#c89b3c", documentTitle: "فاتورة",
+        fontFamily: "comic", headerAlignment: "center", tableStyle: "lines", qrPosition: "center",
+        showCommercialName: true, showCrNumber: true, showSellerAddress: true, showSellerContact: true,
+        showCustomerDetails: true, showPaymentSummary: true, showQr: true, compactLines: false,
+      } } as any,
+    })).rejects.toThrow("font");
   });
 });

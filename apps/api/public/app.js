@@ -15,10 +15,17 @@ const state = {
 
 const DEFAULT_INVOICE_TEMPLATE_CONFIG = {
   accentColor: "#073f3e",
+  secondaryColor: "#c89b3c",
   documentTitle: "فاتورة ضريبية مبسطة",
   logoUrl: "",
+  fontFamily: "plex",
+  headerAlignment: "center",
+  tableStyle: "lines",
+  qrPosition: "center",
   showCommercialName: true,
   showCrNumber: true,
+  showSellerAddress: true,
+  showSellerContact: true,
   showCustomerDetails: true,
   showPaymentSummary: true,
   showQr: true,
@@ -55,7 +62,7 @@ async function api(path, options = {}) {
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
-    if (res.status === 401 && path !== "/api/v1/auth/login") {
+    if (res.status === 401 && state.token && path !== "/api/v1/auth/login") {
       handleExpiredSession();
       const error = new Error("انتهت الجلسة؛ سجّل الدخول مرة أخرى. احتفظنا بمسودة الصنف والسلة.");
       error.code = "SESSION_EXPIRED";
@@ -80,29 +87,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    state.token = result.accessToken;
-    state.sessionExpired = false;
-    // Sprint 36 — the organization is no longer typed in by the user; the
-    // server resolves it and encodes it in the JWT, so read it back from
-    // there. This is the same value the server will enforce on every
-    // subsequent request via TenantGuard, so it can't drift from what the
-    // token actually authorizes.
-    const payload = decodeJwtPayload(state.token);
-    state.orgId = payload ? payload.organizationId : null;
-    if (!state.orgId) throw new Error("تعذّر تحديد المنظمة من رمز الدخول");
-    localStorage.setItem("mizan_token", state.token);
-    localStorage.setItem("mizan_org", state.orgId);
-    await enterApp();
-    const recoveredCart = JSON.parse(localStorage.getItem("mizan_recovery_cart") || "null");
-    if (Array.isArray(recoveredCart) && recoveredCart.length) {
-      state.posCart = recoveredCart;
-      localStorage.removeItem("mizan_recovery_cart");
-      showToast("تمت استعادة سلة البيع");
-    }
-    if (restoreQuickProductDraft()) {
-      openQuickProduct();
-      showToast("تمت استعادة مسودة الصنف");
-    }
+    await activateSession(result.accessToken);
   } catch (err) {
     errorEl.textContent = "فشل تسجيل الدخول: " + err.message;
     errorEl.hidden = false;
@@ -330,11 +315,7 @@ async function loadAccounts() {
 }
 
 // ---------- الإقلاع ----------
-if (state.token && state.orgId) {
-  const payload = decodeJwtPayload(state.token);
-  if (!payload || (payload.exp && Date.now() >= payload.exp * 1000)) handleExpiredSession();
-  else enterApp();
-}
+bootstrapSession();
 
 // ---------- نقطة البيع — تجربة تشغيلية كاملة ----------
 const DEMO_POS_PRODUCTS = [
@@ -852,6 +833,49 @@ function handleExpiredSession() {
   document.getElementById("login-email").focus();
 }
 
+async function activateSession(accessToken) {
+  state.token = accessToken;
+  state.sessionExpired = false;
+  const payload = decodeJwtPayload(accessToken);
+  state.orgId = payload ? payload.organizationId : null;
+  if (!state.orgId) throw new Error("تعذّر تحديد المنظمة من رمز الدخول");
+  localStorage.setItem("mizan_token", state.token);
+  localStorage.setItem("mizan_org", state.orgId);
+  document.getElementById("demo-mode-chip").textContent = payload.demoMode ? "وضع العرض العام · بيانات تجريبية" : "بيانات تجريبية";
+  await enterApp();
+  const recoveredCart = JSON.parse(localStorage.getItem("mizan_recovery_cart") || "null");
+  if (Array.isArray(recoveredCart) && recoveredCart.length) {
+    state.posCart = recoveredCart;
+    localStorage.removeItem("mizan_recovery_cart");
+    showToast("تمت استعادة سلة البيع");
+  }
+  if (restoreQuickProductDraft()) {
+    openQuickProduct();
+    showToast("تمت استعادة مسودة الصنف");
+  }
+}
+
+async function bootstrapSession() {
+  const payload = state.token ? decodeJwtPayload(state.token) : null;
+  if (payload && state.orgId && (!payload.exp || Date.now() < payload.exp * 1000)) {
+    await activateSession(state.token);
+    return;
+  }
+  state.token = null;
+  state.orgId = null;
+  localStorage.removeItem("mizan_token");
+  localStorage.removeItem("mizan_org");
+  const status = document.getElementById("demo-access-status");
+  try {
+    const result = await api("/api/v1/auth/demo", { method: "POST", body: "{}" });
+    await activateSession(result.accessToken);
+  } catch (err) {
+    status.innerHTML = '<i class="ri-lock-2-line" aria-hidden="true"></i> دخول العرض غير مفعّل — استخدم بيانات حسابك';
+    document.getElementById("login-subtitle").textContent = "منصة محاسبية سعودية — سجّل الدخول للمتابعة";
+    document.getElementById("login-form").hidden = false;
+  }
+}
+
 document.getElementById("receipt-close").addEventListener("click", closeReceipt);
 document.getElementById("receipt-print").addEventListener("click", () => window.print());
 document.getElementById("receipt-overlay").addEventListener("click", (event) => { if (event.target.id === "receipt-overlay") closeReceipt(); });
@@ -859,6 +883,11 @@ document.getElementById("receipt-overlay").addEventListener("click", (event) => 
 function renderReceiptHtml(r) {
   const config = { ...DEFAULT_INVOICE_TEMPLATE_CONFIG, ...(r.templateConfig || {}) };
   const accent = /^#[0-9a-f]{6}$/i.test(config.accentColor) ? config.accentColor : DEFAULT_INVOICE_TEMPLATE_CONFIG.accentColor;
+  const secondary = /^#[0-9a-f]{6}$/i.test(config.secondaryColor) ? config.secondaryColor : DEFAULT_INVOICE_TEMPLATE_CONFIG.secondaryColor;
+  const font = ["plex", "cairo", "system"].includes(config.fontFamily) ? config.fontFamily : "plex";
+  const header = ["right", "center"].includes(config.headerAlignment) ? config.headerAlignment : "center";
+  const table = ["lines", "striped", "minimal"].includes(config.tableStyle) ? config.tableStyle : "lines";
+  const qr = ["center", "left"].includes(config.qrPosition) ? config.qrPosition : "center";
   const logoUrl = /^(https?:\/\/|\/)/.test(config.logoUrl || "") ? config.logoUrl : "";
   const rows = r.lines
     .map(
@@ -866,15 +895,15 @@ function renderReceiptHtml(r) {
     )
     .join("");
   const dt = new Date(r.issuedAt).toLocaleString("ar-SA", { hour12: true });
-  return `<div class="invoice-document${config.compactLines ? " compact-lines" : ""}" style="--invoice-accent:${accent}">
+  return `<div class="invoice-document font-${font} header-${header} table-${table} qr-${qr}${config.compactLines ? " compact-lines" : ""}" style="--invoice-accent:${accent};--invoice-secondary:${secondary}">
     <div class="rcpt-brand">
       ${logoUrl ? `<img class="rcpt-logo" src="${escapeHtml(logoUrl)}" alt="شعار ${escapeHtml(r.sellerName)}" />` : `<span class="rcpt-logo-placeholder" aria-hidden="true"><i class="ri-scales-3-line"></i></span>`}
       <div><div class="rcpt-biz-name">${escapeHtml(r.sellerName)}</div>
       ${config.showCommercialName && r.sellerCommercialName ? `<div class="rcpt-commercial-name">${escapeHtml(r.sellerCommercialName)}</div>` : ""}</div>
     </div>
     <div class="rcpt-biz-meta">${r.sellerVatNumber ? "الرقم الضريبي: " + escapeHtml(r.sellerVatNumber) : ""}${config.showCrNumber && r.sellerCrNumber ? ` · السجل التجاري: ${escapeHtml(r.sellerCrNumber)}` : ""}</div>
-    ${r.sellerAddress ? `<div class="rcpt-biz-meta">${escapeHtml(r.sellerAddress)}</div>` : ""}
-    ${r.sellerPhone || r.sellerEmail ? `<div class="rcpt-biz-meta">${escapeHtml([r.sellerPhone, r.sellerEmail].filter(Boolean).join(" · "))}</div>` : ""}
+    ${config.showSellerAddress && r.sellerAddress ? `<div class="rcpt-biz-meta">${escapeHtml(r.sellerAddress)}</div>` : ""}
+    ${config.showSellerContact && (r.sellerPhone || r.sellerEmail) ? `<div class="rcpt-biz-meta">${escapeHtml([r.sellerPhone, r.sellerEmail].filter(Boolean).join(" · "))}</div>` : ""}
     <div class="rcpt-title-band">${escapeHtml(config.documentTitle)}</div>
     <div class="rcpt-meta-row"><span>رقم المستند</span><span class="val">${escapeHtml(r.documentNumber)}</span></div>
     <div class="rcpt-meta-row"><span>التاريخ والوقت</span><span class="val">${dt}</span></div>
@@ -935,10 +964,17 @@ async function loadOrganizationSettings() {
 function readInvoiceTemplateControls() {
   return {
     accentColor: document.getElementById("invoice-accent").value,
+    secondaryColor: document.getElementById("invoice-secondary").value,
     documentTitle: document.getElementById("invoice-document-title").value.trim(),
     logoUrl: document.getElementById("invoice-logo-url").value.trim() || undefined,
+    fontFamily: document.getElementById("invoice-font").value,
+    headerAlignment: document.getElementById("invoice-header-align").value,
+    tableStyle: document.getElementById("invoice-table-style").value,
+    qrPosition: document.getElementById("invoice-qr-position").value,
     showCommercialName: document.getElementById("invoice-show-commercial").checked,
     showCrNumber: document.getElementById("invoice-show-cr").checked,
+    showSellerAddress: document.getElementById("invoice-show-address").checked,
+    showSellerContact: document.getElementById("invoice-show-contact").checked,
     showCustomerDetails: document.getElementById("invoice-show-customer").checked,
     showPaymentSummary: document.getElementById("invoice-show-payment").checked,
     showQr: document.getElementById("invoice-show-qr").checked,
@@ -951,9 +987,17 @@ function hydrateInvoiceTemplateControls(saved) {
   document.getElementById("invoice-document-title").value = config.documentTitle;
   document.getElementById("invoice-accent").value = config.accentColor;
   document.getElementById("invoice-accent-value").textContent = config.accentColor;
+  document.getElementById("invoice-secondary").value = config.secondaryColor;
+  document.getElementById("invoice-secondary-value").textContent = config.secondaryColor;
   document.getElementById("invoice-logo-url").value = config.logoUrl || "";
+  document.getElementById("invoice-font").value = config.fontFamily;
+  document.getElementById("invoice-header-align").value = config.headerAlignment;
+  document.getElementById("invoice-table-style").value = config.tableStyle;
+  document.getElementById("invoice-qr-position").value = config.qrPosition;
   document.getElementById("invoice-show-commercial").checked = config.showCommercialName;
   document.getElementById("invoice-show-cr").checked = config.showCrNumber;
+  document.getElementById("invoice-show-address").checked = config.showSellerAddress;
+  document.getElementById("invoice-show-contact").checked = config.showSellerContact;
   document.getElementById("invoice-show-customer").checked = config.showCustomerDetails;
   document.getElementById("invoice-show-payment").checked = config.showPaymentSummary;
   document.getElementById("invoice-show-qr").checked = config.showQr;
@@ -998,8 +1042,9 @@ document.querySelectorAll("#settings-template-picker .template-option").forEach(
   selectSettingsTemplate(button.dataset.template);
   renderInvoiceTemplatePreview();
 }));
-document.querySelectorAll("#organization-settings-form input, #organization-settings-form textarea").forEach((control) => control.addEventListener("input", () => {
+document.querySelectorAll("#organization-settings-form input, #organization-settings-form textarea, #organization-settings-form select").forEach((control) => control.addEventListener("input", () => {
   if (control.id === "invoice-accent") document.getElementById("invoice-accent-value").textContent = control.value;
+  if (control.id === "invoice-secondary") document.getElementById("invoice-secondary-value").textContent = control.value;
   renderInvoiceTemplatePreview();
 }));
 

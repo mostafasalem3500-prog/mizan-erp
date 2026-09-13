@@ -148,4 +148,16 @@ describe("AuthService.login — optional organizationId (Sprint 36)", () => {
 
     await expect(service.login("a@b.com", "WRONG-password")).rejects.toThrow("Invalid credentials");
   });
+
+  test("issues an explicitly marked demo token without comparing a password", async () => {
+    const service = await makeService([{ organizationId: "org-1", roleId: "role-1" }]);
+
+    const result = await service.loginDemo("owner@mizan-demo.sa");
+
+    expect(JSON.parse(result.accessToken)).toEqual(expect.objectContaining({
+      organizationId: "org-1",
+      roleId: "role-1",
+      demoMode: true,
+    }));
+  });
 });

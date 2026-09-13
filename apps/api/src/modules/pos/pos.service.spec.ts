@@ -126,6 +126,28 @@ describe("PosService — Sell", () => {
     ).rejects.toThrow(/does not match/);
   });
 
+  test("accepts a displayed 43.13 tender when 15% VAT produces an exact half-halala", async () => {
+    const { engine, calls } = makePostingEngine();
+    const service = new PosService(engine as any, makeInventoryService(), makeRepo().repo, makeShiftsService());
+
+    const sale = await service.sell({
+      organizationId: "org-1",
+      periodId: "period-1",
+      terminalId: "term-1",
+      lines: [{ description: "Half-halala VAT", quantity: 1, unitPrice: 37.5, taxCode: "STANDARD" }],
+      tenders: [{ method: "CASH", amount: 43.13 }],
+    });
+
+    expect(sale.subtotal).toBe("37.50");
+    expect(sale.taxTotal).toBe("5.63");
+    expect(sale.total).toBe("43.13");
+    expect(calls[0].lines).toEqual([
+      { accountId: "cash", debit: "43.13" },
+      { accountId: "sales", credit: "37.50" },
+      { accountId: "vat_output", credit: "5.63" },
+    ]);
+  });
+
   test("a line with productId triggers a SEPARATE COGS journal entry via InventoryService.issueStock", async () => {
     const { engine, calls } = makePostingEngine();
     const inventory = makeInventoryService("12.00");

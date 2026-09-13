@@ -11,6 +11,7 @@ export interface AuthTokenPayload {
   organizationId: string;
   roleId: string;
   branchId?: string;
+  demoMode?: boolean;
 }
 
 declare module "express" {

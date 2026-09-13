@@ -22,10 +22,17 @@ export type ReceiptTemplate = "thermal" | "a4" | "simple";
 
 export interface InvoiceTemplateConfig {
   accentColor: string;
+  secondaryColor: string;
   documentTitle: string;
   logoUrl?: string;
+  fontFamily: "plex" | "cairo" | "system";
+  headerAlignment: "right" | "center";
+  tableStyle: "lines" | "striped" | "minimal";
+  qrPosition: "center" | "left";
   showCommercialName: boolean;
   showCrNumber: boolean;
+  showSellerAddress: boolean;
+  showSellerContact: boolean;
   showCustomerDetails: boolean;
   showPaymentSummary: boolean;
   showQr: boolean;
@@ -34,9 +41,16 @@ export interface InvoiceTemplateConfig {
 
 export const DEFAULT_INVOICE_TEMPLATE_CONFIG: InvoiceTemplateConfig = {
   accentColor: "#073f3e",
+  secondaryColor: "#c89b3c",
   documentTitle: "فاتورة ضريبية مبسطة",
+  fontFamily: "plex",
+  headerAlignment: "center",
+  tableStyle: "lines",
+  qrPosition: "center",
   showCommercialName: true,
   showCrNumber: true,
+  showSellerAddress: true,
+  showSellerContact: true,
   showCustomerDetails: true,
   showPaymentSummary: true,
   showQr: true,
@@ -189,6 +203,9 @@ function validateInvoiceTemplateConfig(input: InvoiceTemplateConfig): InvoiceTem
   if (!/^#[0-9A-Fa-f]{6}$/.test(config.accentColor)) {
     throw new BadRequestException("Invoice accent color must be a six-digit hex color");
   }
+  if (!/^#[0-9A-Fa-f]{6}$/.test(config.secondaryColor)) {
+    throw new BadRequestException("Invoice secondary color must be a six-digit hex color");
+  }
   config.documentTitle = String(config.documentTitle ?? "").trim();
   if (!config.documentTitle || config.documentTitle.length > 80) {
     throw new BadRequestException("Invoice document title must contain 1 to 80 characters");
@@ -199,7 +216,11 @@ function validateInvoiceTemplateConfig(input: InvoiceTemplateConfig): InvoiceTem
       throw new BadRequestException("Invoice logo must be a valid HTTPS/HTTP or site-relative URL");
     }
   }
-  for (const key of ["showCommercialName", "showCrNumber", "showCustomerDetails", "showPaymentSummary", "showQr", "compactLines"] as const) {
+  if (!["plex", "cairo", "system"].includes(config.fontFamily)) throw new BadRequestException("Unsupported invoice font");
+  if (!["right", "center"].includes(config.headerAlignment)) throw new BadRequestException("Unsupported invoice header alignment");
+  if (!["lines", "striped", "minimal"].includes(config.tableStyle)) throw new BadRequestException("Unsupported invoice table style");
+  if (!["center", "left"].includes(config.qrPosition)) throw new BadRequestException("Unsupported invoice QR position");
+  for (const key of ["showCommercialName", "showCrNumber", "showSellerAddress", "showSellerContact", "showCustomerDetails", "showPaymentSummary", "showQr", "compactLines"] as const) {
     if (typeof config[key] !== "boolean") throw new BadRequestException(`Invoice template option ${key} must be boolean`);
   }
   return config;

@@ -19,13 +19,14 @@
       <span class="brand-mark" aria-hidden="true"><i class="ri-scales-3-line"></i></span>
       <div><h1>ميزان</h1><span class="brand-tagline">إدارة أعمالك بتوازن</span></div>
     </div>
-    <p class="login-sub">منصة محاسبية سعودية — سجّل الدخول للمتابعة</p>
-    <form id="login-form">
+    <p class="login-sub" id="login-subtitle">جارٍ تهيئة بيئة العرض الآمنة…</p>
+    <p class="demo-access-status" id="demo-access-status" role="status"><i class="ri-loader-4-line" aria-hidden="true"></i> دخول العرض لا يحتاج كلمة مرور</p>
+    <form id="login-form" hidden>
       <label>البريد الإلكتروني
-        <input type="email" id="login-email" value="owner@mizan-demo.sa" required />
+        <input type="email" id="login-email" autocomplete="username" required />
       </label>
       <label>كلمة المرور
-        <input type="password" id="login-password" value="DemoPass123!" required />
+        <input type="password" id="login-password" autocomplete="current-password" required />
       </label>
       <button type="submit"><span>دخول آمن</span><i class="ri-arrow-left-line" aria-hidden="true"></i></button>
       <p class="login-error" id="login-error" hidden></p>
@@ -61,7 +62,7 @@
   <main class="main">
     <header class="topbar">
       <div class="topbar-title"><button id="mobile-menu" class="icon-btn mobile-menu" aria-label="فتح القائمة"><i class="ri-menu-line"></i></button><div><p>مؤسسة الأفق للتجارة <span class="status-dot">متصل</span></p><h2 id="view-title">نظرة عامة</h2></div></div>
-      <div class="topbar-actions"><span class="demo-chip">بيانات تجريبية</span><button id="quick-create" class="quick-create"><i class="ri-add-line"></i><span>فاتورة جديدة</span></button></div>
+      <div class="topbar-actions"><span class="demo-chip" id="demo-mode-chip">بيانات تجريبية</span><button id="quick-create" class="quick-create"><i class="ri-add-line"></i><span>فاتورة جديدة</span></button></div>
     </header>
 
     <!-- الرئيسية -->
@@ -220,11 +221,18 @@
               <div class="studio-fields">
                 <label>عنوان المستند<input id="invoice-document-title" maxlength="80" value="فاتورة ضريبية مبسطة" /></label>
                 <label>لون الهوية<span class="color-control"><input id="invoice-accent" type="color" value="#073f3e" /><output id="invoice-accent-value">#073f3e</output></span></label>
+                <label>اللون المساند<span class="color-control"><input id="invoice-secondary" type="color" value="#c89b3c" /><output id="invoice-secondary-value">#c89b3c</output></span></label>
+                <label>خط الفاتورة<select id="invoice-font"><option value="plex">IBM Plex Arabic</option><option value="cairo">Cairo</option><option value="system">خط النظام</option></select></label>
+                <label>محاذاة الرأس<select id="invoice-header-align"><option value="center">وسط</option><option value="right">يمين</option></select></label>
+                <label>شكل جدول الأصناف<select id="invoice-table-style"><option value="lines">خطوط فاصلة</option><option value="striped">صفوف متناوبة</option><option value="minimal">بسيط بلا خطوط</option></select></label>
+                <label>موضع QR<select id="invoice-qr-position"><option value="center">وسط</option><option value="left">يسار</option></select></label>
                 <label class="wide">رابط شعار المنشأة<input id="invoice-logo-url" type="url" placeholder="https://example.sa/logo.png" /></label>
               </div>
               <div class="template-toggles">
                 <label><input id="invoice-show-commercial" type="checkbox" checked /> الاسم التجاري</label>
                 <label><input id="invoice-show-cr" type="checkbox" checked /> السجل التجاري</label>
+                <label><input id="invoice-show-address" type="checkbox" checked /> عنوان المنشأة</label>
+                <label><input id="invoice-show-contact" type="checkbox" checked /> وسائل التواصل</label>
                 <label><input id="invoice-show-customer" type="checkbox" checked /> تفاصيل العميل</label>
                 <label><input id="invoice-show-payment" type="checkbox" checked /> طريقة الدفع</label>
                 <label><input id="invoice-show-qr" type="checkbox" checked /> رمز QR</label>

@@ -100,7 +100,12 @@ export interface PosRepository {
 }
 
 function round2(value: number): string {
-  return value.toFixed(2);
+  return (toMinorUnits(value) / 100).toFixed(2);
+}
+
+/** Money comparisons and totals use integer halalas, never binary floating-point tolerances. */
+function toMinorUnits(value: number): number {
+  return Math.round((value + Math.sign(value || 1) * Number.EPSILON) * 100);
 }
 
 /**
@@ -175,24 +180,34 @@ export class PosService {
       }
     }
 
-    let subtotal = 0;
-    let taxTotal = 0;
+    let subtotalMinor = 0;
+    let taxTotalMinor = 0;
     for (const line of input.lines) {
-      if (line.quantity <= 0) {
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
         throw new BadRequestException(`Line "${line.description}" must have a positive quantity`);
+      }
+      if (!Number.isFinite(line.unitPrice) || line.unitPrice < 0) {
+        throw new BadRequestException(`Line "${line.description}" must have a valid non-negative price`);
       }
       const rate = TAX_RATE_BY_CODE[line.taxCode];
       if (rate === undefined) {
         throw new BadRequestException(`Unknown tax code "${line.taxCode}"`);
       }
-      const lineNet = line.quantity * line.unitPrice;
-      subtotal += lineNet;
-      taxTotal += lineNet * rate;
+      const lineNetMinor = toMinorUnits(line.quantity * line.unitPrice);
+      subtotalMinor += lineNetMinor;
+      taxTotalMinor += toMinorUnits((lineNetMinor / 100) * rate);
     }
-    const total = subtotal + taxTotal;
+    const totalMinor = subtotalMinor + taxTotalMinor;
+    const subtotal = subtotalMinor / 100;
+    const taxTotal = taxTotalMinor / 100;
+    const total = totalMinor / 100;
 
-    const tenderTotal = input.tenders.reduce((sum, t) => sum + t.amount, 0);
-    if (Math.abs(tenderTotal - total) > 0.005) {
+    if (input.tenders.some((t) => !Number.isFinite(t.amount) || t.amount < 0)) {
+      throw new BadRequestException("Payment tender amounts must be valid and non-negative");
+    }
+    const tenderTotalMinor = input.tenders.reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0);
+    const tenderTotal = tenderTotalMinor / 100;
+    if (tenderTotalMinor !== totalMinor) {
       throw new BadRequestException(
         `Tender total (${tenderTotal.toFixed(2)}) does not match invoice total (${total.toFixed(2)})`,
       );
@@ -200,8 +215,8 @@ export class PosService {
 
     const glMapping = await this.repo.getGLAccountMapping(input.organizationId);
 
-    const cashTendered = input.tenders.filter((t) => t.method === "CASH").reduce((s, t) => s + t.amount, 0);
-    const cardTendered = input.tenders.filter((t) => t.method !== "CASH").reduce((s, t) => s + t.amount, 0);
+    const cashTendered = input.tenders.filter((t) => t.method === "CASH").reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0) / 100;
+    const cardTendered = input.tenders.filter((t) => t.method !== "CASH").reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0) / 100;
 
     const debitLines = [
       ...(cashTendered > 0 ? [{ accountId: glMapping.cashAccountId, debit: round2(cashTendered) }] : []),

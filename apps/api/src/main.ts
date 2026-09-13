@@ -71,9 +71,7 @@ async function bootstrap() {
 
   console.log(`Mizan ERP API (Phase 0) listening on http://localhost:${port}`);
   console.log(`Web UI: http://localhost:${port}/index.html`);
-  console.log(`Demo organization seeded — log in with:`);
-  console.log(`  POST /api/v1/auth/login`);
-  console.log(`  { "email": "${DEMO_OWNER_EMAIL}", "password": "${DEMO_OWNER_PASSWORD}", "organizationId": "${seeded.organizationId}" }`);
+  console.log(`Demo organization seeded (public demo mode: ${process.env.PUBLIC_DEMO_MODE === "true" ? "enabled" : "disabled"}).`);
   console.log(`Demo accounting period id (OPEN): ${seeded.periodId}`);
   console.log(`Default Chart of Accounts seeded (codes 1000-6100, see docs/ARCHITECTURE.md).`);
 }
