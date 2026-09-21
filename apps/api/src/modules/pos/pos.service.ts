@@ -1,23 +1,19 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { AccountingPostingEngine } from "../accounting/accounting-posting-engine";
+import { AccountingPostingEngine, type PostingLineInput } from "../accounting/accounting-posting-engine";
 import { InventoryService } from "../inventory/inventory.service";
 import { ShiftsService } from "./shifts.service";
 import { OrganizationsService } from "../organizations/organizations.service";
 import { CustomersService } from "../customers/customers.service";
 import type { InvoiceTemplateConfig, ReceiptTemplate } from "../organizations/organizations.service";
-
-const TAX_RATE_BY_CODE: Record<string, number> = {
-  STANDARD: 0.15,
-  ZERO: 0,
-  EXEMPT: 0,
-  OUT_OF_SCOPE: 0,
-};
+import { calculateDocumentTax, toHalalas, type TaxCode } from "../tax/tax-engine";
 
 export interface PosSaleLineInput {
   description: string;
   quantity: number;
   unitPrice: number;
-  taxCode: keyof typeof TAX_RATE_BY_CODE;
+  taxCode: TaxCode;
+  taxExemptionReasonCode?: string;
+  taxExemptionReason?: string;
   productId?: string;
 }
 
@@ -97,16 +93,30 @@ export interface PosRepository {
   saveSale(record: PosSaleRecord): Promise<PosSaleRecord>;
   findSale(organizationId: string, saleId: string): Promise<PosSaleRecord | null>;
   searchSales?(organizationId: string, query?: string): Promise<PosSaleRecord[]>;
+  /** Production capability: source document + GL + stock + cash shift commit together. */
+  completeSaleAtomically?(input: AtomicPosSaleInput): Promise<PosSaleRecord>;
 }
 
-function round2(value: number): string {
-  return (toMinorUnits(value) / 100).toFixed(2);
+export interface AtomicPosSaleInput {
+  organizationId: string;
+  branchId?: string;
+  periodId: string;
+  terminalId: string;
+  customerId?: string;
+  shiftId?: string;
+  lines: PosSaleLineInput[];
+  tenders: PaymentTender[];
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  cashTendered: string;
+  financialLines: PostingLineInput[];
+  idempotencyKey?: string;
+  receiptTemplate: ReceiptTemplate;
+  invoiceTemplateSnapshot?: InvoiceTemplateConfig;
 }
 
-/** Money comparisons and totals use integer halalas, never binary floating-point tolerances. */
-function toMinorUnits(value: number): number {
-  return Math.round((value + Math.sign(value || 1) * Number.EPSILON) * 100);
-}
+function round2(value: number): string { return (toHalalas(value) / 100).toFixed(2); }
 
 /**
  * NOTE on scope (spec bands 32-45): this covers Sell and Return only — the
@@ -180,32 +190,16 @@ export class PosService {
       }
     }
 
-    let subtotalMinor = 0;
-    let taxTotalMinor = 0;
-    for (const line of input.lines) {
-      if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
-        throw new BadRequestException(`Line "${line.description}" must have a positive quantity`);
-      }
-      if (!Number.isFinite(line.unitPrice) || line.unitPrice < 0) {
-        throw new BadRequestException(`Line "${line.description}" must have a valid non-negative price`);
-      }
-      const rate = TAX_RATE_BY_CODE[line.taxCode];
-      if (rate === undefined) {
-        throw new BadRequestException(`Unknown tax code "${line.taxCode}"`);
-      }
-      const lineNetMinor = toMinorUnits(line.quantity * line.unitPrice);
-      subtotalMinor += lineNetMinor;
-      taxTotalMinor += toMinorUnits((lineNetMinor / 100) * rate);
-    }
-    const totalMinor = subtotalMinor + taxTotalMinor;
-    const subtotal = subtotalMinor / 100;
-    const taxTotal = taxTotalMinor / 100;
-    const total = totalMinor / 100;
+    const tax = calculateDocumentTax(input.lines);
+    const subtotal = Number(tax.subtotal);
+    const taxTotal = Number(tax.taxTotal);
+    const total = Number(tax.total);
+    const totalMinor = toHalalas(total);
 
     if (input.tenders.some((t) => !Number.isFinite(t.amount) || t.amount < 0)) {
       throw new BadRequestException("Payment tender amounts must be valid and non-negative");
     }
-    const tenderTotalMinor = input.tenders.reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0);
+    const tenderTotalMinor = input.tenders.reduce((sum, tender) => sum + toHalalas(tender.amount), 0);
     const tenderTotal = tenderTotalMinor / 100;
     if (tenderTotalMinor !== totalMinor) {
       throw new BadRequestException(
@@ -215,13 +209,40 @@ export class PosService {
 
     const glMapping = await this.repo.getGLAccountMapping(input.organizationId);
 
-    const cashTendered = input.tenders.filter((t) => t.method === "CASH").reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0) / 100;
-    const cardTendered = input.tenders.filter((t) => t.method !== "CASH").reduce((sum, tender) => sum + toMinorUnits(tender.amount), 0) / 100;
+    const cashTendered = input.tenders.filter((t) => t.method === "CASH").reduce((sum, tender) => sum + toHalalas(tender.amount), 0) / 100;
+    const cardTendered = input.tenders.filter((t) => t.method !== "CASH").reduce((sum, tender) => sum + toHalalas(tender.amount), 0) / 100;
 
     const debitLines = [
       ...(cashTendered > 0 ? [{ accountId: glMapping.cashAccountId, debit: round2(cashTendered) }] : []),
       ...(cardTendered > 0 ? [{ accountId: glMapping.cardClearingAccountId, debit: round2(cardTendered) }] : []),
     ];
+
+    const financialLines: PostingLineInput[] = [
+      ...debitLines,
+      { accountId: glMapping.salesRevenueAccountId, credit: round2(subtotal) },
+      ...(taxTotal > 0 ? [{ accountId: glMapping.vatOutputAccountId, credit: round2(taxTotal) }] : []),
+    ];
+
+    if (this.repo.completeSaleAtomically) {
+      return this.repo.completeSaleAtomically({
+        organizationId: input.organizationId,
+        branchId: input.branchId,
+        periodId: input.periodId,
+        terminalId: input.terminalId,
+        customerId: input.customerId,
+        shiftId: input.shiftId,
+        lines: input.lines,
+        tenders: input.tenders,
+        subtotal: round2(subtotal),
+        taxTotal: round2(taxTotal),
+        total: round2(total),
+        cashTendered: round2(cashTendered),
+        financialLines,
+        idempotencyKey: input.idempotencyKey,
+        receiptTemplate: input.receiptTemplate ?? org?.defaultReceiptTemplate ?? "thermal",
+        invoiceTemplateSnapshot: org?.invoiceTemplateConfig,
+      });
+    }
 
     const saleEntry = await this.postingEngine.post({
       organizationId: input.organizationId,
@@ -230,11 +251,7 @@ export class PosService {
       sourceEvent: "POS_SALE_COMPLETED",
       reference: `POS sale — terminal ${input.terminalId}`,
       idempotencyKey: input.idempotencyKey,
-      lines: [
-        ...debitLines,
-        { accountId: glMapping.salesRevenueAccountId, credit: round2(subtotal) },
-        ...(taxTotal > 0 ? [{ accountId: glMapping.vatOutputAccountId, credit: round2(taxTotal) }] : []),
-      ],
+      lines: financialLines,
     });
 
     const inventoryEffects: RecordedLineEffect[] = [];
@@ -337,8 +354,18 @@ export class PosService {
 
     await this.postingEngine.reverse(sale.saleJournalEntryId, reason);
 
+    const separatelyReversedCogsEntries = new Set<string>();
     for (const effect of sale.inventoryEffects) {
-      await this.postingEngine.reverse(effect.cogsJournalEntryId, reason);
+      // New atomic POS sales carry revenue, VAT and COGS in one balanced
+      // entry, so their effect points at saleJournalEntryId. Historical
+      // sales may still have one separate COGS entry per stocked line.
+      if (
+        effect.cogsJournalEntryId !== sale.saleJournalEntryId &&
+        !separatelyReversedCogsEntries.has(effect.cogsJournalEntryId)
+      ) {
+        await this.postingEngine.reverse(effect.cogsJournalEntryId, reason);
+        separatelyReversedCogsEntries.add(effect.cogsJournalEntryId);
+      }
       await this.inventoryService.receiveStock(
         {
           organizationId,
@@ -421,10 +448,10 @@ export class PosService {
         );
       }
 
-      const rate = TAX_RATE_BY_CODE[line.taxCode];
       const lineNet = item.quantity * line.unitPrice;
+      const returnedTax = calculateDocumentTax([{ ...line, quantity: item.quantity }]);
       netReturn += lineNet;
-      taxReturn += lineNet * rate;
+      taxReturn += Number(returnedTax.taxTotal);
       remaining[item.lineIndex] -= item.quantity;
 
       const effect = sale.inventoryEffects.find((e) => e.lineIndex === item.lineIndex);

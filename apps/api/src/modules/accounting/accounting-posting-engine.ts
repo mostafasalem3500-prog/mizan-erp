@@ -76,7 +76,8 @@ export interface JournalEntryRow {
   lines: JournalEntryLineRow[];
 }
 
-interface PrismaTransactionClient {
+export interface PrismaTransactionClient {
+  [delegate: string]: any;
   accountingPeriod: {
     findUniqueOrThrow(args: { where: { id: string } }): Promise<AccountingPeriodRow>;
   };
@@ -113,7 +114,12 @@ interface PrismaTransactionClient {
 }
 
 export interface PrismaClientLike {
-  $transaction<T>(fn: (tx: PrismaTransactionClient) => Promise<T>): Promise<T>;
+  $transaction<T>(fn: (tx: PrismaTransactionClient) => Promise<T>, options?: { isolationLevel?: "Serializable" }): Promise<T>;
+}
+
+export interface PreparedPosting<T> {
+  request: PostingRequest;
+  afterPost(tx: PrismaTransactionClient, entry: JournalEntryRow): Promise<T>;
 }
 
 /**
@@ -276,6 +282,100 @@ export class AccountingPostingEngine {
 
       return entry;
     });
+  }
+
+  /**
+   * Builds and persists one posting together with its operational side
+   * effects in the SAME serializable database transaction. The prepare
+   * callback may lock/read stock and add COGS lines using the cost that is
+   * current inside that transaction. `afterPost` then saves the source
+   * document and stock/shift changes before commit.
+   *
+   * The idempotency lookup deliberately happens before `prepare`: a replay
+   * therefore cannot deduct stock or increment a cash drawer twice. The
+   * replay callback reads the already-committed source document and returns
+   * the same business result as the first request.
+   */
+  async postPrepared<T>(
+    identity: { organizationId: string; idempotencyKey?: string },
+    prepare: (tx: PrismaTransactionClient) => Promise<PreparedPosting<T>>,
+    onReplay: (tx: PrismaTransactionClient, entry: JournalEntryRow) => Promise<T>,
+  ): Promise<T> {
+    const execute = () => this.prisma.$transaction(async (tx) => {
+      if (identity.idempotencyKey) {
+        const existing = await tx.idempotencyKey.findUnique({
+          where: {
+            organizationId_key: {
+              organizationId: identity.organizationId,
+              key: identity.idempotencyKey,
+            },
+          },
+        });
+        if (existing) {
+          const entry = await tx.journalEntry.findUniqueOrThrow({ where: { id: existing.journalEntryId } });
+          return onReplay(tx, entry);
+        }
+      }
+
+      const prepared = await prepare(tx);
+      const request = prepared.request;
+      if (request.organizationId !== identity.organizationId) {
+        throw new Error("Prepared posting organization does not match its transaction identity");
+      }
+      this.assertBalanced(request.lines);
+
+      const period = await tx.accountingPeriod.findUniqueOrThrow({ where: { id: request.periodId } });
+      const isAuthorizedClosingEntry = request.sourceEvent === "PERIOD_CLOSED" && period.status === "SOFT_CLOSED";
+      if (period.status !== "OPEN" && !isAuthorizedClosingEntry) {
+        throw new ClosedPeriodError(period.id, period.status);
+      }
+
+      const entry = await tx.journalEntry.create({
+        data: {
+          organizationId: request.organizationId,
+          branchId: request.branchId,
+          periodId: request.periodId,
+          sourceEvent: request.sourceEvent,
+          sourceDocId: request.sourceDocId,
+          reference: request.reference,
+          lines: {
+            create: request.lines.map((line) => ({
+              accountId: line.accountId,
+              debit: new Decimal(line.debit ?? 0).toString(),
+              credit: new Decimal(line.credit ?? 0).toString(),
+              costCenterId: line.costCenterId,
+              description: line.description,
+            })),
+          },
+        },
+        include: { lines: true },
+      });
+
+      const result = await prepared.afterPost(tx, entry);
+      if (identity.idempotencyKey) {
+        await tx.idempotencyKey.create({
+          data: {
+            organizationId: identity.organizationId,
+            key: identity.idempotencyKey,
+            journalEntryId: entry.id,
+          },
+        });
+      }
+      return result;
+    }, { isolationLevel: "Serializable" });
+
+    // PostgreSQL may intentionally abort one of two concurrent serializable
+    // stock transactions (Prisma P2034). Retrying the entire callback is
+    // safe because the aborted attempt committed none of its side effects.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await execute();
+      } catch (error: any) {
+        const retryableConflict = error?.code === "P2034" || (identity.idempotencyKey && error?.code === "P2002");
+        if (!retryableConflict || attempt === 3) throw error;
+      }
+    }
+    throw new Error("Unreachable serializable transaction retry state");
   }
 
   /**

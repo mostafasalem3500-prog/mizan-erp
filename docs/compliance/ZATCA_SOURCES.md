@@ -1,7 +1,7 @@
 # ZATCA_SOURCES.md
 سجل المصادر الرسمية المعتمدة للفوترة الإلكترونية — يجب تحديثه عند أي تغيير رسمي، ويُحظر ترحيل أي منطق فوترة إلى الكود قبل تسجيله هنا أولًا.
 
-> آخر مراجعة لهذا الملف: 2026-09-09 (تحديث ثانٍ — تم تنزيل ومطابقة المحتوى الفعلي لثلاث من الوثائق الأربع الحرجة، وليس فقط صفحاتها)
+> آخر مراجعة لهذا الملف: 2026-09-21 (أعيد التحقق من صفحات ZATCA الرسمية؛ ما زالت صفحة المواصفات تسرد Data Dictionary وXML Standard بتاريخ 19 مايو 2023، ولم يظهر إصدار مستند أحدث)
 > القاعدة: أي تعارض بين هذا الملف وأي كود أو مكتبة GitHub أو مقال أو ذاكرة الذكاء الاصطناعي → **المصدر الرسمي هو الفيصل**.
 
 ## 1. اللوائح والمراحل
@@ -23,7 +23,7 @@
 | Detailed Guidelines for E-Invoicing (Fatoora) | v2 | May 2023 | https://zatca.gov.sa/en/E-Invoicing/Introduction/Guidelines/Documents/E-Invoicing_Detailed__Guideline.pdf | تم الاطلاع على متطلبات QR للفاتورة المبسطة ومهلة الـ24 ساعة |
 
 صفحات المصدر الرسمية لهذه الوثائق (وتاريخ آخر تحديث للصفحة نفسها كما يظهر عليها):
-- E-Invoice specifications: https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/Pages/E-Invoice-specifications.aspx (Last Update: 12 Jan 2026)
+- E-Invoice specifications: https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/Pages/E-Invoice-specifications.aspx (Last Update: 12 Jan 2026 — تحقق مباشر 21 Sep 2026)
 - Security requirements: https://zatca.gov.sa/en/E-Invoicing/SystemsDevelopers/Pages/Security-Requirements.aspx (Last Update: 10 Aug 2026)
 - Knowledge Base Library (الأدلة العامة): https://zatca.gov.sa/en/E-Invoicing/Introduction/Guidelines/Pages/default.aspx (Last Update: 10 Aug 2026)
 
@@ -40,7 +40,7 @@
 ## 4. حالة الحجب الحالية على وحدة `zatca`
 
 - **رُفع الحجب جزئيًا**: يمكن الآن البدء بتصميم `ZatcaInvoiceMapper` وبنية QR وCSR اعتمادًا على المحتوى الموثق أعلاه، لأنه مأخوذ من النص الرسمي المباشر وليس من الذاكرة أو مكتبات GitHub.
-- **لا يزال قائمًا جزئيًا**: قبل كتابة أي كود إنتاجي فعلي (وليس تصميم/Workbook) لتوليد XML حقيقي، يجب استخراج محتوى Data Dictionary XLSX كاملًا للتأكد من عدم وجود حقول أو قواعد أحدث لم تظهر داخل مستند XML Standard نفسه، ومطابقة القواعد المستخرجة هنا (خصوصًا BR-KSA) حقلًا حقلًا وليس بالاعتماد على العينة الموثقة في هذا الملف فقط.
+- **لا يزال قائمًا جزئيًا**: مولد XML الهيكلي موجود ومختبر، لكن لا يجوز وصفه كربط إنتاجي للمرحلة الثانية قبل استخراج Data Dictionary XLSX كاملًا، وتشغيل XSD/Schematron الرسمي، وإضافة CSID والختم والتسلسل والربط مع بيئة المحاكاة التابعة للهيئة.
 - التوصية: قبل الشروع في `ZatcaInvoiceMapper` الفعلي، افتح الـXLSX يدويًا (أو عبر بيئة تنفيذ تصل zatca.gov.sa) وقارنه عمودًا بعمود مع ورقة `13_ZATCA_Field_Mapping`.
 
 ## 5. قاعدة استخدام GitHub / المكتبات مفتوحة المصدر

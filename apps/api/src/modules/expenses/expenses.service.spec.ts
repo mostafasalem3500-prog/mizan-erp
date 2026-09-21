@@ -13,7 +13,7 @@ function makeEngine() {
 }
 
 function makeRepo(): ExpensesRepository {
-  return { save: jest.fn().mockImplementation(async (r: ExpenseRecord) => r), findById: jest.fn().mockResolvedValue(null) };
+  return { save: jest.fn().mockImplementation(async (r: ExpenseRecord) => r), findById: jest.fn().mockResolvedValue(null), listAll: jest.fn().mockResolvedValue([]) };
 }
 
 describe("ExpensesService (spec band 24)", () => {

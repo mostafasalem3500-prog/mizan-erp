@@ -290,4 +290,60 @@ describe("AccountingPostingEngine — mandatory invariants (band 114)", () => {
 
     expect(prisma.__state.createdEntries).toHaveLength(2); // two genuinely separate sales, no key to dedupe against
   });
+
+  test("postPrepared never repeats operational side effects on an idempotent replay", async () => {
+    const prisma = makePrismaMock();
+    prismaTx = prisma;
+    const engine = new AccountingPostingEngine(prisma);
+    const prepare = jest.fn(async () => ({
+      request: {
+        organizationId: "org-1",
+        periodId: "period-1",
+        sourceEvent: "POS_SALE_COMPLETED" as const,
+        lines: [{ accountId: "cash", debit: 10 }, { accountId: "sales", credit: 10 }],
+      },
+      afterPost: jest.fn(async (_tx: any, entry: any) => ({ saleId: entry.id, stockAfter: 9 })),
+    }));
+    const onReplay = jest.fn(async (_tx: any, entry: any) => ({ saleId: entry.id, stockAfter: 9 }));
+    const identity = { organizationId: "org-1", idempotencyKey: "sale-atomic-1" };
+
+    const first = await engine.postPrepared(identity, prepare, onReplay);
+    const replay = await engine.postPrepared(identity, prepare, onReplay);
+
+    expect(first).toEqual(replay);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(onReplay).toHaveBeenCalledTimes(1);
+    expect(prisma.__state.createdEntries).toHaveLength(1);
+  });
+
+  test("postPrepared retries a serializable write conflict as one whole transaction", async () => {
+    const prisma = makePrismaMock();
+    prismaTx = prisma;
+    const realTransaction = prisma.$transaction;
+    let attempts = 0;
+    prisma.$transaction = jest.fn(async (fn: any) => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("write conflict"), { code: "P2034" });
+      return realTransaction(fn);
+    });
+    const engine = new AccountingPostingEngine(prisma);
+
+    const result = await engine.postPrepared(
+      { organizationId: "org-1" },
+      async () => ({
+        request: {
+          organizationId: "org-1",
+          periodId: "period-1",
+          sourceEvent: "POS_SALE_COMPLETED",
+          lines: [{ accountId: "cash", debit: 10 }, { accountId: "sales", credit: 10 }],
+        },
+        afterPost: async (_tx, entry) => entry.id,
+      }),
+      async (_tx, entry) => entry.id,
+    );
+
+    expect(result).toBe("je-1");
+    expect(attempts).toBe(2);
+    expect(prisma.__state.createdEntries).toHaveLength(1);
+  });
 });

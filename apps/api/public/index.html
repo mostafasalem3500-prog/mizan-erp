@@ -53,6 +53,7 @@
       <button class="nav-item" data-view="purchases"><i class="ri-store-2-line"></i><span>المشتريات</span></button>
       <button class="nav-item" data-view="assets"><i class="ri-building-2-line"></i><span>الأصول الثابتة</span></button>
       <button class="nav-item" data-view="reports"><i class="ri-bar-chart-box-line"></i><span>التقارير</span></button>
+      <button class="nav-item" data-view="vat"><i class="ri-percent-line"></i><span>ضريبة القيمة المضافة</span></button>
       <button class="nav-item" data-view="accounting-cycle"><i class="ri-loop-right-line"></i><span>الدورة المحاسبية</span></button>
       <button class="nav-item" data-view="accounts"><i class="ri-book-2-line"></i><span>دليل الحسابات</span></button>
       <button class="nav-item" data-view="settings"><i class="ri-settings-3-line"></i><span>إعدادات المنشأة</span></button>
@@ -266,6 +267,7 @@
             <option value="STANDARD">خاضع 15%</option>
             <option value="ZERO">نسبة صفر</option>
             <option value="EXEMPT">معفى</option>
+            <option value="OUT_OF_SCOPE">خارج النطاق</option>
           </select>
           <button type="submit" class="primary-btn">إضافة المنتج</button>
         </form>
@@ -427,6 +429,32 @@
       <div class="panel"><div class="archive-head"><div><h3>سجل القيود</h3><p>آخر 250 قيدًا مع مصدر الترحيل وحالة العكس</p></div><span class="source-badge" id="cycle-entry-count">0 قيد</span></div><div class="table-scroll"><table class="ledger-table"><thead><tr><th>التاريخ</th><th>المصدر</th><th>المرجع</th><th>مدين</th><th>دائن</th><th>الحالة</th></tr></thead><tbody id="cycle-journal-body"></tbody></table></div></div>
     </section>
 
+    <!-- ضريبة القيمة المضافة -->
+    <section id="view-vat" class="view" hidden>
+      <div class="vat-hero">
+        <div><span class="eyebrow">مصالحة المستندات مع الأستاذ العام</span><h3>مركز ضريبة القيمة المضافة</h3><p>ملخص رقابي للفترة يفرّق بين الخاضع 15% والنسبة الصفرية والمعفى وخارج النطاق.</p></div>
+        <label class="period-picker">الفترة المحاسبية<select id="vat-period"></select></label>
+      </div>
+      <div class="ledger-strip vat-kpis">
+        <div class="ledger-item"><span class="ledger-label">ضريبة المخرجات</span><span class="ledger-value" id="vat-output">—</span></div>
+        <div class="ledger-item"><span class="ledger-label">ضريبة المدخلات القابلة للاسترداد</span><span class="ledger-value" id="vat-input">—</span></div>
+        <div class="ledger-item"><span class="ledger-label">صافي المستحق</span><span class="ledger-value" id="vat-net">—</span></div>
+        <div class="ledger-item"><span class="ledger-label">المصالحة مع الأستاذ</span><span class="ledger-value" id="vat-reconciled">—</span></div>
+      </div>
+      <div class="vat-grid">
+        <div class="panel"><div class="archive-head"><div><h3>المبيعات والمخرجات</h3><p>فواتير المبيعات ونقطة البيع بعد خصم المرتجعات المسجلة</p></div></div><div class="table-scroll"><table class="ledger-table"><thead><tr><th>الفئة</th><th>الأساس الضريبي</th><th>الضريبة</th></tr></thead><tbody id="vat-sales-body"></tbody></table></div></div>
+        <div class="panel"><div class="archive-head"><div><h3>المشتريات والمدخلات</h3><p>فواتير الموردين والمصروفات المصنفة ضريبيًا</p></div></div><div class="table-scroll"><table class="ledger-table"><thead><tr><th>الفئة</th><th>الأساس الضريبي</th><th>الضريبة</th></tr></thead><tbody id="vat-purchases-body"></tbody></table></div></div>
+      </div>
+      <div class="panel vat-reconciliation">
+        <div><span class="eyebrow">اختبار تحكّم</span><h3>مصالحة حسابات الضريبة</h3><p id="vat-notice" class="panel-help"></p></div>
+        <div class="vat-checks"><span>فرق المخرجات <strong id="vat-output-diff">—</strong></span><span>فرق المدخلات <strong id="vat-input-diff">—</strong></span><span>المستندات القديمة بلا فترة <strong id="vat-legacy-count">—</strong></span></div>
+      </div>
+      <div class="phase-readiness panel">
+        <h3>جاهزية الفوترة الإلكترونية</h3>
+        <div class="phase-steps"><span class="ready"><i class="ri-check-line"></i> إنشاء وحفظ المرحلة الأولى</span><span class="ready"><i class="ri-check-line"></i> بنية XML وQR</span><span class="pending"><i class="ri-time-line"></i> الختم التشفيري CSID</span><span class="pending"><i class="ri-time-line"></i> الربط الحي Clearance / Reporting</span></div>
+      </div>
+    </section>
+
     <!-- التقارير -->
     <section id="view-reports" class="view" hidden>
       <div class="panel">
@@ -466,7 +494,7 @@
       <label>كود الصنف<input id="quick-product-sku" type="text" placeholder="SKU-001" required /></label>
       <label>سعر البيع<input id="quick-product-price" type="number" min="0.01" step="0.01" placeholder="0.00" required /></label>
       <label>الوحدة<select id="quick-product-unit"><option value="PCS">حبة</option><option value="BOX">كرتون</option><option value="KG">كيلوجرام</option><option value="LTR">لتر</option></select></label>
-      <label>الضريبة<select id="quick-product-tax"><option value="STANDARD">خاضع 15%</option><option value="ZERO">نسبة صفر</option><option value="EXEMPT">معفى</option></select></label>
+      <label>الضريبة<select id="quick-product-tax"><option value="STANDARD">خاضع 15%</option><option value="ZERO">نسبة صفر</option><option value="EXEMPT">معفى</option><option value="OUT_OF_SCOPE">خارج النطاق</option></select></label>
       <button type="submit" class="primary-btn wide"><i class="ri-save-line"></i>حفظ وإضافته إلى السلة</button>
       <p id="quick-product-result" class="form-result wide" role="status"></p>
     </form>

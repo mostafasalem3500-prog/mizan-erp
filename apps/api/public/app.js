@@ -122,6 +122,7 @@ function showView(name) {
     purchases: "المشتريات",
     assets: "الأصول الثابتة",
     reports: "التقارير",
+    vat: "ضريبة القيمة المضافة",
     accounts: "دليل الحسابات",
     "accounting-cycle": "الدورة المحاسبية",
     settings: "إعدادات المنشأة",
@@ -135,6 +136,7 @@ function showView(name) {
   if (name === "shift") loadShiftView();
   if (name === "returns") loadReturnsView();
   if (name === "reports") loadReports();
+  if (name === "vat") loadVatCenter();
   if (name === "accounting-cycle") loadAccountingCycle();
   if (name === "inventory") loadInventoryView();
   if (name === "purchases") loadPurchasesView();
@@ -263,6 +265,7 @@ function addInvoiceLine() {
       <option value="STANDARD">خاضع 15%</option>
       <option value="ZERO">نسبة صفر</option>
       <option value="EXEMPT">معفى</option>
+      <option value="OUT_OF_SCOPE">خارج النطاق</option>
     </select>
   `;
   document.getElementById("invoice-lines").appendChild(row);
@@ -678,6 +681,39 @@ document.getElementById("cycle-final-close").addEventListener("click", () => {
   }
 });
 
+// ---------- مركز ضريبة القيمة المضافة ----------
+const VAT_LABELS = {
+  STANDARD: "خاضع للنسبة الأساسية 15%",
+  ZERO: "خاضع لنسبة صفر",
+  EXEMPT: "معفى من الضريبة",
+  OUT_OF_SCOPE: "خارج نطاق الضريبة",
+};
+
+async function loadVatCenter(preferredPeriodId) {
+  const periods = await api(`/api/v1/organizations/${state.orgId}/periods`);
+  const select = document.getElementById("vat-period");
+  const selected = preferredPeriodId || select.value || state.periodId || periods.find((period) => period.status === "OPEN")?.id || periods[0]?.id;
+  select.innerHTML = periods.map((period) => `<option value="${escapeHtml(period.id)}">${new Date(period.startDate).toLocaleDateString("ar-SA")} — ${new Date(period.endDate).toLocaleDateString("ar-SA")} · ${PERIOD_STATUS_LABELS[period.status] || period.status}</option>`).join("");
+  if (!selected) return;
+  select.value = selected;
+  const report = await api(`/api/v1/organizations/${state.orgId}/tax/vat/periods/${selected}/summary`);
+  document.getElementById("vat-output").textContent = `${report.totals.outputVat} ر.س`;
+  document.getElementById("vat-input").textContent = `${report.totals.recoverableInputVat} ر.س`;
+  document.getElementById("vat-net").textContent = `${report.totals.netVatPayable} ر.س`;
+  const reconciled = document.getElementById("vat-reconciled");
+  reconciled.textContent = report.reconciliation.isReconciled ? "متصالح ✓" : "يوجد فرق يحتاج مراجعة";
+  reconciled.className = `ledger-value ${report.reconciliation.isReconciled ? "status-posted" : "status-reversed"}`;
+  const rows = (items) => items.map((item) => `<tr><td>${escapeHtml(VAT_LABELS[item.code] || item.code)}</td><td class="num">${escapeHtml(item.taxableAmount)}</td><td class="num">${escapeHtml(item.taxAmount)}</td></tr>`).join("");
+  document.getElementById("vat-sales-body").innerHTML = rows(report.sales);
+  document.getElementById("vat-purchases-body").innerHTML = rows(report.purchases);
+  document.getElementById("vat-output-diff").textContent = `${report.reconciliation.outputDifference} ر.س`;
+  document.getElementById("vat-input-diff").textContent = `${report.reconciliation.inputDifference} ر.س`;
+  document.getElementById("vat-legacy-count").textContent = Object.values(report.legacyDocumentsWithoutPeriod).reduce((sum, value) => sum + value, 0);
+  document.getElementById("vat-notice").textContent = report.noticeAr;
+}
+
+document.getElementById("vat-period").addEventListener("change", (event) => loadVatCenter(event.target.value));
+
 // ---------- التقارير ----------
 async function loadReports() {
   const periodId = await findAnOpenPeriodId();
@@ -819,6 +855,12 @@ function addBillLine() {
       <option value="">بدون ربط بمنتج (مصروف عام)</option>
       ${state.products.map((p) => `<option value="${p.id}">${p.name}</option>`).join("")}
     </select>
+    <select class="bill-line-tax">
+      <option value="STANDARD">خاضع 15%</option>
+      <option value="ZERO">نسبة صفر</option>
+      <option value="EXEMPT">معفى</option>
+      <option value="OUT_OF_SCOPE">خارج النطاق</option>
+    </select>
   `;
   document.getElementById("bill-lines").appendChild(row);
 }
@@ -849,7 +891,7 @@ document.getElementById("bill-form").addEventListener("submit", async (e) => {
       description: row.querySelector(".bill-line-desc").value,
       quantity: Number(row.querySelector(".bill-line-qty").value),
       unitCost: Number(row.querySelector(".bill-line-cost").value),
-      taxCode: "STANDARD",
+      taxCode: row.querySelector(".bill-line-tax").value,
       ...(productId ? { productId } : {}),
     };
   });

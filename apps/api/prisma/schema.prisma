@@ -251,6 +251,7 @@ model SalesInvoice {
   id             String   @id
   organizationId String
   customerId     String
+  periodId       String   @default("")
   lines          Json
   subtotal       Decimal  @db.Decimal(18, 4)
   taxTotal       Decimal  @db.Decimal(18, 4)
@@ -264,6 +265,7 @@ model SalesInvoice {
 
   @@index([organizationId, issueDate])
   @@index([organizationId, customerId])
+  @@index([organizationId, periodId])
   @@map("sales_invoices")
 }
 
@@ -303,6 +305,7 @@ model PurchaseBill {
   id             String   @id
   organizationId String
   supplierId     String
+  periodId       String   @default("")
   lines          Json
   subtotal       Decimal  @db.Decimal(18, 4)
   taxTotal       Decimal  @db.Decimal(18, 4)
@@ -316,15 +319,18 @@ model PurchaseBill {
 
   @@index([organizationId, issueDate])
   @@index([organizationId, supplierId])
+  @@index([organizationId, periodId])
   @@map("purchase_bills")
 }
 
 model Expense {
   id                 String   @id
   organizationId     String
+  periodId            String   @default("")
   expenseAccountCode String
   paymentAccountCode String
   amount             Decimal  @db.Decimal(18, 4)
+  taxCode            String   @default("STANDARD")
   taxAmount          Decimal  @db.Decimal(18, 4)
   total              Decimal  @db.Decimal(18, 4)
   description        String
@@ -334,6 +340,7 @@ model Expense {
   organization Organization @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, periodId])
   @@map("expenses")
 }
 

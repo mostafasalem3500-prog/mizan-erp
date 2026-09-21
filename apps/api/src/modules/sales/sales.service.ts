@@ -1,25 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { AccountingPostingEngine } from "../accounting/accounting-posting-engine";
 import { CustomersService } from "../customers/customers.service";
-
-/**
- * Spec band 25/52: tax codes are configurable, not hardcoded logic branches
- * sprinkled through the app — this is the Phase 0 stand-in for the real Tax
- * Engine (band 52), which will look up rates from `tax_codes`/`accounts`
- * settings instead of this fixed map.
- */
-const TAX_RATE_BY_CODE: Record<string, number> = {
-  STANDARD: 0.15,
-  ZERO: 0,
-  EXEMPT: 0,
-  OUT_OF_SCOPE: 0,
-};
+import { calculateDocumentTax, type TaxCode } from "../tax/tax-engine";
 
 export interface SalesInvoiceLineInput {
   description: string;
   quantity: number;
   unitPrice: number;
-  taxCode: keyof typeof TAX_RATE_BY_CODE;
+  taxCode: TaxCode;
+  taxExemptionReasonCode?: string;
+  taxExemptionReason?: string;
 }
 
 export interface CreateSalesInvoiceInput {
@@ -35,6 +25,7 @@ export interface SalesInvoiceRecord {
   id: string;
   organizationId: string;
   customerId: string;
+  periodId: string;
   lines: SalesInvoiceLineInput[];
   subtotal: string;
   taxTotal: string;
@@ -63,11 +54,6 @@ export interface SalesRepository {
   listAllInvoices(organizationId: string): Promise<SalesInvoiceRecord[]>;
 }
 
-/** Two-decimal rounding for money, applied only at the final result — never on intermediate line math (spec band 64). */
-function round2(value: number): string {
-  return value.toFixed(2);
-}
-
 @Injectable()
 export class SalesService {
   constructor(
@@ -93,21 +79,7 @@ export class SalesService {
       throw new NotFoundException(`Customer ${input.customerId} not found`);
     }
 
-    let subtotal = 0;
-    let taxTotal = 0;
-    for (const line of input.lines) {
-      if (line.quantity <= 0) {
-        throw new BadRequestException(`Line "${line.description}" must have a positive quantity`);
-      }
-      const rate = TAX_RATE_BY_CODE[line.taxCode];
-      if (rate === undefined) {
-        throw new BadRequestException(`Unknown tax code "${line.taxCode}"`);
-      }
-      const lineNet = line.quantity * line.unitPrice;
-      subtotal += lineNet;
-      taxTotal += lineNet * rate;
-    }
-    const total = subtotal + taxTotal;
+    const tax = calculateDocumentTax(input.lines);
 
     const glMapping = await this.repo.getGLAccountMapping(input.organizationId);
 
@@ -119,10 +91,10 @@ export class SalesService {
       reference: `Sales invoice for customer ${input.customerId}`,
       idempotencyKey: input.idempotencyKey,
       lines: [
-        { accountId: glMapping.accountsReceivableAccountId, debit: round2(total) },
-        { accountId: glMapping.salesRevenueAccountId, credit: round2(subtotal) },
-        ...(taxTotal > 0
-          ? [{ accountId: glMapping.vatOutputAccountId, credit: round2(taxTotal) }]
+        { accountId: glMapping.accountsReceivableAccountId, debit: tax.total },
+        { accountId: glMapping.salesRevenueAccountId, credit: tax.subtotal },
+        ...(Number(tax.taxTotal) > 0
+          ? [{ accountId: glMapping.vatOutputAccountId, credit: tax.taxTotal }]
           : []),
       ],
     });
@@ -131,10 +103,11 @@ export class SalesService {
       id: journalEntry.id, // Phase 0: invoice id piggybacks on the journal entry id; a real invoices table gets its own id + journalEntryId FK
       organizationId: input.organizationId,
       customerId: input.customerId,
+      periodId: input.periodId,
       lines: input.lines,
-      subtotal: round2(subtotal),
-      taxTotal: round2(taxTotal),
-      total: round2(total),
+      subtotal: tax.subtotal,
+      taxTotal: tax.taxTotal,
+      total: tax.total,
       journalEntryId: journalEntry.id,
       issueDate: new Date().toISOString(),
       paidAmount: "0.00",
@@ -171,6 +144,6 @@ export class SalesService {
         `Applying ${amount.toFixed(2)} would overpay invoice ${invoiceId}: total ${invoice.total}, already paid ${invoice.paidAmount}`,
       );
     }
-    return this.repo.saveInvoice({ ...invoice, paidAmount: round2(newPaid) });
+    return this.repo.saveInvoice({ ...invoice, paidAmount: newPaid.toFixed(2) });
   }
 }

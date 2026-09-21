@@ -5,6 +5,7 @@ import {
   PrismaExpensesRepository,
   PrismaInventoryRepository,
   PrismaPaymentsRepository,
+  PrismaPosRepository,
   PrismaPurchasesRepository,
   PrismaSalesRepository,
   PrismaShiftsRepository,
@@ -32,7 +33,7 @@ describe("Prisma operational repositories", () => {
       },
     };
     const repo = new PrismaSalesRepository(prisma as any, accounts as any);
-    const invoice = await repo.saveInvoice({ id: "inv-1", organizationId: "org-1", customerId: "c-1", lines: [], subtotal: "100.00", taxTotal: "15.00", total: "115.00", paidAmount: "0.00", journalEntryId: "je-1", issueDate: "2026-09-13T10:00:00.000Z" });
+    const invoice = await repo.saveInvoice({ id: "inv-1", organizationId: "org-1", customerId: "c-1", periodId: "period-1", lines: [], subtotal: "100.00", taxTotal: "15.00", total: "115.00", paidAmount: "0.00", journalEntryId: "je-1", issueDate: "2026-09-13T10:00:00.000Z" });
 
     expect(invoice.total).toBe("115.00");
     expect(await repo.findInvoice("org-2", "inv-1")).toBeNull();
@@ -57,7 +58,7 @@ describe("Prisma operational repositories", () => {
       },
     };
     const repo = new PrismaPurchasesRepository(prisma as any, accounts as any);
-    const base = { id: "bill-1", organizationId: "org-1", supplierId: "s-1", lines: [], subtotal: "200.00", taxTotal: "30.00", total: "230.00", journalEntryId: "je-2", issueDate: "2026-09-13T10:00:00.000Z" };
+    const base = { id: "bill-1", organizationId: "org-1", supplierId: "s-1", periodId: "period-1", lines: [], subtotal: "200.00", taxTotal: "30.00", total: "230.00", journalEntryId: "je-2", issueDate: "2026-09-13T10:00:00.000Z" };
     await repo.saveBill({ ...base, paidAmount: "0.00" });
     const paid = await repo.saveBill({ ...base, paidAmount: "50.00" });
 
@@ -85,7 +86,7 @@ describe("Prisma operational repositories", () => {
   });
 
   test("expenses, assets, and payments map Prisma decimals to API money strings", async () => {
-    const expense = { upsert: jest.fn(async ({ create }: any) => create), findFirst: jest.fn(async () => null) };
+    const expense = { upsert: jest.fn(async ({ create }: any) => create), findFirst: jest.fn(async () => null), findMany: jest.fn(async () => []) };
     const asset = { upsert: jest.fn(async ({ create }: any) => create), findFirst: jest.fn(async () => null) };
     const paymentRows: any[] = [];
     const payment = {
@@ -94,7 +95,7 @@ describe("Prisma operational repositories", () => {
     };
     const prisma = { expense, asset, payment };
 
-    const savedExpense = await new PrismaExpensesRepository(prisma as any).save({ id: "e-1", organizationId: "org-1", expenseAccountCode: "6100", paymentAccountCode: "1100", amount: "10.00", taxAmount: "1.50", total: "11.50", description: "اختبار", journalEntryId: "je-e" });
+    const savedExpense = await new PrismaExpensesRepository(prisma as any).save({ id: "e-1", organizationId: "org-1", periodId: "period-1", expenseAccountCode: "6100", paymentAccountCode: "1100", amount: "10.00", taxCode: "STANDARD", taxAmount: "1.50", total: "11.50", description: "اختبار", journalEntryId: "je-e" });
     const savedAsset = await new PrismaAssetsRepository(prisma as any).save({ id: "a-1", organizationId: "org-1", name: "جهاز", cost: "1200.00", residualValue: "0.00", usefulLifeMonths: 12, accumulatedDepreciation: "100.00", acquisitionJournalEntryId: "je-a" });
     const payments = new PrismaPaymentsRepository(prisma as any);
     await payments.save({ id: "pay-1", organizationId: "org-1", type: "CUSTOMER", partyId: "c-1", amount: "25.50", journalEntryId: "je-p" });
@@ -135,5 +136,59 @@ describe("Prisma operational repositories", () => {
     expect(closed.status).toBe("CLOSED");
     expect(await shiftsRepo.findOpenShiftForTerminal("org-1", "T1")).toBeNull();
     expect(auditRows[0]).toEqual(expect.objectContaining({ action: "period.close", organizationId: "org-1", outcome: "success" }));
+  });
+
+  test("POS sale persists document, stock deduction, COGS and shift cash in one prepared posting", async () => {
+    const stock = { organizationId: "org-1", productId: "p-1", quantityOnHand: 5, averageCost: 12 };
+    let savedSale: any;
+    let shiftedBy = "0.00";
+    let capturedRequest: any;
+    const tx: any = {
+      product: { findFirst: jest.fn(async () => ({ id: "p-1" })) },
+      stockLevel: {
+        findUnique: jest.fn(async () => stock),
+        upsert: jest.fn(async ({ update }: any) => Object.assign(stock, update)),
+      },
+      posShift: {
+        updateMany: jest.fn(async ({ data }: any) => { shiftedBy = data.cashSalesTotal.increment; return { count: 1 }; }),
+      },
+      posSale: {
+        create: jest.fn(async ({ data }: any) => { savedSale = data; return data; }),
+        findFirst: jest.fn(async () => savedSale),
+      },
+    };
+    const postingEngine = {
+      postPrepared: jest.fn(async (_identity: any, prepare: any) => {
+        const prepared = await prepare(tx);
+        capturedRequest = prepared.request;
+        return prepared.afterPost(tx, { id: "12345678-entry" });
+      }),
+    };
+    const repo = new PrismaPosRepository({} as any, accounts as any, postingEngine as any);
+
+    const sale = await repo.completeSaleAtomically({
+      organizationId: "org-1",
+      periodId: "period-1",
+      terminalId: "T1",
+      shiftId: "shift-1",
+      lines: [{ description: "صنف", quantity: 2, unitPrice: 20, taxCode: "ZERO", productId: "p-1" }],
+      tenders: [{ method: "CASH", amount: 40 }],
+      subtotal: "40.00",
+      taxTotal: "0.00",
+      total: "40.00",
+      cashTendered: "40.00",
+      financialLines: [{ accountId: "account-1100", debit: "40.00" }, { accountId: "account-4100", credit: "40.00" }],
+      idempotencyKey: "atomic-sale-1",
+      receiptTemplate: "thermal",
+    });
+
+    expect(stock.quantityOnHand).toBe(3);
+    expect(shiftedBy).toBe("40.00");
+    expect(capturedRequest.lines).toEqual(expect.arrayContaining([
+      { accountId: "account-5100", debit: "24.00" },
+      { accountId: "account-1300", credit: "24.00" },
+    ]));
+    expect(sale.saleJournalEntryId).toBe("12345678-entry");
+    expect(sale.inventoryEffects[0]).toEqual(expect.objectContaining({ unitCostUsed: "12.00", cogsJournalEntryId: "12345678-entry" }));
   });
 });

@@ -3,19 +3,15 @@ import { AccountingPostingEngine } from "../accounting/accounting-posting-engine
 import { SuppliersService } from "../suppliers/suppliers.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { ProductsService } from "../inventory/products.service";
-
-const TAX_RATE_BY_CODE: Record<string, number> = {
-  STANDARD: 0.15,
-  ZERO: 0,
-  EXEMPT: 0,
-  OUT_OF_SCOPE: 0,
-};
+import { calculateDocumentTax, type TaxCode } from "../tax/tax-engine";
 
 export interface PurchaseBillLineInput {
   description: string;
   quantity: number;
   unitCost: number;
-  taxCode: keyof typeof TAX_RATE_BY_CODE;
+  taxCode: TaxCode;
+  taxExemptionReasonCode?: string;
+  taxExemptionReason?: string;
   /** When set, this line also updates inventory stock/weighted-average cost for that product (spec bands 20/26 integration). */
   productId?: string;
 }
@@ -33,6 +29,7 @@ export interface PurchaseBillRecord {
   id: string;
   organizationId: string;
   supplierId: string;
+  periodId: string;
   lines: PurchaseBillLineInput[];
   subtotal: string;
   taxTotal: string;
@@ -56,10 +53,6 @@ export interface PurchasesRepository {
   findBill(organizationId: string, billId: string): Promise<PurchaseBillRecord | null>;
   listBillsForSupplier(organizationId: string, supplierId: string): Promise<PurchaseBillRecord[]>;
   listAllBills(organizationId: string): Promise<PurchaseBillRecord[]>;
-}
-
-function round2(value: number): string {
-  return value.toFixed(2);
 }
 
 @Injectable()
@@ -116,33 +109,19 @@ export class PurchasesService {
       }
     }
 
-    let subtotal = 0;
-    let taxTotal = 0;
-    for (const line of input.lines) {
-      if (line.quantity <= 0) {
-        throw new BadRequestException(`Line "${line.description}" must have a positive quantity`);
-      }
-      const rate = TAX_RATE_BY_CODE[line.taxCode];
-      if (rate === undefined) {
-        throw new BadRequestException(`Unknown tax code "${line.taxCode}"`);
-      }
-      const lineNet = line.quantity * line.unitCost;
-      subtotal += lineNet;
-      taxTotal += lineNet * rate;
-    }
-    const total = subtotal + taxTotal;
+    const tax = calculateDocumentTax(input.lines.map((line) => ({ ...line, unitPrice: line.unitCost })));
 
     const glMapping = await this.repo.getGLAccountMapping(input.organizationId);
 
     const stockedSubtotal = input.lines
       .filter((l) => l.productId)
       .reduce((sum, l) => sum + l.quantity * l.unitCost, 0);
-    const nonStockedSubtotal = subtotal - stockedSubtotal;
+    const nonStockedSubtotal = Number(tax.subtotal) - stockedSubtotal;
 
     const debitLines = [
-      ...(stockedSubtotal > 0 ? [{ accountId: glMapping.inventoryAccountId, debit: round2(stockedSubtotal) }] : []),
-      ...(nonStockedSubtotal > 0 ? [{ accountId: glMapping.generalExpenseAccountId, debit: round2(nonStockedSubtotal) }] : []),
-      ...(taxTotal > 0 ? [{ accountId: glMapping.vatInputAccountId, debit: round2(taxTotal) }] : []),
+      ...(stockedSubtotal > 0 ? [{ accountId: glMapping.inventoryAccountId, debit: stockedSubtotal.toFixed(2) }] : []),
+      ...(nonStockedSubtotal > 0 ? [{ accountId: glMapping.generalExpenseAccountId, debit: nonStockedSubtotal.toFixed(2) }] : []),
+      ...(Number(tax.taxTotal) > 0 ? [{ accountId: glMapping.vatInputAccountId, debit: tax.taxTotal }] : []),
     ];
 
     const journalEntry = await this.postingEngine.post({
@@ -152,7 +131,7 @@ export class PurchasesService {
       sourceEvent: "PURCHASE_BILL_POSTED",
       reference: `Purchase bill from supplier ${input.supplierId}`,
       idempotencyKey: input.idempotencyKey,
-      lines: [...debitLines, { accountId: glMapping.accountsPayableAccountId, credit: round2(total) }],
+      lines: [...debitLines, { accountId: glMapping.accountsPayableAccountId, credit: tax.total }],
     });
 
     // Update stock/weighted-average cost for each stocked line — no
@@ -194,10 +173,11 @@ export class PurchasesService {
       id: journalEntry.id,
       organizationId: input.organizationId,
       supplierId: input.supplierId,
+      periodId: input.periodId,
       lines: input.lines,
-      subtotal: round2(subtotal),
-      taxTotal: round2(taxTotal),
-      total: round2(total),
+      subtotal: tax.subtotal,
+      taxTotal: tax.taxTotal,
+      total: tax.total,
       journalEntryId: journalEntry.id,
       issueDate: new Date().toISOString(),
       paidAmount: "0.00",
@@ -228,6 +208,6 @@ export class PurchasesService {
         `Applying ${amount.toFixed(2)} would overpay bill ${billId}: total ${bill.total}, already paid ${bill.paidAmount}`,
       );
     }
-    return this.repo.saveBill({ ...bill, paidAmount: round2(newPaid) });
+    return this.repo.saveBill({ ...bill, paidAmount: newPaid.toFixed(2) });
   }
 }

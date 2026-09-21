@@ -28,7 +28,7 @@ import type { CustomersRepository, CustomerRow, CreateCustomerInput } from "../m
 import type { SuppliersRepository, SupplierRow, CreateSupplierInput } from "../modules/suppliers/suppliers.service";
 import type { ProductsRepository, ProductRow, CreateProductInput } from "../modules/inventory/products.service";
 import type { RolePermissionLookup } from "../modules/common/permissions.guard";
-import type { PosRepository, PosGLAccountMapping, PosSaleRecord } from "../modules/pos/pos.service";
+import type { PosRepository, PosGLAccountMapping, PosSaleRecord, AtomicPosSaleInput } from "../modules/pos/pos.service";
 import type { SalesRepository, SalesGLAccountMapping, SalesInvoiceRecord } from "../modules/sales/sales.service";
 import type { PurchasesRepository, PurchasesGLAccountMapping, PurchaseBillRecord } from "../modules/purchases/purchases.service";
 import type { InventoryRepository, InventoryGLAccountMapping, StockLevel } from "../modules/inventory/inventory.service";
@@ -39,6 +39,8 @@ import type { BranchesRepository, BranchRow, CreateBranchInput } from "../module
 import type { ShiftsRepository, ShiftRecord } from "../modules/pos/shifts.service";
 import type { AuditLogEntry, AuditSink } from "../modules/common/audit.interceptor";
 import { AccountsService } from "../modules/accounts/accounts.service";
+import { AccountingPostingEngine } from "../modules/accounting/accounting-posting-engine";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { OWNER_PERMISSIONS } from "./prisma-seed";
 
 function toAccountRow(row: any): AccountRow {
@@ -486,6 +488,7 @@ function toSalesInvoiceRecord(row: any): SalesInvoiceRecord {
     id: row.id,
     organizationId: row.organizationId,
     customerId: row.customerId,
+    periodId: row.periodId ?? "",
     lines: row.lines,
     subtotal: money2(row.subtotal),
     taxTotal: money2(row.taxTotal),
@@ -511,6 +514,7 @@ export class PrismaSalesRepository implements SalesRepository {
     const data = {
       organizationId: record.organizationId,
       customerId: record.customerId,
+      periodId: record.periodId,
       lines: record.lines,
       subtotal: record.subtotal,
       taxTotal: record.taxTotal,
@@ -544,6 +548,7 @@ function toPurchaseBillRecord(row: any): PurchaseBillRecord {
     id: row.id,
     organizationId: row.organizationId,
     supplierId: row.supplierId,
+    periodId: row.periodId ?? "",
     lines: row.lines,
     subtotal: money2(row.subtotal),
     taxTotal: money2(row.taxTotal),
@@ -570,6 +575,7 @@ export class PrismaPurchasesRepository implements PurchasesRepository {
     const data = {
       organizationId: record.organizationId,
       supplierId: record.supplierId,
+      periodId: record.periodId,
       lines: record.lines,
       subtotal: record.subtotal,
       taxTotal: record.taxTotal,
@@ -625,7 +631,7 @@ export class PrismaInventoryRepository implements InventoryRepository {
 }
 
 function toExpenseRecord(row: any): ExpenseRecord {
-  return { id: row.id, organizationId: row.organizationId, expenseAccountCode: row.expenseAccountCode, paymentAccountCode: row.paymentAccountCode, amount: money2(row.amount), taxAmount: money2(row.taxAmount), total: money2(row.total), description: row.description, journalEntryId: row.journalEntryId };
+  return { id: row.id, organizationId: row.organizationId, periodId: row.periodId ?? "", expenseAccountCode: row.expenseAccountCode, paymentAccountCode: row.paymentAccountCode, amount: money2(row.amount), taxCode: row.taxCode ?? "STANDARD", taxAmount: money2(row.taxAmount), total: money2(row.total), description: row.description, journalEntryId: row.journalEntryId };
 }
 
 export class PrismaExpensesRepository implements ExpensesRepository {
@@ -638,6 +644,10 @@ export class PrismaExpensesRepository implements ExpensesRepository {
   async findById(organizationId: string, expenseId: string): Promise<ExpenseRecord | null> {
     const row = await (this.prisma as any).expense.findFirst({ where: { id: expenseId, organizationId } });
     return row ? toExpenseRecord(row) : null;
+  }
+  async listAll(organizationId: string): Promise<ExpenseRecord[]> {
+    const rows = await (this.prisma as any).expense.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" } });
+    return rows.map(toExpenseRecord);
   }
 }
 
@@ -788,7 +798,11 @@ function toPosSaleRecord(row: any): PosSaleRecord {
 }
 
 export class PrismaPosRepository implements PosRepository {
-  constructor(private readonly prisma: PrismaClient, private readonly accounts: AccountsService) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly accounts: AccountsService,
+    private readonly postingEngine?: AccountingPostingEngine,
+  ) {}
 
   async getGLAccountMapping(organizationId: string): Promise<PosGLAccountMapping> {
     return {
@@ -825,6 +839,155 @@ export class PrismaPosRepository implements PosRepository {
     };
     const row = await (this.prisma as any).posSale.upsert({ where: { id: record.id }, create: { id: record.id, ...data }, update: data });
     return toPosSaleRecord(row);
+  }
+
+  async completeSaleAtomically(input: AtomicPosSaleInput): Promise<PosSaleRecord> {
+    if (!this.postingEngine) {
+      throw new Error("Atomic POS posting requires AccountingPostingEngine");
+    }
+
+    return this.postingEngine.postPrepared(
+      { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey },
+      async (tx) => {
+        const stockByProduct = new Map<string, { quantityOnHand: number; averageCost: string }>();
+        const effects: Array<Omit<PosSaleRecord["inventoryEffects"][number], "cogsJournalEntryId">> = [];
+        let totalCogsMinor = 0;
+
+        for (let lineIndex = 0; lineIndex < input.lines.length; lineIndex++) {
+          const line = input.lines[lineIndex];
+          if (!line.productId) continue;
+
+          let stock = stockByProduct.get(line.productId);
+          if (!stock) {
+            const product = await tx.product.findFirst({
+              where: { id: line.productId, organizationId: input.organizationId },
+              select: { id: true },
+            });
+            if (!product) throw new NotFoundException(`Product ${line.productId} not found`);
+
+            const row = await tx.stockLevel.findUnique({
+              where: {
+                organizationId_productId: {
+                  organizationId: input.organizationId,
+                  productId: line.productId,
+                },
+              },
+            });
+            stock = {
+              quantityOnHand: row ? Number(row.quantityOnHand) : 0,
+              averageCost: row ? Number(row.averageCost).toFixed(2) : "0.00",
+            };
+          }
+
+          if (stock.quantityOnHand < line.quantity) {
+            throw new BadRequestException(
+              `Insufficient stock for product ${line.productId}: have ${stock.quantityOnHand}, tried to issue ${line.quantity}`,
+            );
+          }
+
+          const lineCogsMinor = Math.round(line.quantity * Number(stock.averageCost) * 100);
+          totalCogsMinor += lineCogsMinor;
+          stock.quantityOnHand -= line.quantity;
+          stockByProduct.set(line.productId, stock);
+          effects.push({
+            lineIndex,
+            productId: line.productId,
+            quantity: line.quantity,
+            unitCostUsed: stock.averageCost,
+          });
+        }
+
+        const mapping = await this.getGLAccountMapping(input.organizationId);
+        const financialLines = [
+          ...input.financialLines,
+          ...(totalCogsMinor > 0
+            ? [
+                { accountId: mapping.cogsAccountId, debit: (totalCogsMinor / 100).toFixed(2) },
+                { accountId: mapping.inventoryAccountId, credit: (totalCogsMinor / 100).toFixed(2) },
+              ]
+            : []),
+        ];
+
+        return {
+          request: {
+            organizationId: input.organizationId,
+            branchId: input.branchId,
+            periodId: input.periodId,
+            sourceEvent: "POS_SALE_COMPLETED" as const,
+            reference: `POS sale — terminal ${input.terminalId}`,
+            idempotencyKey: input.idempotencyKey,
+            lines: financialLines,
+          },
+          afterPost: async (transaction: any, entry: any) => {
+            for (const [productId, stock] of stockByProduct) {
+              await transaction.stockLevel.upsert({
+                where: {
+                  organizationId_productId: { organizationId: input.organizationId, productId },
+                },
+                create: {
+                  organizationId: input.organizationId,
+                  productId,
+                  quantityOnHand: stock.quantityOnHand,
+                  averageCost: stock.averageCost,
+                },
+                update: { quantityOnHand: stock.quantityOnHand, averageCost: stock.averageCost },
+              });
+            }
+
+            if (input.shiftId) {
+              const shifted = await transaction.posShift.updateMany({
+                where: {
+                  id: input.shiftId,
+                  organizationId: input.organizationId,
+                  terminalId: input.terminalId,
+                  status: "OPEN",
+                },
+                data: { cashSalesTotal: { increment: input.cashTendered } },
+              });
+              if (shifted.count !== 1) {
+                throw new BadRequestException(`Shift ${input.shiftId} is no longer OPEN`);
+              }
+            }
+
+            const soldAt = new Date();
+            const invoiceNumber = `POS-${soldAt.toISOString().slice(0, 10).replaceAll("-", "")}-${entry.id.slice(0, 8).toUpperCase()}`;
+            const row = await transaction.posSale.create({
+              data: {
+                id: entry.id,
+                organizationId: input.organizationId,
+                customerId: input.customerId,
+                invoiceNumber,
+                terminalId: input.terminalId,
+                periodId: input.periodId,
+                lines: input.lines,
+                tenders: input.tenders,
+                subtotal: input.subtotal,
+                taxTotal: input.taxTotal,
+                total: input.total,
+                saleJournalEntryId: entry.id,
+                inventoryEffects: effects.map((effect) => ({ ...effect, cogsJournalEntryId: entry.id })),
+                remainingQuantities: input.lines.map((line) => line.quantity),
+                status: "COMPLETED",
+                shiftId: input.shiftId,
+                receiptTemplate: input.receiptTemplate,
+                invoiceTemplateSnapshot: input.invoiceTemplateSnapshot,
+                soldAt,
+              },
+              include: { customer: true },
+            });
+            return toPosSaleRecord(row);
+          },
+        };
+      },
+      async (tx, entry) => {
+        const row = await tx.posSale.findFirst({
+          where: { id: entry.id, organizationId: input.organizationId },
+          include: { customer: true },
+        });
+        if (!row) throw new Error(`Idempotent POS sale ${entry.id} has no persisted source document`);
+        return toPosSaleRecord(row);
+      },
+    );
   }
 
   async findSale(organizationId: string, saleId: string): Promise<PosSaleRecord | null> {

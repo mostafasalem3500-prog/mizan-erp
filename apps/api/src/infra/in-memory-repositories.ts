@@ -785,6 +785,10 @@ export class InMemoryExpensesRepository implements ExpensesRepository {
     const r = this.db.expenses.get(expenseId);
     return r && r.organizationId === organizationId ? { ...r } : null;
   }
+
+  async listAll(organizationId: string): Promise<ExpenseRecord[]> {
+    return [...this.db.expenses.values()].filter((r) => r.organizationId === organizationId).map((r) => ({ ...r }));
+  }
 }
 
 export class InMemoryAssetsRepository implements AssetsRepository {

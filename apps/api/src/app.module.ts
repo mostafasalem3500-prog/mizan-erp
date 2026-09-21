@@ -29,6 +29,8 @@ import { ShiftsController } from "./modules/pos/shifts.controller";
 import { ShiftsService } from "./modules/pos/shifts.service";
 import { ReportingController } from "./modules/reporting/reporting.controller";
 import { ReportingService } from "./modules/reporting/reporting.service";
+import { VatController } from "./modules/tax/vat.controller";
+import { VatReportingService } from "./modules/tax/vat-reporting.service";
 import { AccountsController } from "./modules/accounts/accounts.controller";
 import { AccountsService } from "./modules/accounts/accounts.service";
 import { ExpensesController } from "./modules/expenses/expenses.controller";
@@ -106,6 +108,7 @@ class ConsoleAuditSink implements AuditSink {
     PosController,
     ShiftsController,
     ReportingController,
+    VatController,
     AccountsController,
     ExpensesController,
     AssetsController,
@@ -231,7 +234,12 @@ class ConsoleAuditSink implements AuditSink {
       inject: [AccountingPostingEngine, SuppliersService, InventoryService, "PurchasesRepository", ProductsService],
     },
 
-    { provide: "PosRepository", useFactory: (db: InMemoryDatabase, accounts: AccountsService, realPrisma: any) => realPrisma ? new PrismaPosRepository(realPrisma, accounts) : new InMemoryPosRepository(db, accounts), inject: [InMemoryDatabase, AccountsService, "RealPrismaClientOrNull"] },
+    {
+      provide: "PosRepository",
+      useFactory: (db: InMemoryDatabase, accounts: AccountsService, realPrisma: any, engine: AccountingPostingEngine) =>
+        realPrisma ? new PrismaPosRepository(realPrisma, accounts, engine) : new InMemoryPosRepository(db, accounts),
+      inject: [InMemoryDatabase, AccountsService, "RealPrismaClientOrNull", AccountingPostingEngine],
+    },
     {
       provide: PosService,
       useFactory: (engine: AccountingPostingEngine, inventory: InventoryService, repo: any, shifts: ShiftsService, orgs: OrganizationsService, customers: CustomersService) =>
@@ -249,6 +257,12 @@ class ConsoleAuditSink implements AuditSink {
       useFactory: (accQuery: AccountingQueryService, typeLookup: any, ledgerRepo: any, accounts: AccountsService) =>
         new ReportingService(accQuery, typeLookup, ledgerRepo, accounts),
       inject: [AccountingQueryService, "AccountTypeLookup", "GeneralLedgerRepository", AccountsService],
+    },
+    {
+      provide: VatReportingService,
+      useFactory: (sales: SalesService, purchases: PurchasesService, expenses: ExpensesService, pos: PosService, accounting: AccountingQueryService, accounts: AccountsService) =>
+        new VatReportingService(sales, purchases, expenses, pos, accounting, accounts),
+      inject: [SalesService, PurchasesService, ExpensesService, PosService, AccountingQueryService, AccountsService],
     },
 
     { provide: "ExpensesRepository", useFactory: (db: InMemoryDatabase, realPrisma: any) => realPrisma ? new PrismaExpensesRepository(realPrisma) : new InMemoryExpensesRepository(db), inject: [InMemoryDatabase, "RealPrismaClientOrNull"] },
