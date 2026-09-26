@@ -5,7 +5,7 @@
 import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
 import { bootstrapCompany } from "../routes/auth";
-import { loadDemo } from "./demo";
+import { loadDemo, DEMO_VERSION } from "./demo";
 
 export async function seedDemoAccount() {
   const email = (process.env.DEMO_EMAIL || "").trim().toLowerCase();
@@ -29,8 +29,10 @@ export async function seedDemoAccount() {
     console.log(`[demo-account] created ${email} / company ${companyId}`);
   }
   const c = await db.one(`SELECT demo_loaded, demo_job FROM companies WHERE id=$1`, [companyId]);
-  if (!c.demoLoaded && !(c.demoJob && !c.demoJob.done && !c.demoJob.error && Date.now() - new Date(c.demoJob.at).getTime() < 10 * 60000)) {
-    console.log("[demo-account] loading demo dataset…");
+  const running = c.demoJob && !c.demoJob.done && !c.demoJob.error && Date.now() - new Date(c.demoJob.at).getTime() < 10 * 60000;
+  const stale = c.demoLoaded && Number(c.demoJob?.version || 0) < DEMO_VERSION; // showcase dataset older than this build → refresh
+  if ((!c.demoLoaded || stale) && !running) {
+    console.log(stale ? "[demo-account] refreshing showcase dataset to v" + DEMO_VERSION : "[demo-account] loading demo dataset…");
     loadDemo(companyId, userId, "مستخدم تجريبي")
       .then(() => console.log("[demo-account] demo dataset loaded"))
       .catch(async (e) => {

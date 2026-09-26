@@ -42,6 +42,9 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
   ["SV-001", "خدمة توصيل داخل المدينة", 5, 0, 25, "طلب"], ["SV-002", "خدمة تركيب وتشغيل", 5, 0, 150, "زيارة"], ["MD-001", "أدوية ومستلزمات معفاة", 0, 30, 30, "عبوة", "E"],
 ];
 
+/** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
+export const DEMO_VERSION = 5;
+
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
 }
@@ -285,7 +288,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
   await tx(async (t) => {
     const q1From = months[0], q1To = monthEnd(months[2]);
     if (q1To < end) await fileVatReturn(t, companyId, userName, q1From, q1To, true);
-    await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, at: new Date() })]);
+    await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);
   });
 }
 
