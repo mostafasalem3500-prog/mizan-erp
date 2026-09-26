@@ -42,17 +42,32 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
   const [open, setOpen] = useState<any[]>([]);
   const [alloc, setAlloc] = useState<Record<string, number>>({});
   const [auto, setAuto] = useState(true);
-  useEffect(() => { if (partner) api(`/payments/open-invoices/${partner.id}?direction=${direction}`).then(setOpen); else setOpen([]); setAlloc({}); }, [partner]);
+  const { data: currencies } = useFetch("/currencies");
+  const [currency, setCurrency] = useState("SAR");
+  const [fcAmount, setFcAmount] = useState<string>("");
+  const [rate, setRate] = useState<string>("");
+  const fc = currency !== "SAR";
+  useEffect(() => { if (partner) { api(`/payments/open-invoices/${partner.id}?direction=${direction}`).then(setOpen); setCurrency(partner.currency && partner.currency !== "SAR" ? partner.currency : "SAR"); } else setOpen([]); setAlloc({}); }, [partner]);
+  useEffect(() => { const c = currencies?.find((x: any) => x.code === currency); if (c && fc) setRate(String(c.rate)); }, [currency, currencies]);
+  useEffect(() => { if (fc && fcAmount && rate) setAmount((Number(fcAmount) * Number(rate)).toFixed(2)); }, [fcAmount, rate, fc]);
+  // for foreign-currency vouchers allocations are in the foreign currency (only same-currency documents are listed)
+  const docs = fc ? open.filter((i) => i.currency === currency) : open;
+  const dueOf = (i: any) => (fc ? Number(i.fcDue) : Number(i.due));
   const allocated = Object.values(alloc).reduce((a, b) => a + (b || 0), 0);
   const amt = Number(amount || 0);
-  const autoFill = () => { let rest = amt; const a: Record<string, number> = {}; for (const i of open) { const d = Math.min(Number(i.due), rest); if (d <= 0) break; a[i.id] = Math.round(d * 100) / 100; rest -= d; } setAlloc(a); };
-  useEffect(() => { if (auto) autoFill(); }, [amount, open, auto]);
+  const payAmt = fc ? Number(fcAmount || 0) : amt;
+  const autoFill = () => { let rest = payAmt; const a: Record<string, number> = {}; for (const i of docs) { const d = Math.min(dueOf(i), rest); if (d <= 0) break; a[i.id] = Math.round(d * 100) / 100; rest -= d; } setAlloc(a); };
+  useEffect(() => { if (auto) autoFill(); }, [amount, fcAmount, open, auto, currency]);
+  const sym = (currencies || []).find((x: any) => x.code === currency)?.symbol || currency;
   return (
-    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0} onClick={() => run(async () => { await api("/payments", { body: { direction, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
+    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label={direction === "IN" ? "العميل" : "المورد"} span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(direction === "IN" ? "CUSTOMER" : "SUPPLIER")} label={(p: any) => `${p.name} — الرصيد ${money(p.balance)}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="المبلغ"><NumInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        <Field label="العملة"><Select value={currency} onChange={(e) => { setCurrency(e.target.value); setAlloc({}); }}>{(currencies || [{ code: "SAR", nameAr: "ريال سعودي" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
+        {fc && <Field label={`المبلغ بالعملة (${sym})`}><NumInput value={fcAmount} onChange={(e) => setFcAmount(e.target.value)} /></Field>}
+        {fc && <Field label="سعر الصرف الفعلي (ر.س لكل وحدة)" hint="سعر البنك في هذه العملية — الفرق عن سعر الفاتورة يُقيد كأرباح/خسائر فروق عملة"><NumInput value={rate} onChange={(e) => setRate(e.target.value)} /></Field>}
+        <Field label={fc ? "المعادل بالريال (المبلغ الفعلي من الحساب)" : "المبلغ"}><NumInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="طريقة الدفع"><Select value={method} onChange={(e) => setMethod(e.target.value)}>{["CASH", "BANK", "CARD", "CHEQUE"].map((m) => <option key={m} value={m}>{METHOD_AR[m]}</option>)}</Select></Field>
         <Field label="الصندوق / البنك"><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
         <Field label="المرجع (حوالة/شيك)"><Input value={ref} onChange={(e) => setRef(e.target.value)} dir="ltr" /></Field>
@@ -60,11 +75,11 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
       </div>
       {partner && (
         <div className="mt">
-          <div className="row between"><h3>تخصيص المبلغ على الفواتير المفتوحة</h3><label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> تخصيص تلقائي (الأقدم أولاً)</label></div>
-          {!open.length ? <div className="muted mt">لا توجد فواتير مفتوحة — سيُسجل المبلغ كدفعة مقدمة على الحساب.</div> : (
+          <div className="row between"><h3>تخصيص المبلغ على الفواتير المفتوحة{fc && <span className="muted small"> — بالـ{sym}</span>}</h3><label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> تخصيص تلقائي (الأقدم أولاً)</label></div>
+          {!docs.length ? <div className="muted mt">لا توجد فواتير مفتوحة{fc ? ` بعملة ${currency}` : ""} — سيُسجل المبلغ كدفعة مقدمة على الحساب.</div> : (
             <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>المخصص</th></tr></thead>
-              <tbody>{open.map((i) => <tr key={i.id}><td>{i.number}</td><td>{fmtDate(i.date)}</td><td>{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.total} /></td><td className="n"><Money v={i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={Number(i.due)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(Number(i.due), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
-              <tfoot><tr><td colSpan={5}>المخصص / المبلغ</td><td className={allocated > amt + 0.001 ? "neg-val" : ""}><Money v={allocated} /> / <Money v={amt} /></td></tr></tfoot></table>
+              <tbody>{docs.map((i) => <tr key={i.id}><td>{i.number}{i.currency !== "SAR" && <span className="badge blue" style={{ marginInlineStart: 6 }}>{i.currency} @ {Number(i.exchangeRate)}</span>}</td><td>{fmtDate(i.date)}</td><td>{fmtDate(i.dueDate)}</td><td className="n">{i.currency !== "SAR" ? <><Money v={i.fcTotal} /> <span className="muted small">({money(i.total)} ر.س)</span></> : <Money v={i.total} />}</td><td className="n"><Money v={fc ? i.fcDue : i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={dueOf(i)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(dueOf(i), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
+              <tfoot><tr><td colSpan={5}>المخصص / المبلغ</td><td className={allocated > payAmt + 0.001 ? "neg-val" : ""}><Money v={allocated} /> / <Money v={payAmt} /> {fc ? sym : ""}</td></tr></tfoot></table>
           )}
         </div>
       )}

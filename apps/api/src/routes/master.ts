@@ -49,6 +49,7 @@ master.post(
       companyId: cid(req), code, name, nameEn: b.nameEn || null, isCustomer: !!b.isCustomer, isSupplier: !!b.isSupplier, kind: b.kind === "INDIVIDUAL" ? "INDIVIDUAL" : "COMPANY",
       vatNumber: b.vatNumber || null, crNumber: b.crNumber || null, phone: b.phone || null, email: b.email || null, street: b.street || null, buildingNo: b.buildingNo || null,
       district: b.district || null, city: b.city || null, postalCode: b.postalCode || null, country: b.country || "SA", creditLimit: num(b.creditLimit), paymentTerms: Math.max(0, Math.round(num(b.paymentTerms))), notes: b.notes || null,
+      currency: /^[A-Z]{3}$/.test(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("كود العميل/المورد مستخدم مسبقاً"); throw e; });
     await audit(req, "CREATE", "partner", row.id, { name });
     return row;
@@ -65,6 +66,7 @@ master.put(
       name: b.name, nameEn: b.nameEn, isCustomer: b.isCustomer, isSupplier: b.isSupplier, kind: b.kind, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone ?? null, email: b.email ?? null,
       street: b.street ?? null, buildingNo: b.buildingNo ?? null, district: b.district ?? null, city: b.city ?? null, postalCode: b.postalCode ?? null, country: b.country, creditLimit: b.creditLimit === undefined ? undefined : num(b.creditLimit),
       paymentTerms: b.paymentTerms === undefined ? undefined : Math.round(num(b.paymentTerms)), notes: b.notes ?? null, isActive: b.isActive,
+      currency: b.currency === undefined ? undefined : /^[A-Z]{3}$/.test(String(b.currency).toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId === undefined ? undefined : b.priceListId || null,
     });
     if (!row) throw notFound();
     await audit(req, "UPDATE", "partner", row.id, { name: row.name });
@@ -109,13 +111,19 @@ master.get(
     if (req.query.categoryId) { params.push(req.query.categoryId); where.push(`p.category_id=$${params.length}`); }
     if (req.query.active !== "all") where.push("p.is_active");
     params.push(limit, offset);
-    return db.rows(
+    const rows = await db.rows(
       `SELECT p.*, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost
        FROM products p LEFT JOIN product_categories c ON c.id=p.category_id
        LEFT JOIN (SELECT product_id, SUM(qty) qty, SUM(value) value FROM stock_balances WHERE company_id=$1 GROUP BY product_id) s ON s.product_id=p.id
        WHERE ${where.join(" AND ")} ORDER BY p.sku LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
+    if (req.query.priceListId && rows.length) {
+      const { resolvePrices } = require("../services/pricelists") as typeof import("../services/pricelists");
+      const prices = await resolvePrices(db, cid(req), String(req.query.priceListId), rows.map((r) => r.id), Number(req.query.qty) || 1);
+      for (const r of rows) if (prices[r.id] !== undefined) { r.listPrice = r.salePrice; r.salePrice = prices[r.id]; r.priceListApplied = true; }
+    }
+    return rows;
   }),
 );
 

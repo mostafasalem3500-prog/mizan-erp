@@ -11,6 +11,7 @@ import { BankPage } from "./pages/Bank";
 import { ChequesPage, RecurringPage } from "./pages/Round3";
 import { PayrollPage } from "./pages/Payroll";
 import { BudgetsPage } from "./pages/Budgets";
+import { PriceListsPage } from "./pages/Pricing";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -23,6 +24,7 @@ const NAV = [
   { to: "/sales/quotations", ic: "📝", label: "عروض الأسعار والأوامر", perm: "sales.read" },
   { to: "/sales/credit-notes", ic: "↩", label: "الإشعارات الدائنة", perm: "sales.read" },
   { to: "/customers", ic: "👥", label: "العملاء", perm: "partners.read" },
+  { to: "/price-lists", ic: "🏷", label: "قوائم الأسعار", perm: "products.read" },
   { to: "/receipts", ic: "💵", label: "سندات القبض", perm: "payments.read" },
   { group: "المشتريات" },
   { to: "/purchases/invoices", ic: "📦", label: "فواتير المشتريات", perm: "purchases.read" },
@@ -133,6 +135,7 @@ export function App() {
                 <Route path="/payroll/:tab" element={<PayrollPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
+                <Route path="/price-lists" element={<PriceListsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />
                 <Route path="/budgets/:id" element={<BudgetsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />

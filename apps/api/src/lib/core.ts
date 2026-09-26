@@ -19,6 +19,7 @@ export const D = (v: any) => new Decimal(v === null || v === undefined || v === 
 export const r2 = (v: any): number => D(v).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
 export const r3 = (v: any): number => D(v).toDecimalPlaces(3, Decimal.ROUND_HALF_UP).toNumber();
 export const r4 = (v: any): number => D(v).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toNumber();
+export const r6 = (v: any): number => D(v).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber();
 export const sum = (arr: any[], f: (x: any) => any = (x) => x): number =>
   arr.reduce((a, x) => a.plus(D(f(x))), D(0)).toDecimalPlaces(2).toNumber();
 export const num = (v: any, def = 0): number => {

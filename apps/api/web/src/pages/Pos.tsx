@@ -35,8 +35,18 @@ export function PosPage() {
   const incl = !!me.company.pricesIncludeVat;
   const list = useMemo(() => (products.data || []).filter((p: any) => (cat === "all" || p.categoryId === cat) && (!search || p.name.includes(search) || p.sku?.toLowerCase().includes(search.toLowerCase()) || p.barcode === search)), [products.data, cat, search]);
 
-  const add = (p: any) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1 }; return n; } return [...c, { product: p, qty: 1, unitPrice: Number(p.salePrice), discountPct: 0 }]; });
-  const setQty = (id: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => l.product.id !== id) : c.map((l) => (l.product.id === id ? { ...l, qty } : l))));
+  // customer price list (fixed prices / % discount) — applied when the customer is chosen and on every add
+  const [priceList, setPriceList] = useState<any>(null);
+  useEffect(() => { if (partner?.priceListId) api(`/price-lists/${partner.priceListId}`).then(setPriceList).catch(() => setPriceList(null)); else setPriceList(null); }, [partner?.priceListId]);
+  const priceFor = (p: any, qty = 1, pl = priceList) => {
+    if (!pl) return Number(p.salePrice);
+    if (pl.kind === "DISCOUNT") return Math.round(Number(p.salePrice) * (1 - Number(pl.discountPct) / 100) * 100) / 100;
+    const items = (pl.items || []).filter((i: any) => i.productId === p.id && Number(i.minQty) <= qty).sort((a: any, b: any) => Number(a.minQty) - Number(b.minQty));
+    return items.length ? Number(items[items.length - 1].price) : Number(p.salePrice);
+  };
+  useEffect(() => { setCart((c) => c.map((l) => ({ ...l, unitPrice: priceFor(l.product, l.qty) }))); }, [priceList]);
+  const add = (p: any) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1) }; return n; } return [...c, { product: p, qty: 1, unitPrice: priceFor(p, 1), discountPct: 0 }]; });
+  const setQty = (id: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => l.product.id !== id) : c.map((l) => (l.product.id === id ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" ? priceFor(l.product, qty) : l.unitPrice } : l))));
   const totals = useMemo(() => {
     let net = 0, vat = 0;
     for (const l of cart) {
@@ -154,7 +164,7 @@ export function PosPage() {
       </div>
       <div className="cart">
         <div className="cart-h">
-          <div className="grow"><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("CUSTOMER")} label={(p: any) => p.name} placeholder="عميل نقدي (اختياري: اختر عميلاً)" onCreate={() => setNewPartner(true)} /></div>
+          <div className="grow"><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("CUSTOMER")} label={(p: any) => p.name} placeholder="عميل نقدي (اختياري: اختر عميلاً)" onCreate={() => setNewPartner(true)} />{priceList && <div className="small" style={{ color: "var(--primary)" }}>قائمة الأسعار: {priceList.name}</div>}</div>
           <button className="btn ghost sm" title="تعليق الطلب (F8)" onClick={hold}>⏸</button>
           <button className="btn ghost sm" title="إفراغ السلة" onClick={() => cart.length && confirmDlg("إفراغ السلة؟") && setCart([])}>🗑</button>
         </div>

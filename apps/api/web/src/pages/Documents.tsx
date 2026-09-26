@@ -91,27 +91,51 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   const [newPartner, setNewPartner] = useState(false);
   const isSale = direction === "SALE";
   const isNote = kind === "CREDIT_NOTE" || kind === "DEBIT_NOTE";
+  const { data: currencies } = useFetch("/currencies");
+  const [currency, setCurrency] = useState("SAR");
+  const [rate, setRate] = useState<number>(1);
+  const [priceList, setPriceList] = useState<any>(null);
+  const fc = currency !== "SAR";
+  const sym = (currencies || []).find((c: any) => c.code === currency)?.symbol || currency;
+  // partner defaults: currency (foreign suppliers/customers) and price list (customers)
+  useEffect(() => {
+    if (!partner || id || isNote) return;
+    const cur = partner.currency && partner.currency !== "SAR" ? partner.currency : "SAR";
+    setCurrency(cur);
+    if (cur !== "SAR") api(`/currencies/${cur}/rate${q({ date })}`).then((r) => setRate(Number(r.rate))).catch(() => undefined); else setRate(1);
+    if (isSale && partner.priceListId) api(`/price-lists/${partner.priceListId}`).then(setPriceList).catch(() => setPriceList(null)); else setPriceList(null);
+  }, [partner?.id]);
+  const changeCurrency = async (cur: string) => { setCurrency(cur); if (cur === "SAR") setRate(1); else try { const r = await api(`/currencies/${cur}/rate${q({ date })}`); setRate(Number(r.rate)); } catch {} };
   useEffect(() => {
     if (prefill) { setPartner(prefill.partner); setLines(prefill.lines); setReason(prefill.reason || ""); setLoaded(true); return; }
     if (!id) return;
     api(`/invoices/${id}`).then((d) => {
       setPartner(d.partner || { id: d.partnerId, name: d.partnerName });
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
-      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode })));
+      setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1);
+      if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
+      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode })));
       setLoaded(true);
     }).catch((e) => toast(e.message, "err"));
   }, [id]);
   const totals = useMemo(() => {
-    let net = 0, vat = 0, rc = 0;
-    for (const l of lines) { const c = calc(l, incl); net += c.net; vat += c.vat; rc += c.rcVat; }
-    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, rc };
+    let net = 0, vat = 0, rc = 0, customs = 0;
+    for (const l of lines) { const c = calc(l, incl); net += c.net; vat += c.vat; rc += c.rcVat; if (!isSale && l.taxCode === "IM") customs += c.vat; }
+    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat - customs) * 100) / 100, rc, customs: Math.round(customs * 100) / 100 };
   }, [lines, incl]);
   const upd = (k: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === k ? { ...l, ...patch } : l)));
+  const listPrice = (p: any, qty = 1) => {
+    if (!priceList || !isSale) return null;
+    if (priceList.kind === "DISCOUNT") return Math.round(Number(p.salePrice) * (1 - Number(priceList.discountPct) / 100) * 10000) / 10000;
+    const items = (priceList.items || []).filter((i: any) => i.productId === p.id && Number(i.minQty) <= qty).sort((a: any, b: any) => Number(a.minQty) - Number(b.minQty));
+    return items.length ? Number(items[items.length - 1].price) : null;
+  };
   const pickProduct = (k: number, p: any) => {
     if (!p) return upd(k, { product: null });
-    upd(k, { product: p, description: p.name, unitPrice: isSale ? Number(p.salePrice) : Number(p.purchasePrice) || Number(p.avgCost) || 0, taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
+    const base = isSale ? listPrice(p) ?? Number(p.salePrice) : Number(p.purchasePrice) || Number(p.avgCost) || 0;
+    upd(k, { product: p, description: p.name, unitPrice: fc ? Math.round((base / rate) * 10000) / 10000 : base, taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
-  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl,
+  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null,
     lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode })) });
   const save = (post: boolean) => run(async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
@@ -131,7 +155,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   if (!loaded) return <Modal title="..." onClose={onClose}><Loading /></Modal>;
   return (
     <Modal wide title={`${id ? "تعديل" : "إنشاء"} ${KIND_TITLE[direction][kind]}`} onClose={() => onClose()} footer={<>
-      <div className="grow row"><span className="muted">قبل الضريبة</span><b><Money v={totals.net} /></b><span className="muted">الضريبة</span><b><Money v={totals.vat} /></b>{totals.rc > 0 && <span className="muted small">احتساب عكسي: {money(totals.rc)}</span>}<span className="muted">الإجمالي</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={totals.total} /></b></div>
+      <div className="grow row"><span className="muted">قبل الضريبة</span><b><Money v={totals.net} /></b><span className="muted">الضريبة</span><b><Money v={totals.vat} /></b>{totals.rc > 0 && <span className="muted small">احتساب عكسي: {money(totals.rc * (fc ? rate : 1))} ر.س</span>}{totals.customs > 0 && <span className="muted small">منها ضريبة استيراد تُسدد للجمارك: {money(totals.customs * (fc ? rate : 1))} ر.س</span>}<span className="muted">{totals.customs > 0 ? "المستحق للمورد" : "الإجمالي"}</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={totals.total} /> {fc ? sym : ""}</b>{fc && <span className="muted small">= {money(totals.total * rate)} ر.س @ {rate}</span>}</div>
       <button className="btn" onClick={() => onClose()}>إلغاء</button>
       <button className="btn" disabled={busy} onClick={() => save(false)}>حفظ مسودة</button>
       {(kind === "INVOICE" || isNote) && <button className="btn primary" disabled={busy} onClick={() => save(true)}>حفظ وترحيل ✓</button>}
@@ -145,11 +169,12 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
         {kind !== "QUOTATION" && <Field label="تاريخ الاستحقاق"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
         {!isSale && <Field label="رقم فاتورة المورد"><Input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} dir="ltr" /></Field>}
         {isNote && <Field label="سبب الإشعار (إلزامي للهيئة)" span2><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: إرجاع بضاعة / خطأ في السعر" /></Field>}
-        <Field label="خيارات"><label className="check"><input type="checkbox" checked={incl} onChange={(e) => setIncl(e.target.checked)} /> الأسعار شاملة الضريبة</label></Field>
+        <Field label="العملة"><div className="row" style={{ gap: 6 }}><Select value={currency} disabled={isNote} onChange={(e) => changeCurrency(e.target.value)} style={{ width: 110 }}>{(currencies || [{ code: "SAR" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</Select>{fc && <NumInput title="سعر الصرف: ريال لكل وحدة" value={rate} disabled={isNote} onChange={(e) => setRate(Number(e.target.value) || 0)} style={{ width: 100 }} />}</div></Field>
+        <Field label="خيارات"><label className="check"><input type="checkbox" checked={incl} onChange={(e) => setIncl(e.target.checked)} /> الأسعار شاملة الضريبة</label>{priceList && <div className="small" style={{ color: "var(--primary)" }}>قائمة الأسعار: {priceList.name}{priceList.kind === "DISCOUNT" ? ` (خصم ${priceList.discountPct}%)` : ""}</div>}</Field>
         {isSale && <Field label="مسح باركود"><Input placeholder="امسح أو اكتب ثم Enter" dir="ltr" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const v = (e.target as HTMLInputElement).value.trim(); if (v) { barcodeAdd(v); (e.target as HTMLInputElement).value = ""; } } }} /></Field>}
       </div>
       <div className="table-wrap mt"><table className="tbl compact">
-        <thead><tr><th style={{ width: "34%" }}>الصنف / البيان</th><th style={{ width: 90 }}>الكمية</th><th style={{ width: 120 }}>السعر</th><th style={{ width: 80 }}>خصم %</th><th style={{ width: 140 }}>الضريبة</th><th className="n">الصافي</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th /></tr></thead>
+        <thead><tr><th style={{ width: "34%" }}>الصنف / البيان</th><th style={{ width: 90 }}>الكمية</th><th style={{ width: 120 }}>السعر{fc ? ` (${sym})` : ""}</th><th style={{ width: 80 }}>خصم %</th><th style={{ width: 140 }}>الضريبة</th><th className="n">الصافي</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th /></tr></thead>
         <tbody>{lines.map((l) => { const c = calc(l, incl); return (
           <tr key={l.key}>
             <td>
@@ -158,7 +183,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
               <Input style={{ marginTop: 4 }} placeholder="البيان" value={l.description} onChange={(e) => upd(l.key, { description: e.target.value })} />
               {!isSale && !l.product && <div style={{ marginTop: 4 }}><Picker value={l.account || null} onChange={(a) => upd(l.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.type === "ASSET")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="حساب المصروف/الأصل (للبنود غير المخزنية)" /></div>}
             </td>
-            <td><NumInput value={l.qty} min={0} onChange={(e) => upd(l.key, { qty: Number(e.target.value) })} /></td>
+            <td><NumInput value={l.qty} min={0} onChange={(e) => { const qty = Number(e.target.value); const lp = l.product && priceList?.kind === "FIXED" ? listPrice(l.product, qty) : null; upd(l.key, { qty, ...(lp !== null && lp !== undefined ? { unitPrice: fc ? Math.round((lp / rate) * 10000) / 10000 : lp } : {}) }); }} /></td>
             <td><NumInput value={l.unitPrice} min={0} onChange={(e) => upd(l.key, { unitPrice: Number(e.target.value) })} /></td>
             <td><NumInput value={l.discountPct} min={0} max={100} onChange={(e) => upd(l.key, { discountPct: Number(e.target.value) })} /></td>
             <td><Select value={l.taxCode} onChange={(e) => upd(l.key, { taxCode: e.target.value })}>{(isSale ? ["S", "Z", "X", "E", "O"] : ["S", "IM", "RC", "Z", "E", "O"]).map((t) => <option key={t} value={t}>{TAX_AR[t]}</option>)}</Select></td>
@@ -201,6 +226,8 @@ export function DocumentView() {
   const [layout, setLayout] = useState<"a4" | "thermal">("a4");
   const [cn, setCn] = useState<any>(null);
   const [pay, setPay] = useState(false);
+  const [landed, setLanded] = useState(false);
+  const [customs, setCustoms] = useState(false);
   const { run, busy } = useAction();
   useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
   if (loading || !d) return <Loading />;
@@ -225,6 +252,8 @@ export function DocumentView() {
         {d.status === "DRAFT" && <button className="btn danger sm" onClick={del}>حذف</button>}
         {d.status === "POSTED" && d.kind === "INVOICE" && remaining > 0.001 && can("payments.write") && <button className="btn accent sm" onClick={() => setPay(true)}>{isSale ? "تسجيل تحصيل" : "تسجيل سداد"}</button>}
         {d.status === "POSTED" && d.kind === "INVOICE" && can(isSale ? "sales.write" : "purchases.write") && <button className="btn sm" onClick={creditNote}>↩ {isSale ? "إشعار دائن / مرتجع" : "مرتجع مشتريات"}</button>}
+        {!isSale && d.status === "POSTED" && d.kind === "INVOICE" && can("purchases.write") && d.lines.some((l: any) => l.productId) && <button className="btn sm" onClick={() => setLanded(true)}>🚢 تكاليف استيراد</button>}
+        {!isSale && d.status === "POSTED" && Number(d.customsVat) > 0 && !d.customsPaidJournalId && can("payments.write") && <button className="btn accent sm" onClick={() => setCustoms(true)}>سداد ضريبة الجمارك ({money(d.customsVat)})</button>}
         {isSale && d.status === "POSTED" && ["PENDING", "FAILED", "NOT_ONBOARDED", "REJECTED"].includes(d.zatcaStatus) && <button className="btn sm" onClick={resend}>إرسال للهيئة</button>}
         {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
         <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
@@ -235,14 +264,50 @@ export function DocumentView() {
       <div className="grid c2 no-print">
         {d.journal?.length > 0 && <div className="card"><div className="card-h"><h3>القيد المحاسبي</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{d.journal.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table></div></div>}
         <div className="grid">
-          {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td>{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} /></td></tr>)}</tbody></table></div></div>}
+          {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td>{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
+          {d.landedCosts?.length > 0 && <div className="card"><div className="card-h"><h3>تكاليف الاستيراد المحمّلة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.landedCosts.map((l: any) => <tr key={l.id}><td>{l.number}</td><td>{fmtDate(l.date)}</td><td><Badge s={l.status} /></td><td className="n"><Money v={l.total} /></td></tr>)}</tbody></table></div></div>}
           {d.related?.length > 0 && <div className="card"><div className="card-h"><h3>مستندات مرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.related.map((r: any) => <tr key={r.id}><td><Link to={`/doc/${r.id}`}>{r.number}</Link></td><td>{KIND_AR[r.kind]}</td><td><Badge s={r.status} /></td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>}
           {isSale && d.zatcaResponse && <div className="card"><div className="card-h"><h3>استجابة هيئة الزكاة والضريبة</h3></div><div className="card-b small" dir="ltr" style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{JSON.stringify(d.zatcaResponse, null, 1)}</div></div>}
         </div>
       </div>
       {cn && <DocEditor direction={d.direction} kind="CREDIT_NOTE" id={cn.id} originId={d.id} onClose={(s) => { setCn(null); if (s) reload(); }} />}
       {pay && <QuickPayment doc={d} onClose={(s) => { setPay(false); if (s) reload(); }} />}
+      {landed && <LandedCostModal doc={d} onClose={(s) => { setLanded(false); if (s) reload(); }} />}
+      {customs && <PayCustomsModal doc={d} onClose={(s) => { setCustoms(false); if (s) reload(); }} />}
     </div>
+  );
+}
+
+function PayCustomsModal({ doc, onClose }: { doc: any; onClose: (s?: boolean) => void }) {
+  const { run, busy } = useAction();
+  const [account, setAccount] = useState<any>(null);
+  const [date, setDate] = useState(today());
+  return (
+    <Modal narrow title="سداد ضريبة الاستيراد للجمارك" onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account} onClick={() => run(async () => { await api(`/invoices/${doc.id}/pay-customs`, { body: { accountId: account.id, date } }); onClose(true); }, "تم قيد سداد ضريبة الجمارك")}>تأكيد</button></>}>
+      <div className="grid"><div className="stat-list"><div className="item"><span>ضريبة القيمة المضافة على الاستيراد (البند 8 في الإقرار)</span><b><Money v={doc.customsVat} /></b></div></div><Field label="من حساب"><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field><Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field></div>
+    </Modal>
+  );
+}
+
+function LandedCostModal({ doc, onClose }: { doc: any; onClose: (s?: boolean) => void }) {
+  const { run, busy } = useAction();
+  const [costs, setCosts] = useState<any[]>([{ key: 1, description: "شحن", amount: "", account: null }, { key: 2, description: "جمارك وتخليص", amount: "", account: null }]);
+  const [method, setMethod] = useState("VALUE");
+  const [date, setDate] = useState(today());
+  const [preview, setPreview] = useState<any>(null);
+  const body = () => ({ invoiceId: doc.id, date, method, costs: costs.filter((c) => Number(c.amount) > 0).map((c) => ({ description: c.description, amount: Number(c.amount), accountId: c.account?.id || null })) });
+  const upd = (k: number, patch: any) => { setCosts((cs) => cs.map((c) => (c.key === k ? { ...c, ...patch } : c))); setPreview(null); };
+  return (
+    <Modal wide title={`تحميل تكاليف استيراد على ${doc.number}`} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn" disabled={busy} onClick={() => run(async () => setPreview(await api("/landed-costs/preview", { body: body() })))}>معاينة التوزيع</button><button className="btn primary" disabled={busy || !preview} onClick={() => run(async () => { const r = await api("/landed-costs", { body: body() }); await api(`/landed-costs/${r.id}/post`, { body: {} }); onClose(true); }, "تم تحميل التكاليف على المخزون وترحيل القيد")}>ترحيل</button></>}>
+      <div className="alert info">سجّل فواتير الشحن والجمارك أولاً كمصروف على حساب «مصروفات شحن وجمارك وتخليص (تُحمَّل على المخزون)»، ثم حمّلها هنا على أصناف الفاتورة فترتفع تكلفة الوحدة. الكميات المباعة قبل التحميل تُحمَّل على تكلفة المبيعات مباشرة.</div>
+      <div className="form-grid"><Field label="التاريخ"><Input type="date" value={date} onChange={(e) => { setDate(e.target.value); setPreview(null); }} /></Field><Field label="أساس التوزيع"><Select value={method} onChange={(e) => { setMethod(e.target.value); setPreview(null); }}><option value="VALUE">حسب قيمة الأسطر</option><option value="QTY">حسب الكمية</option></Select></Field></div>
+      <table className="tbl compact mt"><thead><tr><th>البيان</th><th style={{ width: 160 }}>المبلغ (ر.س)</th><th>الحساب الدائن (افتراضي: حساب التحميل)</th><th /></tr></thead>
+        <tbody>{costs.map((c) => <tr key={c.key}><td><Input value={c.description} onChange={(e) => upd(c.key, { description: e.target.value })} /></td><td><NumInput value={c.amount} onChange={(e) => upd(c.key, { amount: e.target.value })} /></td><td><Picker value={c.account} onChange={(a) => upd(c.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.isCashBank || a.type === "LIABILITY")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="5104 مصروفات شحن وجمارك (افتراضي)" /></td><td><button className="btn ghost sm" onClick={() => setCosts((cs) => cs.filter((x) => x.key !== c.key))}>✕</button></td></tr>)}</tbody></table>
+      <button className="btn sm mt" onClick={() => setCosts((cs) => [...cs, { key: Date.now(), description: "", amount: "", account: null }])}>＋ سطر</button>
+      {preview && <div className="mt"><div className="row between"><h3>التوزيع</h3><span>إجمالي {money(preview.total)} — للمخزون <b>{money(preview.toInventory)}</b> · لتكلفة المبيعات <b>{money(preview.toCogs)}</b></span></div>
+        <table className="tbl compact mt"><thead><tr><th>الصنف</th><th className="n">الكمية المشتراة</th><th className="n">المتبقي بالمخزون</th><th className="n">النصيب</th><th className="n">للمخزون</th><th className="n">لتكلفة المبيعات</th><th className="n">تكلفة الوحدة بعد التحميل</th></tr></thead>
+          <tbody>{preview.allocation.map((a: any) => <tr key={a.lineId}><td>{a.description}</td><td className="n">{a.qty}</td><td className="n">{a.onHand}</td><td className="n"><Money v={a.share} /></td><td className="n"><Money v={a.toInventory} /></td><td className="n"><Money v={a.toCogs} blankZero /></td><td className="n">{a.newUnitCost !== null ? money(a.newUnitCost) : "—"}</td></tr>)}</tbody></table></div>}
+    </Modal>
   );
 }
 
@@ -273,6 +338,8 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
   const remaining = Number(d.total) - Number(d.amountPaid);
   const docTitle = isSale ? (d.kind === "INVOICE" ? (d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية") : title) : title;
   const showVat = d.lines.some((l: any) => Number(l.vatAmount) > 0);
+  const fc = d.currency && d.currency !== "SAR";
+  const fx = (v: any) => money(Number(v) / Number(d.exchangeRate || 1));
   return (
         <div className="card print-doc">
           <div className="head">
@@ -291,6 +358,7 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
                 {d.dueDate && d.kind === "INVOICE" && <tr><td style={{ border: "none" }} className="muted">الاستحقاق</td><td style={{ border: "none" }} className="num">{fmtDate(d.dueDate)}</td></tr>}
                 {d.origin && <tr><td style={{ border: "none" }} className="muted">مرجع الفاتورة</td><td style={{ border: "none" }} className="num">{d.origin.number}</td></tr>}
                 {d.supplierRef && <tr><td style={{ border: "none" }} className="muted">فاتورة المورد</td><td style={{ border: "none" }} className="num">{d.supplierRef}</td></tr>}
+                {fc && <tr><td style={{ border: "none" }} className="muted">العملة</td><td style={{ border: "none" }} className="num">{d.currency} — سعر الصرف {Number(d.exchangeRate)}</td></tr>}
               </tbody></table>
             </div>
             {qr && <img src={qr} alt="QR" style={{ width: 120, height: 120 }} />}
@@ -300,7 +368,7 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
             {d.reason && <div><div className="muted small">سبب الإشعار</div>{d.reason}</div>}
           </div>
           <table><thead><tr><th>#</th><th>البيان</th><th>الكمية</th><th>سعر الوحدة</th>{d.lines.some((l: any) => Number(l.discountPct)) && <th>خصم</th>}<th>المبلغ قبل الضريبة</th>{showVat && <><th>الضريبة</th><th>الإجمالي</th></>}</tr></thead>
-            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.unit || ""}</td><td className="num">{money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
+            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.unit || ""}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} ر.س</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
           </table>
           <div className="row mt" style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
             <div className="small muted" style={{ maxWidth: 380 }}>{d.notes && <div>ملاحظات: {d.notes}</div>}{c.invoiceTerms && <div>{c.invoiceTerms}</div>}{d.tenders?.length > 0 && <div>طريقة الدفع: {d.tenders.map((t: any) => `${METHOD_AR[t.method] || t.method} ${money(t.amount)}`).join(" + ")}</div>}</div>
@@ -309,7 +377,9 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
               {Number(d.discountTotal) > 0 && <tr><td>الخصم</td><td className="num">{money(d.discountTotal)}</td></tr>}
               <tr><td>الإجمالي الخاضع للضريبة</td><td className="num">{money(d.taxable)}</td></tr>
               <tr><td>ضريبة القيمة المضافة 15%</td><td className="num">{money(d.vatTotal)}</td></tr>
-              <tr style={{ fontWeight: 700, fontSize: 15 }}><td>الإجمالي شامل الضريبة</td><td className="num">{money(d.total)} ر.س</td></tr>
+              {Number(d.customsVat) > 0 && <tr><td className="small">منها ضريبة استيراد تُسدد للجمارك (لا تُدفع للمورد)</td><td className="num">−{money(d.customsVat)}</td></tr>}
+              <tr style={{ fontWeight: 700, fontSize: 15 }}><td>{Number(d.customsVat) > 0 ? "المستحق للمورد" : "الإجمالي شامل الضريبة"}</td><td className="num">{money(d.total)} ر.س</td></tr>
+              {fc && <tr style={{ fontWeight: 700 }}><td>الإجمالي بعملة المستند</td><td className="num">{money(d.fcTotal ?? fx(d.total))} {d.currency}</td></tr>}
               <tr><td colSpan={2} className="small" style={{ background: "#f8fafa" }}>{amountToArabicWords(Number(d.total))}</td></tr>
               {d.kind === "INVOICE" && d.status === "POSTED" && Number(d.amountPaid) > 0 && <><tr><td>المسدد</td><td className="num">{money(d.amountPaid)}</td></tr><tr><td>المتبقي</td><td className="num">{money(remaining)}</td></tr></>}
             </tbody></table>

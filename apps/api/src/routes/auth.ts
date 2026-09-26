@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 import { db, tx } from "../db/pool";
 import { h, bad, req as need, AppError, conflict, today, addMonths } from "../lib/core";
 import { authenticate, signToken, subscriptionState, ROLES, superAdmin, AuthCtx } from "../lib/auth";
+import { seedCurrencies } from "../services/currency";
 import { seedChartOfAccounts, ensureFiscalYear } from "../accounting/engine";
 import { ensureZatcaConfig } from "../zatca/stamp";
 
@@ -20,6 +21,7 @@ export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?:
   await t.insert("branches", { companyId: company.id, code: "MAIN", name: "الفرع الرئيسي" });
   await t.insert("warehouses", { companyId: company.id, code: "MAIN", name: "المستودع الرئيسي", isDefault: true });
   await seedChartOfAccounts(t, company.id);
+  await seedCurrencies(t, company.id);
   await ensureFiscalYear(t, company.id, today());
   await ensureZatcaConfig(t, company.id);
   return company;

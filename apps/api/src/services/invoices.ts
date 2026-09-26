@@ -7,6 +7,7 @@ import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, i
 import { post, nextNumber, assertOpenDate, accountByKey, Line } from "../accounting/engine";
 import { stockIn, stockOut, avgCost } from "../accounting/stock";
 import { stampInvoice } from "../zatca/stamp";
+import { rateFor, toFc, fcUnitToBase, BASE } from "./currency";
 
 export const PREFIX: Record<string, Record<string, string>> = {
   SALE: { QUOTATION: "QT", ORDER: "SO", INVOICE: "INV", CREDIT_NOTE: "CN", DEBIT_NOTE: "DN" },
@@ -40,6 +41,9 @@ export interface InvoiceInput {
   channel?: string;
   isDemo?: boolean;
   pricesIncludeVat?: boolean;
+  currency?: string; // document currency (default: partner currency, else SAR); line prices are entered in it
+  exchangeRate?: number; // SAR per 1 unit (default: company rate table for the date)
+  priceListId?: string | null;
 }
 
 export async function defaultWarehouse(t: Db, companyId: string) {
@@ -48,7 +52,7 @@ export async function defaultWarehouse(t: Db, companyId: string) {
   return w.id as string;
 }
 
-async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesIncludeVat: boolean) {
+async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesIncludeVat: boolean, rate = 1) {
   if (!Array.isArray(input.lines) || !input.lines.length) throw bad("أضف بنداً واحداً على الأقل");
   const productIds = input.lines.map((l) => l.productId).filter(Boolean) as string[];
   const products = productIds.length
@@ -60,7 +64,8 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
     if (l.productId && !p) throw bad(`الصنف في السطر ${i + 1} غير موجود`);
     const qty = r3(num(l.qty));
     if (qty <= 0) throw bad(`الكمية في السطر ${i + 1} يجب أن تكون أكبر من صفر`);
-    const unitPrice = r4(num(l.unitPrice));
+    const fcUnitPrice = rate !== 1 ? r4(num(l.unitPrice)) : null;
+    const unitPrice = fcUnitPrice !== null ? fcUnitToBase(fcUnitPrice, rate) : r4(num(l.unitPrice));
     if (unitPrice < 0) throw bad(`السعر في السطر ${i + 1} لا يمكن أن يكون سالباً`);
     const discountPct = num(l.discountPct);
     if (discountPct < 0 || discountPct > 100) throw bad(`نسبة الخصم في السطر ${i + 1} غير صحيحة`);
@@ -74,6 +79,7 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
       description: (l.description || p?.name || "").trim() || `بند ${i + 1}`,
       qty,
       unitPrice,
+      fcUnitPrice,
       discountPct,
       taxCode,
       taxRate: c.rate,
@@ -97,12 +103,23 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   if (!input.partnerId) throw bad(input.direction === "SALE" ? "اختر العميل" : "اختر المورد");
   const partner = await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [input.partnerId, companyId], "الطرف غير موجود");
   const incl = input.pricesIncludeVat ?? (input.direction === "SALE" ? !!company.pricesIncludeVat : false);
-  const lines = await buildLines(t, companyId, input, incl);
+  // currency: explicit → partner default → SAR. Notes inherit the original document's currency and rate.
+  let currency = String(input.currency || partner.currency || BASE).toUpperCase();
+  let rate = num(input.exchangeRate) > 0 ? Number(input.exchangeRate) : 0;
+  if (input.originId && (input.kind === "CREDIT_NOTE" || input.kind === "DEBIT_NOTE")) {
+    const o = await t.maybe(`SELECT currency, exchange_rate FROM invoices WHERE id=$1`, [input.originId]);
+    if (o) { currency = o.currency; rate = Number(o.exchangeRate); }
+  }
+  if (currency === BASE) rate = 1;
+  else if (!rate) rate = await rateFor(t, companyId, currency, date);
+  const lines = await buildLines(t, companyId, input, incl, rate);
   const subtotal = sum(lines, (l) => D(l.netAmount).plus(l.discount));
   const discountTotal = sum(lines, (l) => l.discount);
   const taxable = sum(lines, (l) => l.netAmount);
   const vatTotal = sum(lines, (l) => l.vatAmount);
-  const total = r2(D(taxable).plus(vatTotal));
+  // import VAT (IM) is paid to customs, not to the supplier → excluded from the payable total
+  const customsVat = input.direction === "PURCHASE" ? sum(lines.filter((l) => l.taxCode === "IM"), (l) => l.vatAmount) : 0;
+  const total = r2(D(taxable).plus(vatTotal).minus(customsVat));
   let invoiceType = input.invoiceType || (partner.vatNumber ? "STANDARD" : "SIMPLIFIED");
   if (input.direction === "PURCHASE") invoiceType = "STANDARD";
 
@@ -137,6 +154,11 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     taxable,
     vatTotal,
     total,
+    customsVat,
+    currency,
+    exchangeRate: rate,
+    fcTotal: currency === BASE ? null : toFc(total, rate),
+    priceListId: input.priceListId || null,
     isDemo: !!input.isDemo,
   };
   let inv: any;
@@ -157,7 +179,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     "invoice_lines",
     lines.map((l) => ({
       invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty,
-      unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
+      unitPrice: l.unitPrice, fcUnitPrice: l.fcUnitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
       netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort,
     })),
   );
@@ -289,6 +311,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     }
     const vat = Number(inv.vatTotal);
     if (vat) jl.push({ key: "VAT_IN", [dr]: vat, description: `ضريبة مدخلات ${ref}` } as Line);
+    if (Number(inv.customsVat)) jl.push({ key: "CUSTOMS_PAYABLE", [cr]: Number(inv.customsVat), description: `ضريبة استيراد مستحقة للجمارك ${ref}` } as Line);
     if (rcVat) {
       jl.push({ key: "VAT_IN", [dr]: rcVat, description: `احتساب عكسي ${ref}` } as Line);
       jl.push({ key: "VAT_OUT", [cr]: rcVat, description: `احتساب عكسي ${ref}` } as Line);
@@ -334,13 +357,20 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   return getInvoice(t, companyId, id);
 }
 
-export async function applySettlement(t: Db, invoiceId: string, amount: number) {
-  const inv = await t.one(`SELECT total, amount_paid FROM invoices WHERE id=$1 FOR UPDATE`, [invoiceId]);
+/** amount is in SAR (book value); fcAmount (invoice currency) is derived from the document rate when omitted. */
+export async function applySettlement(t: Db, invoiceId: string, amount: number, fcAmount?: number) {
+  const inv = await t.one(`SELECT total, amount_paid, currency, exchange_rate, fc_total, fc_paid FROM invoices WHERE id=$1 FOR UPDATE`, [invoiceId]);
   const paid = r2(D(inv.amountPaid).plus(amount));
   if (paid > Number(inv.total) + 0.001) throw bad("المبلغ المخصص يتجاوز المتبقي على المستند");
   if (paid < -0.001) throw bad("تخصيص غير صحيح");
   const status = paid >= Number(inv.total) - 0.001 ? "PAID" : paid > 0 ? "PARTIAL" : "UNPAID";
-  await t.exec(`UPDATE invoices SET amount_paid=$2, payment_status=$3, updated_at=now() WHERE id=$1`, [invoiceId, paid, status]);
+  let fcPaid = Number(inv.fcPaid || 0);
+  if (inv.currency && inv.currency !== BASE) {
+    fcPaid = r2(D(fcPaid).plus(fcAmount !== undefined ? fcAmount : toFc(amount, Number(inv.exchangeRate))));
+    if (status === "PAID") fcPaid = Number(inv.fcTotal || 0);
+    if (paid <= 0.001) fcPaid = 0;
+  }
+  await t.exec(`UPDATE invoices SET amount_paid=$2, payment_status=$3, fc_paid=$4, updated_at=now() WHERE id=$1`, [invoiceId, paid, status, fcPaid]);
 }
 
 /** quotation → order → invoice (copies lines, keeps traceability) */
@@ -350,11 +380,26 @@ export async function convert(t: Db, company: any, id: string, user: string, toK
   if (src.status === "CONVERTED") throw conflict("تم تحويل هذا المستند مسبقاً");
   const draft = await saveDraft(t, company, user, {
     direction: src.direction, kind: toKind, date: today(), partnerId: src.partnerId, warehouseId: src.warehouseId,
-    invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo,
-    lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode })),
+    invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo, currency: src.currency, exchangeRate: Number(src.exchangeRate), priceListId: src.priceListId,
+    lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.fcUnitPrice ?? l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode })),
     pricesIncludeVat: false,
   });
   await t.exec(`UPDATE invoices SET notes = COALESCE(notes,'') || $2 WHERE id=$1`, [draft.id, ` (من ${src.number})`]);
   await t.exec(`UPDATE invoices SET status='CONVERTED', updated_at=now() WHERE id=$1`, [id]);
   return draft;
+}
+
+/** Pays the import VAT owed to customs for a posted bill (Dr customs payable / Cr cash-bank). */
+export async function payCustomsVat(t: Db, companyId: string, user: string, id: string, accountId: string, date?: string) {
+  const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المستند غير موجود");
+  if (inv.status !== "POSTED" || !Number(inv.customsVat)) throw bad("لا توجد ضريبة استيراد مستحقة على هذا المستند");
+  if (inv.customsPaidJournalId) throw conflict("ضريبة الجمارك مسددة مسبقاً");
+  const acc = await t.one(`SELECT id FROM accounts WHERE id=$1 AND company_id=$2 AND is_cash_bank`, [accountId, companyId], "اختر حساب السداد");
+  const d = date && isDate(date) ? date : today();
+  const e = await post(t, companyId, { date: d, type: "PAYMENT", sourceType: "INVOICE", sourceId: inv.id, reference: inv.number, memo: `سداد ضريبة الاستيراد للجمارك — ${inv.number}`, createdBy: user, isDemo: inv.isDemo, lines: [
+    { key: "CUSTOMS_PAYABLE", debit: Number(inv.customsVat), description: `ضريبة جمارك ${inv.number}` },
+    { account: acc.id, credit: Number(inv.customsVat), description: `سداد جمارك ${inv.number}` },
+  ] });
+  await t.exec(`UPDATE invoices SET customs_paid_journal_id=$2 WHERE id=$1`, [id, e!.id]);
+  return getInvoice(t, companyId, id);
 }

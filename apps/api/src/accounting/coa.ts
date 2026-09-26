@@ -52,6 +52,7 @@ export const SAUDI_COA: Row[] = [
   ["210201", "ضريبة القيمة المضافة - المخرجات", "Output VAT", "TAX", { key: "VAT_OUT" }],
   ["210202", "ضريبة القيمة المضافة - مستحقة للهيئة", "VAT Payable (Settlement)", "TAX", { key: "VAT_PAYABLE" }],
   ["210203", "مخصص الزكاة", "Zakat Provision", "TAX", { key: "ZAKAT_PAYABLE" }],
+  ["210204", "ضريبة استيراد مستحقة للجمارك", "Customs VAT Payable", "TAX", { key: "CUSTOMS_PAYABLE" }],
   ["2103", "مستحقات وأرصدة دائنة أخرى", "Accruals & Other Credits", "CURRENT_LIABILITY"],
   ["210301", "رواتب وأجور مستحقة", "Salaries Payable", "CURRENT_LIABILITY", { key: "SALARIES_PAYABLE" }],
   ["210302", "التأمينات الاجتماعية المستحقة", "GOSI Payable", "CURRENT_LIABILITY", { key: "GOSI_PAYABLE" }],
@@ -77,12 +78,14 @@ export const SAUDI_COA: Row[] = [
   ["42", "إيرادات أخرى", "Other Income", "OTHER_INCOME"],
   ["4201", "أرباح فروقات الجرد", "Inventory Count Gains", "OTHER_INCOME", { key: "INV_GAIN" }],
   ["4202", "إيرادات متنوعة", "Miscellaneous Income", "OTHER_INCOME", { key: "OTHER_INCOME" }],
+  ["4203", "أرباح فروق عملة", "FX Gains", "OTHER_INCOME", { key: "FX_GAIN" }],
 
   ["5", "المصروفات والتكاليف", "Expenses", "EXPENSE"],
   ["51", "تكلفة المبيعات", "Cost of Sales", "COGS"],
   ["5101", "تكلفة البضاعة المباعة", "Cost of Goods Sold", "COGS", { key: "COGS" }],
   ["5102", "عجز وتالف المخزون", "Inventory Shrinkage", "COGS", { key: "INV_LOSS" }],
   ["5103", "مشتريات خدمات مباشرة", "Direct Service Purchases", "COGS", { key: "PURCHASE_EXPENSE" }],
+  ["5104", "مصروفات شحن وجمارك وتخليص (تُحمَّل على المخزون)", "Landed Costs Clearing", "COGS", { key: "LANDED_COST" }],
   ["52", "المصروفات العمومية والإدارية", "General & Administrative", "EXPENSE"],
   ["5201", "الرواتب والأجور", "Salaries & Wages", "EXPENSE", { key: "SALARIES" }],
   ["5202", "بدلات ومزايا الموظفين", "Allowances & Benefits", "EXPENSE", { key: "ALLOWANCES" }],
@@ -108,6 +111,7 @@ export const SAUDI_COA: Row[] = [
   ["5401", "الزكاة الشرعية", "Zakat Expense", "ZAKAT", { key: "ZAKAT" }],
   ["5402", "مصروفات تمويلية", "Finance Costs", "OTHER_EXPENSE"],
   ["5403", "خسائر بيع أصول", "Loss on Asset Disposal", "OTHER_EXPENSE"],
+  ["5404", "خسائر فروق عملة", "FX Losses", "OTHER_EXPENSE", { key: "FX_LOSS" }],
 ];
 
 export const TYPE_BY_CLASS: Record<string, string> = { "1": "ASSET", "2": "LIABILITY", "3": "EQUITY", "4": "REVENUE", "5": "EXPENSE" };

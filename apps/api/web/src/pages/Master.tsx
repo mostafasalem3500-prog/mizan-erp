@@ -37,6 +37,8 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
 function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
+  const { data: currencies } = useFetch("/currencies");
+  const { data: priceLists } = useFetch("/price-lists");
   const [f, setF] = useState<any>({ kind: "COMPANY", country: "SA", paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, ...p });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
@@ -59,6 +61,8 @@ function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s
         <Field label="الدولة"><Input value={f.country || "SA"} onChange={s("country")} dir="ltr" /></Field>
         <Field label="أيام السداد (0 = نقدي)"><NumInput value={f.paymentTerms} onChange={s("paymentTerms")} /></Field>
         <Field label="حد الائتمان"><NumInput value={f.creditLimit} onChange={s("creditLimit")} /></Field>
+        <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || "SAR"} onChange={s("currency")}>{(currencies || [{ code: "SAR", nameAr: "ريال سعودي" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
+        <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
         <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>
         <Field label="ملاحظات" span3><textarea className="input" value={f.notes || ""} onChange={s("notes")} /></Field>
       </div>

@@ -44,7 +44,7 @@ ops.get(
     if (req.query.q) add("(i.number ILIKE ? OR i.partner_name ILIKE ? OR i.supplier_ref ILIKE ?)", `%${req.query.q}%`);
     const total = await db.one(`SELECT COUNT(*)::int c, COALESCE(SUM(CASE WHEN i.status='POSTED' THEN CASE WHEN i.kind='CREDIT_NOTE' THEN -i.total ELSE i.total END END),0) sum FROM invoices i WHERE ${where.join(" AND ")}`, params);
     params.push(limit, offset);
-    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return { rows, total: total.c, sum: total.sum };
   }),
 );
@@ -54,7 +54,8 @@ ops.get("/invoices/:id", perm("sales.read"), h(async (req) => {
   doc.partner = doc.partnerId ? await db.maybe(`SELECT * FROM partners WHERE id=$1`, [doc.partnerId]) : null;
   doc.origin = doc.originId ? await db.maybe(`SELECT id, number, date, total FROM invoices WHERE id=$1`, [doc.originId]) : null;
   doc.related = await db.rows(`SELECT id, number, kind, status, date, total FROM invoices WHERE origin_id=$1 ORDER BY date`, [doc.id]);
-  doc.payments = await db.rows(`SELECT p.id, p.number, p.date, p.amount, p.method, (a->>'amount')::numeric allocated FROM payments p, jsonb_array_elements(COALESCE(p.allocations,'[]'::jsonb)) a WHERE p.company_id=$1 AND p.status='POSTED' AND a->>'invoiceId'=$2`, [cid(req), doc.id]);
+  doc.landedCosts = doc.direction === "PURCHASE" && doc.kind === "INVOICE" ? await db.rows(`SELECT id, number, date, status, total FROM landed_costs WHERE invoice_id=$1 ORDER BY date`, [doc.id]) : [];
+  doc.payments = await db.rows(`SELECT p.id, p.number, p.date, p.amount, p.method, p.currency, p.fc_amount, p.exchange_rate, p.fx_diff, (a->>'amount')::numeric allocated, (a->>'fcAmount')::numeric fc_allocated FROM payments p, jsonb_array_elements(COALESCE(p.allocations,'[]'::jsonb)) a WHERE p.company_id=$1 AND p.status='POSTED' AND a->>'invoiceId'=$2`, [cid(req), doc.id]);
   doc.journal = doc.journalId ? await db.rows(`SELECT l.debit, l.credit, l.description, a.code, a.name_ar FROM journal_lines l JOIN accounts a ON a.id=l.account_id WHERE l.entry_id=$1 ORDER BY l.sort`, [doc.journalId]) : [];
   doc.company = await db.one(`SELECT name_ar, name_en, vat_number, cr_number, phone, email, logo, street, building_no, additional_no, district, city, postal_code, invoice_footer, invoice_terms, invoice_template FROM companies WHERE id=$1`, [cid(req)]);
   return doc;
@@ -103,7 +104,7 @@ ops.get("/payments", perm("payments.read"), h(async (req) => {
   params.push(limit, offset);
   return db.rows(`SELECT p.*, pr.name AS partner_name, a.name_ar AS account_name FROM payments p JOIN partners pr ON pr.id=p.partner_id JOIN accounts a ON a.id=p.account_id WHERE ${where.join(" AND ")} ORDER BY p.date DESC, p.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
-ops.get("/payments/open-invoices/:partnerId", perm("payments.read"), h(async (req) => db.rows(`SELECT id, number, kind, date, due_date, total, amount_paid, total-amount_paid due FROM invoices WHERE company_id=$1 AND partner_id=$2 AND direction=$3 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid>0.001 ORDER BY date`, [cid(req), p(req).partnerId, req.query.direction === "OUT" ? "PURCHASE" : "SALE"])));
+ops.get("/payments/open-invoices/:partnerId", perm("payments.read"), h(async (req) => db.rows(`SELECT id, number, kind, date, due_date, total, amount_paid, total-amount_paid due, currency, exchange_rate, fc_total, fc_paid, COALESCE(fc_total,0)-fc_paid fc_due FROM invoices WHERE company_id=$1 AND partner_id=$2 AND direction=$3 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid>0.001 ORDER BY date`, [cid(req), p(req).partnerId, req.query.direction === "OUT" ? "PURCHASE" : "SALE"])));
 ops.post("/payments", perm("payments.write"), h(async (req) => { const p = await tx((t) => createPayment(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "payment", p.id, { number: p.number, amount: p.amount }); return p; }));
 ops.post("/payments/:id/cancel", perm("payments.write"), h(async (req) => { const r = await tx((t) => cancelPayment(t, cid(req), actor(req), p(req).id, req.body?.date)); await audit(req, "CANCEL", "payment", p(req).id); return r; }));
 

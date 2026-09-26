@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, NumInput, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, JTYPE_AR, confirmDlg } from "../lib";
+import { BankStatementPanel } from "./Pricing";
 
 export function BankPage() {
   const { can } = useCompanyContext();
@@ -35,6 +36,7 @@ export function BankPage() {
           </div>
         )}
       </div></div>
+      <BankStatementPanel accountId={accId} onChanged={reload} />
       <div className="card">
         <div className="card-h"><h3>حركات الحساب</h3><div className="row">
           {can("accounting.write") && <><button className="btn sm" disabled={!selectedIds.length || busy} onClick={() => mark(true)}>✓ تأشير المحدد كمطابق</button><button className="btn sm ghost" disabled={!selectedIds.length || busy} onClick={() => mark(false)}>إلغاء التأشير</button>

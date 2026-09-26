@@ -5,7 +5,7 @@
 import { Db, db, tx, pool } from "../db/pool";
 import { r2, addDays, addMonths, monthEnd, today } from "../lib/core";
 import { post, nextNumber } from "../accounting/engine";
-import { saveDraft, postInvoice } from "./invoices";
+import { saveDraft, postInvoice, payCustomsVat } from "./invoices";
 import { createPayment } from "./payments";
 import { createExpense } from "./expenses";
 import { createAsset, runDepreciation } from "./assets";
@@ -14,6 +14,8 @@ import { stockAdjustment, fileVatReturn } from "./misc";
 import { createRun, postRun, payRun } from "./payroll";
 import { employeePosition, addLeave, createLoan, createProvision, postProvision, createSettlement, postSettlement, paySettlement } from "./hr";
 import { createBudget, fillFromActuals, getBudget } from "./budgets";
+import { createLandedCost, postLandedCost } from "./landed";
+import { savePriceList } from "./pricelists";
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -43,7 +45,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 5;
+export const DEMO_VERSION = 6;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -91,7 +93,11 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     await createAsset(t, companyId, userName, { name: "سيارة توصيل - تويوتا هايس", category: "سيارات", acquisitionDate: start, cost: 95000, vatAmount: 14250, salvageValue: 15000, usefulLifeMonths: 60, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120103'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120202'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أجهزة نقاط البيع والحاسب", category: "حاسب آلي", acquisitionDate: start, cost: 18000, vatAmount: 2700, salvageValue: 0, usefulLifeMonths: 36, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120106'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120205'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أثاث ورفوف المعرض", category: "أثاث", acquisitionDate: start, cost: 24000, vatAmount: 3600, salvageValue: 2000, usefulLifeMonths: 84, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120104'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120203'`, [companyId])).id });
-    return { wh: wh.id, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id };
+    const usdSupplier = await t.insert("partners", { companyId, code: "S-D090", name: "Shenzhen Electronics Trading Co.", isSupplier: true, kind: "COMPANY", city: "Shenzhen", country: "CN", currency: "USD", paymentTerms: 30, isDemo: true });
+    // wholesale price list (8% off) linked to two company customers
+    const pl = await savePriceList(t, companyId, { name: "عملاء الجملة", kind: "DISCOUNT", discountPct: 8, isDemo: true });
+    await t.exec(`UPDATE partners SET price_list_id=$2 WHERE id = ANY($1)`, [customers.filter((x) => x.kind === "COMPANY").slice(0, 2).map((x) => x.id), pl.id]);
+    return { wh: wh.id, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier };
   });
 
   const stock = ids.products.filter((p) => p.type === "STOCK");
@@ -123,8 +129,26 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         const d = await saveDraft(t, c, userName, { direction: "PURCHASE", kind: "INVOICE", date: addDays(mStart, 10), partnerId: ids.suppliers[5].id, warehouseId: ids.wh, supplierRef: `IMP-${between(100, 999)}`, lines: [{ productId: p.id, qty: 40, unitPrice: 90, taxCode: "RC" }], isDemo: true });
         purchaseBills.push(await postInvoice(t, c, d.id, userName));
       }
+      // a USD import (foreign-currency bill) with landed costs, paid next month at a different rate → FX difference
+      if (mi === 2 || mi === 5) {
+        const p1 = ids.products.find((x) => x.sku === "EL-001")!, p2 = ids.products.find((x) => x.sku === "EL-003")!;
+        const d = await saveDraft(t, c, userName, { direction: "PURCHASE", kind: "INVOICE", date: addDays(mStart, 6), partnerId: ids.usdSupplier.id, warehouseId: ids.wh, supplierRef: `PI-${between(1000, 9999)}`, currency: "USD", exchangeRate: 3.75, lines: [
+          { productId: p1.id, qty: 60, unitPrice: r2(Number(p1.purchasePrice) / 3.75 * 0.85), taxCode: "IM" }, { productId: p2.id, qty: 30, unitPrice: r2(Number(p2.purchasePrice) / 3.75 * 0.85), taxCode: "IM" },
+        ], isDemo: true });
+        const bill = await postInvoice(t, c, d.id, userName);
+        purchaseBills.push(bill);
+        await payCustomsVat(t, companyId, userName, bill.id, ids.bank, addDays(mStart, 11));
+        const lcAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='LANDED_COST'`, [companyId]);
+        await createExpense(t, companyId, userName, { date: addDays(mStart, 12), accountId: lcAcc.id, payee: "شركة الشحن والتخليص الدولية", description: `شحن بحري وتخليص جمركي — شحنة ${bill.number}`, amount: 2400, taxCode: "S", payAccountId: ids.bank, isDemo: true });
+        const lc = await createLandedCost(t, companyId, userName, { invoiceId: bill.id, date: addDays(mStart, 13), costs: [{ description: "شحن بحري", amount: 1500 }, { description: "رسوم جمركية وتخليص", amount: 900 }], isDemo: true });
+        await postLandedCost(t, companyId, userName, lc.id);
+        if (mi === 2) {
+          const fc = Number(bill.fcTotal);
+          await createPayment(t, companyId, userName, { direction: "OUT", partnerId: ids.usdSupplier.id, date: addDays(mStart, 34), amount: r2(fc * 3.77), accountId: ids.bank, method: "BANK", reference: `TT-${between(100000, 999999)}`, currency: "USD", fcAmount: fc, isDemo: true });
+        }
+      }
       // ── B2B sales invoices: 8-12/month ──
-      for (let i = 0; i < between(12, 18); i++) {
+      for (let i = 0; i < between(18, 24); i++) {
         const date = addDays(mStart, between(0, Math.max(0, daysBetween(mStart, mEnd))));
         const cust = pick(ids.customers.filter((x) => x.kind === "COMPANY"));
         const lines = Array.from({ length: between(1, 4) }, () => {
@@ -168,7 +192,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         await t.exec(`UPDATE journal_entries SET date=$2 WHERE source_type='POS_SESSION' AND source_id=$1`, [session.id, date]);
       }
       // ── expenses ──
-      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 7000, taxCode: "S", payAccountId: ids.bank, isDemo: true });
+      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 5500, taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5205"), payee: "الشركة السعودية للكهرباء", description: "فاتورة كهرباء", amount: r2(1800 + rand() * 900), taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5206"), payee: "STC", description: "اتصالات وإنترنت", amount: 650, taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(2, 25)), accountId: await expAcc(t, "5213"), payee: "متفرقات", description: "مصروفات نثرية", amount: r2(200 + rand() * 400), taxCode: "S", payAccountId: ids.cash, isDemo: true });
@@ -298,8 +322,13 @@ function daysBetween(a: string, b: string) {
 
 /** Deletes everything tagged is_demo for the company, in dependency order, in one transaction. */
 export async function purgeDemo(companyId: string) {
+  const real = await db.one(`SELECT COUNT(*)::int c FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id WHERE i.company_id=$1 AND NOT i.is_demo AND i.status='POSTED' AND p.is_demo`, [companyId]);
+  if (real.c) throw new Error("توجد مستندات فعلية مرحّلة على أصناف تجريبية — لا يمكن حذف البيانات التجريبية دون التأثير على المخزون. أنشئ أصنافك الخاصة للمستندات الفعلية.");
   await tx(async (t) => {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
+    await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`UPDATE partners SET price_list_id=NULL WHERE company_id=$1 AND price_list_id IN (SELECT id FROM price_lists WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM price_lists WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employee_settlements WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM hr_provisions WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employee_provision_ledger WHERE company_id=$1 AND is_demo`, [companyId]);
