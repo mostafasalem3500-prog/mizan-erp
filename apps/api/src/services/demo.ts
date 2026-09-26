@@ -46,6 +46,8 @@ async function log(companyId: string, step: string, pct: number) {
 export async function loadDemo(companyId: string, userId: string, userName: string) {
   const company = await db.one(`SELECT * FROM companies WHERE id=$1`, [companyId]);
   if (!company) throw new Error("company");
+  // a previous attempt may have been interrupted (server restart) — start clean
+  await purgeDemo(companyId);
   const c = { ...company, id: companyId, allowNegativeStock: false, pricesIncludeVat: false };
   const rand = rng(20260926);
   const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
