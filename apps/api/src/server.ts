@@ -8,6 +8,7 @@ import { AppError } from "./lib/core";
 import { auth, admin } from "./routes/auth";
 import { master } from "./routes/master";
 import { ops } from "./routes/ops";
+import { seedDemoAccount } from "./services/seed-demo-account";
 
 const app = express();
 app.disable("x-powered-by");
@@ -56,6 +57,7 @@ const port = Number(process.env.PORT || 3000);
 migrate()
   .then(() => {
     app.listen(port, "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
+    seedDemoAccount().catch((e) => console.error("[demo-account]", e));
   })
   .catch((e) => {
     console.error("migration failed", e);
