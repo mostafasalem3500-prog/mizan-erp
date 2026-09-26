@@ -14,7 +14,7 @@ pub.get(
   h(async (req) => {
     const token = p(req).token;
     if (!/^[0-9a-f-]{36}$/.test(token)) throw notFound();
-    const inv = await db.maybe(`SELECT id, company_id FROM invoices WHERE share_token=$1 AND status='POSTED'`, [token]);
+    const inv = await db.maybe(`SELECT id, company_id FROM invoices WHERE share_token=$1 AND (status='POSTED' OR kind IN ('QUOTATION','ORDER'))`, [token]);
     if (!inv) throw notFound("الرابط غير صالح");
     const doc = await getInvoice(db, inv.companyId, inv.id);
     doc.partner = doc.partnerId ? await db.maybe(`SELECT name, vat_number, phone, city, street, district, building_no FROM partners WHERE id=$1`, [doc.partnerId]) : null;

@@ -229,7 +229,7 @@ export function DocumentView() {
         {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
         <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
         <PrintBtn />
-        {d.status === "POSTED" && isSale && <ShareBtn d={d} />}
+        {isSale && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && <ShareBtn d={d} />}
       </div>
       {layout === "thermal" ? <Thermal d={d} qr={qr} /> : <InvoiceA4 d={d} qr={qr} />}
       <div className="grid c2 no-print">

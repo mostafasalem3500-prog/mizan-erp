@@ -22,6 +22,10 @@ export function PosPage() {
   const [ticketDisc, setTicketDisc] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
   const [done, setDone] = useState<any>(null);
+  const [queue, setQueue] = useLocalState<any[]>("mz_pos_queue", []);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [syncing, setSyncing] = useState(false);
+  const [syncErrors, setSyncErrors] = useState<{ ref: string; msg: string }[]>([]);
   const [openCash, setOpenCash] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -45,6 +49,46 @@ export function PosPage() {
     }
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0) };
   }, [cart, ticketDisc, incl]);
+
+  // ── offline: queued sales are replayed in order with an idempotent clientRef ──
+  const syncQueue = async () => {
+    if (syncing || !navigator.onLine) return;
+    const pending = (JSON.parse(localStorage.getItem("mz_pos_queue") || "[]") as any[]);
+    if (!pending.length) return;
+    setSyncing(true);
+    const errs: { ref: string; msg: string }[] = [];
+    let remaining = [...pending];
+    for (const item of pending) {
+      try {
+        await api("/pos/sale", { body: item.body });
+        remaining = remaining.filter((x) => x.body.clientRef !== item.body.clientRef);
+        setQueue(remaining);
+      } catch (e: any) {
+        if (e.code === "OFFLINE" || e.status === 0) break; // still offline — keep everything
+        if (e.status === 401) break;
+        errs.push({ ref: item.body.clientRef, msg: e.message }); // business error (stock/session): needs the cashier
+        remaining = remaining.filter((x) => x.body.clientRef !== item.body.clientRef);
+        setQueue(remaining);
+      }
+    }
+    setSyncErrors((prev) => [...prev, ...errs]);
+    setSyncing(false);
+    if (pending.length !== remaining.length) { sess.reload(); products.reload(); toast(`تمت مزامنة ${pending.length - remaining.length} عملية بيع`, "ok"); }
+  };
+  useEffect(() => {
+    const on = () => { setOnline(true); syncQueue(); };
+    const off = () => setOnline(false);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    const iv = setInterval(() => { if (navigator.onLine && (JSON.parse(localStorage.getItem("mz_pos_queue") || "[]") as any[]).length) syncQueue(); }, 20000);
+    syncQueue();
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); clearInterval(iv); };
+  }, []);
+  /** builds a local invoice-like object so the receipt can be shown/printed while offline */
+  const localReceipt = (body: any, lines: CartLine[], tenders: any[]) => {
+    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? 15 : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name, qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
+    const taxable = rows.reduce((a, r) => a + r.netAmount, 0), vatTotal = rows.reduce((a, r) => a + r.vatAmount, 0);
+    return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? taxable + vatTotal })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
+  };
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -86,6 +130,7 @@ export function PosPage() {
           <button className="btn sm" onClick={() => nav("/")}>← النظام</button>
           <div className="search grow" style={{ minWidth: 220 }}><span className="ic">🔍</span><input ref={searchRef} className="input" placeholder="بحث / باركود (F2)" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearchKey} autoFocus /></div>
           <span className="badge teal">وردية {session.number} · {session.orders} طلب</span>
+          {!online && <span className="badge red">غير متصل</span>}
           <button className="btn sm" onClick={() => setReturnOpen(true)}>↩ مرتجع</button>
           {held.length > 0 && <div className="row" style={{ gap: 4 }}>{held.map((h) => <button key={h.id} className="btn sm accent" onClick={() => resume(h)}>▶ معلق ({h.cart.length})</button>)}</div>}
           <button className="btn sm" onClick={() => setCloseOpen(true)}>إغلاق الوردية</button>
@@ -135,9 +180,24 @@ export function PosPage() {
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
       {payOpen && <PayModal total={totals.total} partner={partner} onClose={() => setPayOpen(false)} onPay={(tenders) => run(async () => {
-        const inv = await api("/pos/sale", { body: { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct })), tenders } });
-        setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(inv); sess.reload(); products.reload();
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+        const finish = (inv: any) => { setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(inv); };
+        if (!navigator.onLine) { setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("لا يوجد اتصال — حُفظت العملية وستُرحّل تلقائياً عند عودة الاتصال", "info"); return; }
+        try {
+          const inv = await api("/pos/sale", { body });
+          finish(inv); sess.reload(); products.reload();
+        } catch (e: any) {
+          if (e.code !== "OFFLINE") throw e;
+          setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("انقطع الاتصال — حُفظت العملية وستُرحّل تلقائياً", "info");
+        }
       })} />}
+      {(queue.length > 0 || !online || syncErrors.length > 0) && (
+        <div style={{ position: "fixed", bottom: 12, insetInlineStart: 12, zIndex: 60, maxWidth: 380, gap: 8 }} className="grid">
+          {!online && <div className="alert warn" style={{ margin: 0 }}>⚠ غير متصل بالإنترنت — البيع مستمر محلياً ويُرحّل تلقائياً عند عودة الاتصال</div>}
+          {queue.length > 0 && <div className="alert info row between" style={{ margin: 0 }}><span>{queue.length} عملية بانتظار المزامنة {syncing && <span className="spinner" style={{ verticalAlign: "middle" }} />}</span><button className="btn sm" disabled={syncing || !online} onClick={syncQueue}>مزامنة الآن</button></div>}
+          {syncErrors.map((e) => <div key={e.ref} className="alert err row between" style={{ margin: 0 }}><span className="small">تعذّر ترحيل عملية {e.ref.slice(0, 8)}: {e.msg}</span><button className="btn sm ghost" onClick={() => setSyncErrors((s) => s.filter((x) => x.ref !== e.ref))}>✕</button></div>)}
+        </div>
+      )}
       {done && <ReceiptModal inv={done} onClose={() => { setDone(null); searchRef.current?.focus(); }} />}
       {closeOpen && <CloseModal session={session} onClose={(closed) => { setCloseOpen(false); if (closed) { sess.reload(); } }} />}
       {returnOpen && <ReturnModal session={session} onClose={(r) => { setReturnOpen(false); if (r) { sess.reload(); products.reload(); setDone(r); } }} />}
@@ -184,10 +244,10 @@ function ReceiptModal({ inv, onClose }: { inv: any; onClose: () => void }) {
   const [qr, setQr] = useState("");
   const { me } = useCompanyContext();
   const [full, setFull] = useState<any>(null);
-  useEffect(() => { api(`/invoices/${inv.id}`).then(setFull); if (inv.qr) QRCode.toDataURL(inv.qr, { margin: 0, width: 120 }).then(setQr); }, [inv.id]);
+  useEffect(() => { if (inv.offline) { setFull(inv); return; } api(`/invoices/${inv.id}`).then(setFull).catch(() => setFull(inv)); if (inv.qr) QRCode.toDataURL(inv.qr, { margin: 0, width: 120 }).then(setQr); }, [inv.id]);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
   return (
-    <Modal narrow title={<>{inv.kind === "CREDIT_NOTE" ? "مرتجع" : "فاتورة"} {inv.number} ✓ {inv.cashChange > 0 && <span className="badge green">الباقي {money(inv.cashChange)}</span>}</>} onClose={onClose} footer={<><button className="btn" onClick={() => window.print()}>🖨 طباعة (حراري)</button><button className="btn primary" onClick={onClose}>بيع جديد (Enter)</button></>}>
+    <Modal narrow title={<>{inv.kind === "CREDIT_NOTE" ? "مرتجع" : "فاتورة"} {inv.offline ? "محفوظة محلياً" : inv.number} ✓ {inv.cashChange > 0 && <span className="badge green">الباقي {money(inv.cashChange)}</span>}</>} onClose={onClose} footer={<><button className="btn" onClick={() => window.print()}>🖨 طباعة (حراري)</button><button className="btn primary" onClick={onClose}>بيع جديد (Enter)</button></>}>
       {full ? <Thermal d={full} qr={qr} /> : <Loading />}
     </Modal>
   );

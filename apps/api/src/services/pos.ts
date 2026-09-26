@@ -24,6 +24,8 @@ export interface PosSaleInput {
   notes?: string;
   isDemo?: boolean;
   date?: string;
+  clientRef?: string; // offline-queued sale id → idempotent replay
+  issuedAt?: string; // ISO time the sale actually happened (offline)
 }
 
 async function walkInCustomer(t: Db, companyId: string) {
@@ -34,6 +36,12 @@ async function walkInCustomer(t: Db, companyId: string) {
 
 export async function posSale(t: Db, company: any, user: { id: string; name: string }, s: PosSaleInput) {
   const companyId = company.id;
+  if (s.clientRef) {
+    const dup = await t.maybe(`SELECT id FROM invoices WHERE company_id=$1 AND client_ref=$2`, [companyId, s.clientRef]);
+    if (dup) return { ...(await getInvoice(t, companyId, dup.id)), cashChange: 0, replayed: true };
+  }
+  const issuedAt = s.clientRef && s.issuedAt && !isNaN(Date.parse(s.issuedAt)) && Date.now() - Date.parse(s.issuedAt) < 7 * 86400000 && Date.parse(s.issuedAt) <= Date.now() + 300000 ? new Date(s.issuedAt) : undefined;
+  const saleDate = issuedAt ? new Date(issuedAt.getTime() + 3 * 3600 * 1000).toISOString().slice(0, 10) : s.date || today();
   const session = await t.one(`SELECT * FROM pos_sessions WHERE id=$1 AND company_id=$2 FOR UPDATE`, [s.sessionId, companyId], "الوردية غير موجودة");
   if (session.status !== "OPEN") throw conflict("الوردية مغلقة");
   const partner = s.partnerId ? await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [s.partnerId, companyId], "العميل غير موجود") : await walkInCustomer(t, companyId);
@@ -49,7 +57,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
     return { productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: disc, taxCode: p.taxCode };
   });
   const draft = await saveDraft(t, company, user.name, {
-    direction: "SALE", kind: "INVOICE", channel: "POS", date: s.date || today(), partnerId: partner.id, warehouseId: session.warehouseId,
+    direction: "SALE", kind: "INVOICE", channel: "POS", date: saleDate, partnerId: partner.id, warehouseId: session.warehouseId,
     invoiceType: partner.vatNumber ? "STANDARD" : "SIMPLIFIED", notes: s.notes || null, lines, isDemo: !!s.isDemo,
     pricesIncludeVat: !!company.pricesIncludeVat,
   });
@@ -77,7 +85,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   let posted: any;
   if (credit) {
     // mixed: post invoice on AR then a receipt for the paid part
-    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id });
+    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id, issuedAt });
     if (postTenders.length) {
       const { createPayment } = require("./payments") as typeof import("./payments");
       const cashAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='POS_CASH'`, [companyId]);
@@ -88,11 +96,12 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
       await t.exec(`UPDATE invoices SET tenders=$2, pos_session_id=$3 WHERE id=$1`, [posted.id, JSON.stringify([...postTenders, { method: "CREDIT", amount: creditAmount }]), session.id]);
     }
   } else {
-    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id });
+    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id, issuedAt });
   }
   const cashPart = r2(postTenders.filter((x) => x.method === "CASH").reduce((a, x) => a + x.amount, 0));
   const cardPart = r2(postTenders.filter((x) => x.method !== "CASH").reduce((a, x) => a + x.amount, 0));
   await t.exec(`UPDATE pos_sessions SET cash_sales=cash_sales+$2, card_sales=card_sales+$3, orders_count=orders_count+1 WHERE id=$1`, [session.id, cashPart, cardPart]);
+  if (s.clientRef) await t.exec(`UPDATE invoices SET client_ref=$2 WHERE id=$1`, [posted.id, s.clientRef]);
   return { ...(await getInvoice(t, companyId, posted.id)), cashChange };
 }
 

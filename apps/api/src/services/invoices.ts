@@ -174,7 +174,7 @@ export async function getInvoice(t: Db, companyId: string, id: string) {
 }
 
 /** Posts an INVOICE / CREDIT_NOTE / DEBIT_NOTE: numbering, stock, journal, ZATCA stamp. */
-export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean } = {}) {
+export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean; issuedAt?: Date } = {}) {
   const companyId = company.id;
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المستند غير موجود");
   if (inv.status !== "DRAFT") throw conflict("المستند مرحل مسبقاً");
@@ -313,7 +313,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   if (opts.tenders?.length) amountPaid = Number(inv.total);
   await t.update("invoices", { id }, {
     number, status: "POSTED", journalId: entry?.id || null, costTotal, amountPaid,
-    paymentStatus: amountPaid >= Number(inv.total) ? "PAID" : "UNPAID", issuedAt: new Date(), updatedAt: new Date(),
+    paymentStatus: amountPaid >= Number(inv.total) ? "PAID" : "UNPAID", issuedAt: opts.issuedAt || new Date(), updatedAt: new Date(),
     tenders: opts.tenders || null, posSessionId: opts.posSessionId || null,
   });
 

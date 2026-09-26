@@ -10,6 +10,7 @@ import { master } from "./routes/master";
 import { ops } from "./routes/ops";
 import { pub, extra } from "./routes/extra";
 import { r3 } from "./routes/round3";
+import { r4 } from "./routes/round4";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
@@ -34,6 +35,7 @@ app.use("/api", master);
 app.use("/api", ops);
 app.use("/api", extra);
 app.use("/api", r3);
+app.use("/api", r4);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 
