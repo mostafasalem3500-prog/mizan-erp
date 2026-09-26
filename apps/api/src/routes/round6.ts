@@ -58,3 +58,42 @@ r6.delete("/bank/:accountId/statement", perm("accounting.write"), h(async (req) 
 
 // ── customs VAT payment for import bills ──────────────────────────────────
 r6.post("/invoices/:id/pay-customs", perm("payments.write"), h(async (req) => { const r = await tx((t) => payCustomsVat(t, cid(req), actor(req), p(req).id, String(need(req.body, "accountId", "حساب السداد")), req.body.date)); await audit(req, "PAY_CUSTOMS", "invoice", p(req).id); return r; }));
+
+// ── reorder suggestions → purchase orders ────────────────────────────────
+r6.get("/inventory/reorder", perm("inventory.read"), h(async (req) => {
+  const rows = await db.rows(
+    `WITH bal AS (SELECT product_id, SUM(qty) qty FROM stock_balances WHERE company_id=$1 GROUP BY product_id),
+     sales AS (SELECT l.product_id, SUM(l.qty*l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date >= CURRENT_DATE - 90 GROUP BY l.product_id),
+     lastbuy AS (SELECT DISTINCT ON (l.product_id) l.product_id, i.partner_id, i.partner_name, l.unit_price/NULLIF(l.factor,0) unit_price, i.date FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='INVOICE' AND i.status='POSTED' ORDER BY l.product_id, i.date DESC),
+     onorder AS (SELECT l.product_id, SUM(l.qty*l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='ORDER' AND i.status='DRAFT' GROUP BY l.product_id)
+     SELECT p.id, p.sku, p.name, p.unit, p.reorder_level, p.purchase_price, COALESCE(b.qty,0) qty, COALESCE(s.q,0) sold90, COALESCE(o.q,0) on_order, lb.partner_id AS supplier_id, lb.partner_name AS supplier_name, lb.unit_price AS last_price, lb.date AS last_date
+     FROM products p LEFT JOIN bal b ON b.product_id=p.id LEFT JOIN sales s ON s.product_id=p.id LEFT JOIN lastbuy lb ON lb.product_id=p.id LEFT JOIN onorder o ON o.product_id=p.id
+     WHERE p.company_id=$1 AND p.type='STOCK' AND p.is_active AND (COALESCE(b.qty,0) <= p.reorder_level OR ($2::boolean AND COALESCE(s.q,0) > 0))
+     ORDER BY (COALESCE(b.qty,0) - p.reorder_level), p.name`, [cid(req), req.query.all === "1"]);
+  return rows.map((r) => {
+    const monthly = Number(r.sold90) / 3;
+    const target = Math.max(Number(r.reorderLevel) * 2, monthly * 1.5); // cover ~6 weeks or twice the reorder level
+    const suggested = Math.max(0, Math.ceil(target - Number(r.qty) - Number(r.onOrder)));
+    return { ...r, monthlySales: Math.round(monthly * 10) / 10, suggested, price: Number(r.lastPrice ?? r.purchasePrice ?? 0) };
+  }).filter((r) => r.suggested > 0 || Number(r.qty) <= Number(r.reorderLevel));
+}));
+r6.post("/inventory/reorder/orders", perm("purchases.write"), h(async (req) => {
+  const items: { productId: string; qty: number; supplierId?: string | null; price?: number }[] = req.body?.items || [];
+  const groups = new Map<string, typeof items>();
+  for (const it of items) { if (!it.productId || !(Number(it.qty) > 0)) continue; const k = it.supplierId || ""; (groups.get(k) || groups.set(k, []).get(k)!).push(it); }
+  if (!groups.size) throw bad("لا توجد أصناف بكميات");
+  const { saveDraft } = require("../services/invoices") as typeof import("../services/invoices");
+  const created: any[] = [];
+  await tx(async (t) => {
+    for (const [supplierId, list] of groups) {
+      let sid = supplierId;
+      if (!sid) { const s = await t.maybe(`SELECT id FROM partners WHERE company_id=$1 AND is_supplier AND is_active ORDER BY created_at LIMIT 1`, [cid(req)]); if (!s) throw bad("حدد المورد للأصناف التي ليس لها مورد سابق"); sid = s.id; }
+      const sup = await t.one(`SELECT currency FROM partners WHERE id=$1 AND company_id=$2`, [sid, cid(req)], "المورد غير موجود");
+      const rate = sup.currency && sup.currency !== "SAR" ? await rateFor(t, cid(req), sup.currency) : 1; // last prices are in SAR → convert to the supplier's currency
+      const d = await saveDraft(t, req.company, actor(req), { direction: "PURCHASE", kind: "ORDER", partnerId: sid, notes: "أمر شراء من اقتراحات إعادة الطلب", currency: sup.currency || "SAR", exchangeRate: rate, lines: list.map((it) => ({ productId: it.productId, qty: Number(it.qty), unitPrice: rate !== 1 ? Math.round(((Number(it.price) || 0) / rate) * 10000) / 10000 : Number(it.price) || 0, taxCode: "S" })) });
+      created.push({ id: d.id, number: d.number, partnerName: d.partnerName, lines: list.length });
+    }
+  });
+  await audit(req, "CREATE", "reorder_po", cid(req), { orders: created.length });
+  return created;
+}));

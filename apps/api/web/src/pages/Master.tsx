@@ -138,10 +138,11 @@ export function ProductsPage() {
 function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
-  const [f, setF] = useState<any>({ type: "STOCK", unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p });
+  const [f, setF] = useState<any>({ type: "STOCK", unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p, uoms: (p.uoms || []).map((u: any) => ({ ...u, key: Math.random() })) });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const updU = (k: number, patch: any) => setF({ ...f, uoms: f.uoms.map((u: any) => (u.key === k ? { ...u, ...patch } : u)) });
   return (
-    <Modal title={p.id ? `تعديل: ${p.name}` : "صنف جديد"} onClose={() => onClose()} footer={<>
+    <Modal wide title={p.id ? `تعديل: ${p.name}` : "صنف جديد"} onClose={() => onClose()} footer={<>
       {p.id && <button className="btn danger sm" onClick={() => run(async () => { if (!confirmDlg("حذف الصنف؟")) return; const r = await api(`/products/${p.id}`, { method: "DELETE" }); if (r.message) toast(r.message); onClose(true); })}>حذف</button>}
       <div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { p.id ? await api(`/products/${p.id}`, { method: "PUT", body: f }) : await api("/products", { body: f }); onClose(true); }, "تم الحفظ")}>حفظ</button></>}>
       <div className="form-grid">
@@ -159,6 +160,13 @@ function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; 
         <Field label="الصورة"><div className="row"><label className="btn sm">اختيار صورة<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, image: await fileToDataUrl(file, 300) }); }} /></label>{f.image && <><img src={f.image} style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover" }} alt="" /><button className="btn ghost sm" onClick={() => setF({ ...f, image: null })}>✕</button></>}</div></Field>
         {p.id && <Field label="الحالة"><label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط (يظهر في البيع)</label></Field>}
       </div>
+      {f.type === "STOCK" && <div className="mt">
+        <div className="row between"><b>وحدات البيع الإضافية (عبوات)</b><button className="btn sm" onClick={() => setF({ ...f, uoms: [...f.uoms, { key: Math.random(), name: "كرتون", factor: 12, barcode: "", salePrice: "", purchasePrice: "" }] })}>＋ عبوة</button></div>
+        <div className="hint">المخزون يُحفظ بالوحدة الأساسية ({f.unit || "حبة"})؛ العبوة = عدد الوحدات الأساسية × معامل التحويل، ولها باركود وسعر خاصان تُستخدم في الفواتير ونقطة البيع. اترك السعر فارغاً ليُحسب = سعر الوحدة × المعامل.</div>
+        {!!f.uoms.length && <table className="tbl compact mt"><thead><tr><th>اسم العبوة</th><th style={{ width: 110 }}>تحتوي ({f.unit || "حبة"})</th><th>باركود العبوة</th><th style={{ width: 130 }}>سعر البيع</th><th style={{ width: 130 }}>سعر الشراء</th><th /></tr></thead>
+          <tbody>{f.uoms.map((u: any) => <tr key={u.key}><td><Input value={u.name} onChange={(e) => updU(u.key, { name: e.target.value })} list="uom-names" /></td><td><NumInput value={u.factor} onChange={(e) => updU(u.key, { factor: e.target.value })} /></td><td><Input value={u.barcode || ""} onChange={(e) => updU(u.key, { barcode: e.target.value })} dir="ltr" /></td><td><NumInput value={u.salePrice ?? ""} placeholder={String(Math.round(Number(f.salePrice || 0) * Number(u.factor || 0) * 100) / 100)} onChange={(e) => updU(u.key, { salePrice: e.target.value })} /></td><td><NumInput value={u.purchasePrice ?? ""} placeholder={String(Math.round(Number(f.purchasePrice || 0) * Number(u.factor || 0) * 100) / 100)} onChange={(e) => updU(u.key, { purchasePrice: e.target.value })} /></td><td><button className="btn ghost sm" onClick={() => setF({ ...f, uoms: f.uoms.filter((x: any) => x.key !== u.key) })}>✕</button></td></tr>)}</tbody></table>}
+        <datalist id="uom-names"><option value="كرتون" /><option value="علبة" /><option value="درزن" /><option value="شد" /><option value="كيس" /><option value="طرد" /></datalist>
+      </div>}
     </Modal>
   );
 }

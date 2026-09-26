@@ -107,12 +107,13 @@ master.get(
     const params: any[] = [cid(req)];
     const where = ["p.company_id=$1"];
     if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(p.name ILIKE $${params.length} OR p.sku ILIKE $${params.length} OR p.barcode ILIKE $${params.length})`); }
-    if (req.query.barcode) { params.push(req.query.barcode); where.push(`(p.barcode=$${params.length} OR p.sku=$${params.length})`); }
+    if (req.query.barcode) { params.push(req.query.barcode); where.push(`(p.barcode=$${params.length} OR p.sku=$${params.length} OR EXISTS (SELECT 1 FROM product_uoms u WHERE u.product_id=p.id AND u.barcode=$${params.length}))`); }
     if (req.query.categoryId) { params.push(req.query.categoryId); where.push(`p.category_id=$${params.length}`); }
     if (req.query.active !== "all") where.push("p.is_active");
     params.push(limit, offset);
     const rows = await db.rows(
-      `SELECT p.*, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost
+      `SELECT p.*, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost,
+         COALESCE((SELECT json_agg(json_build_object('id', u.id, 'name', u.name, 'factor', u.factor, 'barcode', u.barcode, 'salePrice', u.sale_price, 'purchasePrice', u.purchase_price) ORDER BY u.sort, u.factor) FROM product_uoms u WHERE u.product_id=p.id), '[]'::json) uoms
        FROM products p LEFT JOIN product_categories c ON c.id=p.category_id
        LEFT JOIN (SELECT product_id, SUM(qty) qty, SUM(value) value FROM stock_balances WHERE company_id=$1 GROUP BY product_id) s ON s.product_id=p.id
        WHERE ${where.join(" AND ")} ORDER BY p.sku LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -140,6 +141,7 @@ master.post(
       companyId: cid(req), sku, barcode: b.barcode || null, name, nameEn: b.nameEn || null, type: b.type === "SERVICE" ? "SERVICE" : "STOCK", categoryId: b.categoryId || null, unit: b.unit || "حبة",
       salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image: b.image || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف (SKU) مستخدم مسبقاً"); throw e; });
+    if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
     if (b.openingQty && row.type === "STOCK") {
       const { stockAdjustment } = require("../services/misc") as typeof import("../services/misc");
       await tx((t) => stockAdjustment(t, cid(req), actor(req), { kind: "OPENING", lines: [{ productId: row.id, qty: num(b.openingQty), unitCost: num(b.purchasePrice) }] }));
@@ -160,9 +162,21 @@ master.put(
       purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image: b.image, isActive: b.isActive, type: b.type,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف مستخدم مسبقاً"); throw e; });
     if (!row) throw notFound();
+    if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
     return row;
   }),
 );
+
+/** Replaces a product's pack units (keeps ids of unchanged names so open documents keep referring to them). */
+async function saveUoms(companyId: string, productId: string, uoms: any[]) {
+  const clean = uoms.map((u, i) => ({ name: String(u.name || "").trim(), factor: num(u.factor), barcode: u.barcode ? String(u.barcode).trim() : null, salePrice: u.salePrice === "" || u.salePrice === null || u.salePrice === undefined ? null : num(u.salePrice), purchasePrice: u.purchasePrice === "" || u.purchasePrice === null || u.purchasePrice === undefined ? null : num(u.purchasePrice), sort: i })).filter((u) => u.name && u.factor > 0);
+  const names = clean.map((u) => u.name);
+  await db.exec(`DELETE FROM product_uoms WHERE company_id=$1 AND product_id=$2 AND NOT (name = ANY($3))`, [companyId, productId, names]);
+  for (const u of clean) {
+    await db.exec(`INSERT INTO product_uoms(company_id, product_id, name, factor, barcode, sale_price, purchase_price, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (product_id, name) DO UPDATE SET factor=EXCLUDED.factor, barcode=EXCLUDED.barcode, sale_price=EXCLUDED.sale_price, purchase_price=EXCLUDED.purchase_price, sort=EXCLUDED.sort`, [companyId, productId, u.name, u.factor, u.barcode, u.salePrice, u.purchasePrice, u.sort]);
+  }
+}
 
 master.delete(
   "/products/:id",

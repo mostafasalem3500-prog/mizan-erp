@@ -390,7 +390,7 @@ export async function dashboard(t: Db, companyId: string) {
     `SELECT to_char(e.date,'YYYY-MM') m, SUM(CASE WHEN a.type='REVENUE' THEN l.credit-l.debit ELSE 0 END) revenue, SUM(CASE WHEN a.type='EXPENSE' THEN l.debit-l.credit ELSE 0 END) expense
      FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date >= $2 GROUP BY 1 ORDER BY 1`, [companyId, start12]);
   const topProducts = await t.rows(
-    `SELECT p.name, SUM(l.qty) qty, SUM(l.net_amount) net FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id
+    `SELECT p.name, SUM(l.qty * l.factor) qty, SUM(l.net_amount) net FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id
      WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date >= $2 GROUP BY p.id ORDER BY net DESC LIMIT 8`, [companyId, addDays(td, -90)]);
   const topCustomers = await t.rows(
     `SELECT p.name, SUM(i.total) total FROM invoices i JOIN partners p ON p.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date >= $2 GROUP BY p.id ORDER BY total DESC LIMIT 8`, [companyId, addDays(td, -90)]);

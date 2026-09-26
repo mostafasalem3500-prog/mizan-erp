@@ -23,6 +23,7 @@
     "decimal.js": "^10.6.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^6.10.1",
     "pg": "^8.23.0",
     "xmldsigjs": "^2.8.8"
   },
@@ -32,6 +33,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.3",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "ts-node": "^10.9.2",
     "typescript": "^7.0.2"

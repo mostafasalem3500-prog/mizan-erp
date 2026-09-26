@@ -18,7 +18,7 @@ export async function currentSession(t: Db, companyId: string, userId: string) {
 export interface PosSaleInput {
   sessionId: string;
   partnerId?: string | null;
-  lines: { productId: string; qty: number; unitPrice?: number; discountPct?: number }[];
+  lines: { productId: string; qty: number; unitPrice?: number; discountPct?: number; uomId?: string | null }[];
   tenders: { method: "CASH" | "CARD" | "BANK" | "CREDIT"; amount: number | null }[]; // amount null → the remainder
   discountPct?: number; // whole-ticket discount
   notes?: string;
@@ -54,7 +54,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
     if (!p) throw bad("صنف غير موجود أو موقوف");
     const unit = l.unitPrice !== undefined && l.unitPrice !== null ? num(l.unitPrice) : Number(p.salePrice);
     const disc = r2(100 - (100 - num(l.discountPct)) * (100 - ticketDisc) / 100);
-    return { productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: disc, taxCode: p.taxCode };
+    return { productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: disc, taxCode: p.taxCode, uomId: l.uomId || null };
   });
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "INVOICE", channel: "POS", date: saleDate, partnerId: partner.id, warehouseId: session.warehouseId,
@@ -114,7 +114,7 @@ export async function posReturn(t: Db, company: any, user: { id: string; name: s
   const retLines = lines.map((l) => {
     const ol = origin.lines.find((x: any) => x.productId === l.productId);
     if (!ol) throw bad("الصنف غير موجود في الفاتورة الأصلية");
-    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description };
+    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description, uomId: ol.uomId || null };
   });
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "CREDIT_NOTE", channel: "POS", date: today(), partnerId: origin.partnerId, warehouseId: session.warehouseId,

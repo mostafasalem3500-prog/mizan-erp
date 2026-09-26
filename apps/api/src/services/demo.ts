@@ -45,7 +45,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 6;
+export const DEMO_VERSION = 7;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -78,6 +78,13 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     const products: any[] = [];
     for (const [sku, name, ci, cost, price, unit, tax] of PRODUCTS)
       products.push(await t.insert("products", { companyId, sku, barcode: `629${String(between(100000000, 999999999))}`, name, type: sku.startsWith("SV") ? "SERVICE" : "STOCK", categoryId: cats[ci].id, unit, salePrice: price, purchasePrice: cost, taxCode: tax || "S", reorderLevel: sku.startsWith("SV") ? 0 : 20, isDemo: true }));
+    // pack units for a few fast movers (carton / box) with their own barcodes
+    const PACKS: [string, string, number][] = [["FD-006", "كرتون", 12], ["FD-003", "شد", 6], ["EL-001", "علبة", 10], ["ST-003", "ربطة", 12], ["FD-004", "كرتون", 24]];
+    const uoms: Record<string, any> = {};
+    for (const [sku, name, factor] of PACKS) {
+      const prod = products.find((x) => x.sku === sku);
+      if (prod) uoms[sku] = await t.insert("product_uoms", { companyId, productId: prod.id, name, factor, barcode: `629${String(between(100000000, 999999999))}`, salePrice: r2(Number(prod.salePrice) * factor * 0.95), purchasePrice: null, sort: 0 });
+    }
     // opening balances: capital, cash, bank
     const cash = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='CASH'`, [companyId]);
     const bank = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='BANK'`, [companyId]);
@@ -97,7 +104,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     // wholesale price list (8% off) linked to two company customers
     const pl = await savePriceList(t, companyId, { name: "عملاء الجملة", kind: "DISCOUNT", discountPct: 8, isDemo: true });
     await t.exec(`UPDATE partners SET price_list_id=$2 WHERE id = ANY($1)`, [customers.filter((x) => x.kind === "COMPANY").slice(0, 2).map((x) => x.id), pl.id]);
-    return { wh: wh.id, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier };
+    return { wh: wh.id, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier, uoms };
   });
 
   const stock = ids.products.filter((p) => p.type === "STOCK");
@@ -153,7 +160,9 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         const cust = pick(ids.customers.filter((x) => x.kind === "COMPANY"));
         const lines = Array.from({ length: between(1, 4) }, () => {
           const p = rand() < 0.15 ? pick(services) : pick(stock);
-          return { productId: p.id, qty: p.type === "SERVICE" ? between(1, 3) : between(10, 60), unitPrice: Number(p.salePrice), discountPct: rand() < 0.3 ? pick([2, 5, 10]) : 0, taxCode: p.taxCode };
+          const u = p.type === "STOCK" && ids.uoms[p.sku] && rand() < 0.5 ? ids.uoms[p.sku] : null; // sometimes sold by the carton
+          return u ? { productId: p.id, qty: between(2, 8), unitPrice: Number(u.salePrice), discountPct: 0, taxCode: p.taxCode, uomId: u.id }
+            : { productId: p.id, qty: p.type === "SERVICE" ? between(1, 3) : between(10, 60), unitPrice: Number(p.salePrice), discountPct: rand() < 0.3 ? pick([2, 5, 10]) : 0, taxCode: p.taxCode };
         });
         try {
           await t.savepoint(async () => {

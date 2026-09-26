@@ -5,6 +5,12 @@ import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, In
 
 const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "currencies", label: "العملات" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
 
+function MailStatus() {
+  const { data } = useFetch("/mail/status");
+  if (!data) return <span className="muted">…</span>;
+  return data.configured ? <span className="badge green">مفعّل — {data.from}</span> : <span className="badge amber">غير مفعّل</span>;
+}
+
 export function SettingsPage() {
   const { tab = "company" } = useParams();
   const nav = useNavigate();
@@ -47,6 +53,7 @@ function CompanyForm() {
         <Field label="بداية السنة المالية (شهر)"><Select value={f.fiscalYearStart} onChange={s("fiscalYearStart")}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</Select></Field>
         <Field label="خيارات المخزون"><label className="check"><input type="checkbox" checked={!!f.allowNegativeStock} onChange={s("allowNegativeStock")} /> السماح بالبيع بالسالب (رصيد مخزون سالب)</label></Field>
         <Field label="التسعير"><label className="check"><input type="checkbox" checked={!!f.pricesIncludeVat} onChange={s("pricesIncludeVat")} /> أسعار البيع شاملة الضريبة (للتجزئة)</label></Field>
+        <Field label="البريد الصادر (SMTP)" hint="يُضبط من متغيرات الخادم SMTP_HOST/PORT/USER/PASS/FROM ثم يظهر زر «بريد» في الفواتير وشاشة التحصيل"><MailStatus /></Field>
         <Field label="دورية الإقرار الضريبي" hint="ربع سنوي للمنشآت دون 40 مليون ر.س، وشهري لمن فوقها"><Select value={f.vatPeriod || "QUARTERLY"} onChange={s("vatPeriod")}><option value="QUARTERLY">ربع سنوي</option><option value="MONTHLY">شهري</option></Select></Field>
         <Field label="الشعار"><div className="row"><label className="btn sm">رفع شعار<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, logo: await fileToDataUrl(file, 400) }); }} /></label>{f.logo && <><img src={f.logo} style={{ height: 40 }} alt="" /><button className="btn ghost sm" onClick={() => setF({ ...f, logo: null })}>✕</button></>}</div></Field>
       </div>

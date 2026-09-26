@@ -63,8 +63,8 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
 }
 
 // ─── editor ────────────────────────────────────────────────────────────────
-type Line = { key: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string };
-const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S" });
+type Line = { key: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
+const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S", uom: null });
 
 function calc(l: Line, incl: boolean) {
   const rate = l.taxCode === "S" || l.taxCode === "IM" ? 15 : 0;
@@ -114,7 +114,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
       setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1);
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
-      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode })));
+      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [] } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
       setLoaded(true);
     }).catch((e) => toast(e.message, "err"));
   }, [id]);
@@ -130,13 +130,17 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
     const items = (priceList.items || []).filter((i: any) => i.productId === p.id && Number(i.minQty) <= qty).sort((a: any, b: any) => Number(a.minQty) - Number(b.minQty));
     return items.length ? Number(items[items.length - 1].price) : null;
   };
-  const pickProduct = (k: number, p: any) => {
-    if (!p) return upd(k, { product: null });
+  const unitPriceFor = (p: any, u: any | null) => {
     const base = isSale ? listPrice(p) ?? Number(p.salePrice) : Number(p.purchasePrice) || Number(p.avgCost) || 0;
-    upd(k, { product: p, description: p.name, unitPrice: fc ? Math.round((base / rate) * 10000) / 10000 : base, taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
+    const packed = u ? (isSale ? (u.salePrice !== null && u.salePrice !== undefined ? Number(u.salePrice) : base * Number(u.factor)) : (u.purchasePrice !== null && u.purchasePrice !== undefined ? Number(u.purchasePrice) : base * Number(u.factor))) : base;
+    return fc ? Math.round((packed / rate) * 10000) / 10000 : Math.round(packed * 10000) / 10000;
+  };
+  const pickProduct = (k: number, p: any, u: any | null = null) => {
+    if (!p) return upd(k, { product: null, uom: null });
+    upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
   const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null,
-    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode })) });
+    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null })) });
   const save = (post: boolean) => run(async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
     const d = id ? await api(`/invoices/${id}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
@@ -150,7 +154,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   });
   const barcodeAdd = async (code: string) => {
     const r = await api(`/products${q({ barcode: code, limit: 1 })}`);
-    if (r[0]) { const empty = lines.find((l) => !l.product && !l.description); if (empty) pickProduct(empty.key, r[0]); else { const l = newLine(); setLines((ls) => [...ls, l]); setTimeout(() => pickProduct(l.key, r[0]), 0); } } else toast("لا يوجد صنف بهذا الباركود", "err");
+    if (r[0]) { const u = (r[0].uoms || []).find((x: any) => x.barcode === code) || null; const empty = lines.find((l) => !l.product && !l.description); if (empty) pickProduct(empty.key, r[0], u); else { const l = newLine(); setLines((ls) => [...ls, l]); setTimeout(() => pickProduct(l.key, r[0], u), 0); } } else toast("لا يوجد صنف بهذا الباركود", "err");
   };
   if (!loaded) return <Modal title="..." onClose={onClose}><Loading /></Modal>;
   return (
@@ -183,7 +187,8 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
               <Input style={{ marginTop: 4 }} placeholder="البيان" value={l.description} onChange={(e) => upd(l.key, { description: e.target.value })} />
               {!isSale && !l.product && <div style={{ marginTop: 4 }}><Picker value={l.account || null} onChange={(a) => upd(l.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.type === "ASSET")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="حساب المصروف/الأصل (للبنود غير المخزنية)" /></div>}
             </td>
-            <td><NumInput value={l.qty} min={0} onChange={(e) => { const qty = Number(e.target.value); const lp = l.product && priceList?.kind === "FIXED" ? listPrice(l.product, qty) : null; upd(l.key, { qty, ...(lp !== null && lp !== undefined ? { unitPrice: fc ? Math.round((lp / rate) * 10000) / 10000 : lp } : {}) }); }} /></td>
+            <td><NumInput value={l.qty} min={0} onChange={(e) => { const qty = Number(e.target.value); const lp = l.product && !l.uom && priceList?.kind === "FIXED" ? listPrice(l.product, qty) : null; upd(l.key, { qty, ...(lp !== null && lp !== undefined ? { unitPrice: fc ? Math.round((lp / rate) * 10000) / 10000 : lp } : {}) }); }} />
+              {l.product && (l.product.uoms?.length > 0 || l.uom) && <Select style={{ marginTop: 4 }} value={l.uom?.id || ""} onChange={(e) => { const u = (l.product.uoms || []).find((x: any) => x.id === e.target.value) || null; if (!u && e.target.value) return; pickProduct(l.key, l.product, u); }}><option value="">{l.product.unit || "وحدة"}</option>{(l.product.uoms || []).map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}{l.uom && !(l.product.uoms || []).some((u: any) => u.id === l.uom!.id) && <option value={l.uom.id}>{l.uom.name} ({l.uom.factor})</option>}</Select>}</td>
             <td><NumInput value={l.unitPrice} min={0} onChange={(e) => upd(l.key, { unitPrice: Number(e.target.value) })} /></td>
             <td><NumInput value={l.discountPct} min={0} max={100} onChange={(e) => upd(l.key, { discountPct: Number(e.target.value) })} /></td>
             <td><Select value={l.taxCode} onChange={(e) => upd(l.key, { taxCode: e.target.value })}>{(isSale ? ["S", "Z", "X", "E", "O"] : ["S", "IM", "RC", "Z", "E", "O"]).map((t) => <option key={t} value={t}>{TAX_AR[t]}</option>)}</Select></td>
@@ -228,6 +233,7 @@ export function DocumentView() {
   const [pay, setPay] = useState(false);
   const [landed, setLanded] = useState(false);
   const [customs, setCustoms] = useState(false);
+  const mail = useFetch("/mail/status");
   const { run, busy } = useAction();
   useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
   if (loading || !d) return <Loading />;
@@ -259,6 +265,7 @@ export function DocumentView() {
         <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
         <PrintBtn />
         {isSale && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && <ShareBtn d={d} />}
+        {isSale && mail.data?.configured && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && can("sales.write") && <button className="btn sm" disabled={busy} onClick={() => run(async () => { const to = prompt("إرسال المستند بالبريد إلى:", d.partner?.email || ""); if (!to) return; await api(`/invoices/${d.id}/email`, { body: { to } }); }, "تم إرسال البريد")}>✉ بريد</button>}
       </div>
       {layout === "thermal" ? <Thermal d={d} qr={qr} /> : <InvoiceA4 d={d} qr={qr} />}
       <div className="grid c2 no-print">
@@ -368,7 +375,7 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
             {d.reason && <div><div className="muted small">سبب الإشعار</div>{d.reason}</div>}
           </div>
           <table><thead><tr><th>#</th><th>البيان</th><th>الكمية</th><th>سعر الوحدة</th>{d.lines.some((l: any) => Number(l.discountPct)) && <th>خصم</th>}<th>المبلغ قبل الضريبة</th>{showVat && <><th>الضريبة</th><th>الإجمالي</th></>}</tr></thead>
-            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.unit || ""}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} ر.س</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
+            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.uom || l.unit || ""}{l.uom && Number(l.factor) > 1 ? <span className="small muted"> (= {Number(l.qty) * Number(l.factor)} {l.unit})</span> : null}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} ر.س</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
           </table>
           <div className="row mt" style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
             <div className="small muted" style={{ maxWidth: 380 }}>{d.notes && <div>ملاحظات: {d.notes}</div>}{c.invoiceTerms && <div>{c.invoiceTerms}</div>}{d.tenders?.length > 0 && <div>طريقة الدفع: {d.tenders.map((t: any) => `${METHOD_AR[t.method] || t.method} ${money(t.amount)}`).join(" + ")}</div>}</div>
@@ -400,7 +407,7 @@ export function Thermal({ d, qr }: { d: any; qr: string }) {
       {d.partnerName && d.partnerName !== "عميل نقدي" && <div>العميل: {d.partnerName}</div>}
       {d.createdBy && <div>الكاشير: {d.createdBy}</div>}
       <table style={{ marginTop: 6 }}><thead><tr><th style={{ textAlign: "start" }}>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
-        <tbody>{d.lines.map((l: any) => <tr key={l.id}><td>{l.description}<div style={{ fontSize: 10 }} className="num">{money(l.unitPrice)} × {Number(l.qty)}</div></td><td className="c num">{Number(l.qty)}</td><td className="c num">{money(l.total)}</td></tr>)}</tbody></table>
+        <tbody>{d.lines.map((l: any) => <tr key={l.id}><td>{l.description}{l.uom && <span style={{ fontSize: 10 }}> ({l.uom})</span>}<div style={{ fontSize: 10 }} className="num">{money(l.unitPrice)} × {Number(l.qty)}</div></td><td className="c num">{Number(l.qty)}</td><td className="c num">{money(l.total)}</td></tr>)}</tbody></table>
       <div style={{ marginTop: 6 }}>
         <div className="row between"><span>الإجمالي قبل الضريبة</span><span className="num">{money(d.taxable)}</span></div>
         {Number(d.discountTotal) > 0 && <div className="row between"><span>الخصم</span><span className="num">{money(d.discountTotal)}</span></div>}

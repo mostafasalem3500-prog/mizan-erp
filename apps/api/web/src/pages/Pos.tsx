@@ -4,7 +4,8 @@ import QRCode from "qrcode";
 import { api, q, useFetch, money, Money, Loading, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, useAction, useToast, useCompanyContext, useLocalState, fmtDT, METHOD_AR, Badge, confirmDlg } from "../lib";
 import { Thermal, QuickPartner } from "./Documents";
 
-type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number };
+type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
+const lineKey = (l: { product: any; uom?: any }) => l.product.id + ":" + (l.uom?.id || "");
 const EMOJI: Record<string, string> = { "مواد غذائية": "🍚", "مشروبات": "🥤", "منظفات": "🧴", "قرطاسية": "📎", "إلكترونيات": "🔌", "خدمات": "🛠" };
 
 export function PosPage() {
@@ -38,15 +39,17 @@ export function PosPage() {
   // customer price list (fixed prices / % discount) — applied when the customer is chosen and on every add
   const [priceList, setPriceList] = useState<any>(null);
   useEffect(() => { if (partner?.priceListId) api(`/price-lists/${partner.priceListId}`).then(setPriceList).catch(() => setPriceList(null)); else setPriceList(null); }, [partner?.priceListId]);
-  const priceFor = (p: any, qty = 1, pl = priceList) => {
+  const priceFor = (p: any, qty = 1, pl = priceList, uom: any = null) => {
+    if (uom) return uom.salePrice !== null && uom.salePrice !== undefined ? Number(uom.salePrice) : Math.round(priceFor(p, 1, pl) * Number(uom.factor) * 100) / 100;
     if (!pl) return Number(p.salePrice);
     if (pl.kind === "DISCOUNT") return Math.round(Number(p.salePrice) * (1 - Number(pl.discountPct) / 100) * 100) / 100;
     const items = (pl.items || []).filter((i: any) => i.productId === p.id && Number(i.minQty) <= qty).sort((a: any, b: any) => Number(a.minQty) - Number(b.minQty));
     return items.length ? Number(items[items.length - 1].price) : Number(p.salePrice);
   };
-  useEffect(() => { setCart((c) => c.map((l) => ({ ...l, unitPrice: priceFor(l.product, l.qty) }))); }, [priceList]);
-  const add = (p: any) => setCart((c) => { const i = c.findIndex((l) => l.product.id === p.id); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1) }; return n; } return [...c, { product: p, qty: 1, unitPrice: priceFor(p, 1), discountPct: 0 }]; });
-  const setQty = (id: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => l.product.id !== id) : c.map((l) => (l.product.id === id ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" ? priceFor(l.product, qty) : l.unitPrice } : l))));
+  useEffect(() => { setCart((c) => c.map((l) => ({ ...l, unitPrice: priceFor(l.product, l.qty, priceList, l.uom) }))); }, [priceList]);
+  const add = (p: any, uom: any = null) => setCart((c) => { const k = p.id + ":" + (uom?.id || ""); const i = c.findIndex((l) => lineKey(l) === k); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1, priceList, uom) }; return n; } return [...c, { product: p, uom, qty: 1, unitPrice: priceFor(p, 1, priceList, uom), discountPct: 0 }]; });
+  const setUom = (key: string, uomId: string) => setCart((c) => c.map((l) => { if (lineKey(l) !== key) return l; const u = (l.product.uoms || []).find((x: any) => x.id === uomId) || null; return { ...l, uom: u, unitPrice: priceFor(l.product, l.qty, priceList, u) }; }));
+  const setQty = (key: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => lineKey(l) !== key) : c.map((l) => (lineKey(l) === key ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" && !l.uom ? priceFor(l.product, qty) : l.unitPrice } : l))));
   const totals = useMemo(() => {
     let net = 0, vat = 0;
     for (const l of cart) {
@@ -95,7 +98,7 @@ export function PosPage() {
   }, []);
   /** builds a local invoice-like object so the receipt can be shown/printed while offline */
   const localReceipt = (body: any, lines: CartLine[], tenders: any[]) => {
-    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? 15 : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name, qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
+    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? 15 : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
     const taxable = rows.reduce((a, r) => a + r.netAmount, 0), vatTotal = rows.reduce((a, r) => a + r.vatAmount, 0);
     return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? taxable + vatTotal })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
   };
@@ -115,7 +118,8 @@ export function PosPage() {
     const v = search.trim();
     if (!v) return;
     const exact = (products.data || []).find((p: any) => p.barcode === v || p.sku?.toLowerCase() === v.toLowerCase());
-    if (exact) { add(exact); setSearch(""); } else if (list.length === 1) { add(list[0]); setSearch(""); } else toast("لم يُعثر على صنف مطابق", "err");
+    const packOf = (products.data || []).find((p: any) => (p.uoms || []).some((u: any) => u.barcode === v));
+    if (packOf) { add(packOf, packOf.uoms.find((u: any) => u.barcode === v)); setSearch(""); } else if (exact) { add(exact); setSearch(""); } else if (list.length === 1) { add(list[0]); setSearch(""); } else toast("لم يُعثر على صنف مطابق", "err");
   };
   const hold = () => { if (!cart.length) return; setHeld((h) => [...h, { id: Date.now(), at: new Date().toISOString(), cart, partner }]); setCart([]); setPartner(null); toast("تم تعليق الطلب", "ok"); };
   const resume = (h: any) => { if (cart.length && !confirmDlg("استبدال السلة الحالية؟")) return; setCart(h.cart); setPartner(h.partner); setHeld((x) => x.filter((y) => y.id !== h.id)); };
@@ -170,12 +174,13 @@ export function PosPage() {
         </div>
         <div className="cart-lines">
           {cart.map((l) => (
-            <div className="line" key={l.product.id}>
-              <div><b>{l.product.name}</b><div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div></div>
+            <div className="line" key={lineKey(l)}>
+              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>
+                {l.product.uoms?.length > 0 && <select className="input" style={{ padding: "2px 6px", fontSize: 12, width: "auto", marginTop: 2 }} value={l.uom?.id || ""} onChange={(e) => setUom(lineKey(l), e.target.value)}><option value="">{l.product.unit || "حبة"}</option>{l.product.uoms.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}</select>}</div>
               <div className="row" style={{ gap: 6 }}>
-                <div className="qty"><button onClick={() => setQty(l.product.id, l.qty - 1)}>−</button><input value={l.qty} onChange={(e) => setQty(l.product.id, Number(e.target.value) || 0)} /><button onClick={() => setQty(l.product.id, l.qty + 1)}>＋</button></div>
+                <div className="qty"><button onClick={() => setQty(lineKey(l), l.qty - 1)}>−</button><input value={l.qty} onChange={(e) => setQty(lineKey(l), Number(e.target.value) || 0)} /><button onClick={() => setQty(lineKey(l), l.qty + 1)}>＋</button></div>
                 <b className="num" style={{ minWidth: 70, textAlign: "end" }}>{money(l.qty * l.unitPrice * (1 - l.discountPct / 100))}</b>
-                <button className="btn ghost sm" onClick={() => { const v = prompt("خصم % على هذا السطر", String(l.discountPct)); if (v !== null) setCart((c) => c.map((x) => (x.product.id === l.product.id ? { ...x, discountPct: Math.min(100, Math.max(0, Number(v) || 0)) } : x))); }}>%</button>
+                <button className="btn ghost sm" onClick={() => { const v = prompt("خصم % على هذا السطر", String(l.discountPct)); if (v !== null) setCart((c) => c.map((x) => (lineKey(x) === lineKey(l) ? { ...x, discountPct: Math.min(100, Math.max(0, Number(v) || 0)) } : x))); }}>%</button>
               </div>
             </div>))}
           {!cart.length && <div className="empty">اضغط على صنف لإضافته للسلة<br /><span className="small">اختصارات: <span className="kbd">F2</span> بحث · <span className="kbd">F5</span> دفع · <span className="kbd">F8</span> تعليق</span></div>}
@@ -190,7 +195,7 @@ export function PosPage() {
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
       {payOpen && <PayModal total={totals.total} partner={partner} onClose={() => setPayOpen(false)} onPay={(tenders) => run(async () => {
-        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
         const finish = (inv: any) => { setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(inv); };
         if (!navigator.onLine) { setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("لا يوجد اتصال — حُفظت العملية وستُرحّل تلقائياً عند عودة الاتصال", "info"); return; }
         try {

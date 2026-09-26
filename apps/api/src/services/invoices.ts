@@ -18,10 +18,11 @@ export interface LineInput {
   productId?: string | null;
   accountId?: string | null;
   description?: string;
-  qty: number;
-  unitPrice: number;
+  qty: number; // in the line unit (pack) — stock moves in base units (qty × factor)
+  unitPrice: number; // per line unit
   discountPct?: number;
   taxCode?: string;
+  uomId?: string | null; // product_uoms.id (pack); omitted → base unit
 }
 
 export interface InvoiceInput {
@@ -59,9 +60,14 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
     ? await t.rows(`SELECT * FROM products WHERE company_id=$1 AND id = ANY($2)`, [companyId, productIds])
     : [];
   const pmap = new Map(products.map((p) => [p.id, p]));
+  const uomIds = input.lines.map((l) => l.uomId).filter(Boolean) as string[];
+  const uoms = uomIds.length ? await t.rows(`SELECT * FROM product_uoms WHERE company_id=$1 AND id = ANY($2)`, [companyId, uomIds]) : [];
   return input.lines.map((l, i) => {
     const p = l.productId ? pmap.get(l.productId) : null;
     if (l.productId && !p) throw bad(`الصنف في السطر ${i + 1} غير موجود`);
+    const u = l.uomId ? uoms.find((x) => x.id === l.uomId && x.productId === l.productId) : null;
+    if (l.uomId && !u) throw bad(`وحدة القياس في السطر ${i + 1} لا تخص الصنف`);
+    const factor = u ? Number(u.factor) : 1;
     const qty = r3(num(l.qty));
     if (qty <= 0) throw bad(`الكمية في السطر ${i + 1} يجب أن تكون أكبر من صفر`);
     const fcUnitPrice = rate !== 1 ? r4(num(l.unitPrice)) : null;
@@ -78,6 +84,8 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
       accountId: l.accountId || null,
       description: (l.description || p?.name || "").trim() || `بند ${i + 1}`,
       qty,
+      uom: u ? u.name : null,
+      factor,
       unitPrice,
       fcUnitPrice,
       discountPct,
@@ -178,7 +186,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   await t.insertMany(
     "invoice_lines",
     lines.map((l) => ({
-      invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty,
+      invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, uom: l.uom, factor: l.factor,
       unitPrice: l.unitPrice, fcUnitPrice: l.fcUnitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
       netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort,
     })),
@@ -189,7 +197,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
 export async function getInvoice(t: Db, companyId: string, id: string) {
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId], "المستند غير موجود");
   inv.lines = await t.rows(
-    `SELECT l.*, p.sku, p.unit, p.barcode FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id WHERE l.invoice_id=$1 ORDER BY l.sort`,
+    `SELECT l.*, p.sku, p.unit, p.barcode, u.id AS uom_id FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id LEFT JOIN product_uoms u ON u.product_id=l.product_id AND u.name=l.uom WHERE l.invoice_id=$1 ORDER BY l.sort`,
     [id],
   );
   return inv;
@@ -226,14 +234,14 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   if (isReturn && origin) {
     // cannot return more than was invoiced (net of previous returns)
     const prev = await t.rows(
-      `SELECT l.product_id, SUM(l.qty) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
+      `SELECT l.product_id, SUM(l.qty * l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
        WHERE i.origin_id=$1 AND i.kind='CREDIT_NOTE' AND i.status='POSTED' AND l.product_id IS NOT NULL GROUP BY l.product_id`,
       [origin.id],
     );
     for (const l of lines.filter((x) => x.productId)) {
-      const sold = originLines.filter((o) => o.productId === l.productId).reduce((a, o) => a + Number(o.qty), 0);
+      const sold = originLines.filter((o) => o.productId === l.productId).reduce((a, o) => a + Number(o.qty) * Number(o.factor || 1), 0);
       const already = Number(prev.find((p) => p.productId === l.productId)?.q || 0);
-      if (Number(l.qty) > sold - already + 1e-9) throw bad(`كمية المرتجع للصنف «${l.description}» تتجاوز المتبقي في الفاتورة الأصلية (${r3(sold - already)})`);
+      if (Number(l.qty) * Number(l.factor || 1) > sold - already + 1e-9) throw bad(`كمية المرتجع للصنف «${l.description}» تتجاوز المتبقي في الفاتورة الأصلية (${r3(sold - already)} ${l.ptype ? "وحدة" : ""})`);
     }
     const prevTotal = await t.one(`SELECT COALESCE(SUM(total),0) s FROM invoices WHERE origin_id=$1 AND kind='CREDIT_NOTE' AND status='POSTED'`, [origin.id]);
     if (Number(inv.total) > Number(origin.total) - Number(prevTotal.s) + 0.001) throw bad("قيمة الإشعار الدائن تتجاوز المتبقي من الفاتورة الأصلية");
@@ -242,7 +250,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   // ── inventory effects ──
   for (const l of lines) {
     if (!l.productId || l.ptype !== "STOCK") continue;
-    const q = Number(l.qty);
+    const q = r3(Number(l.qty) * Number(l.factor || 1)); // base units
     const base = { productId: l.productId, warehouseId: inv.warehouseId, qty: q, date: inv.date, sourceId: inv.id, reference: ref, isDemo: inv.isDemo };
     let cost = 0;
     if (isSale && !isReturn) {
@@ -381,7 +389,7 @@ export async function convert(t: Db, company: any, id: string, user: string, toK
   const draft = await saveDraft(t, company, user, {
     direction: src.direction, kind: toKind, date: today(), partnerId: src.partnerId, warehouseId: src.warehouseId,
     invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo, currency: src.currency, exchangeRate: Number(src.exchangeRate), priceListId: src.priceListId,
-    lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.fcUnitPrice ?? l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode })),
+    lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.fcUnitPrice ?? l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uomId || null })),
     pricesIncludeVat: false,
   });
   await t.exec(`UPDATE invoices SET notes = COALESCE(notes,'') || $2 WHERE id=$1`, [draft.id, ` (من ${src.number})`]);

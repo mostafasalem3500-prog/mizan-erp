@@ -12,6 +12,8 @@ import { ChequesPage, RecurringPage } from "./pages/Round3";
 import { PayrollPage } from "./pages/Payroll";
 import { BudgetsPage } from "./pages/Budgets";
 import { PriceListsPage } from "./pages/Pricing";
+import { LabelsPage, ReorderPage } from "./pages/Stock";
+import { CollectionsPage } from "./pages/Collections";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -26,6 +28,7 @@ const NAV = [
   { to: "/customers", ic: "👥", label: "العملاء", perm: "partners.read" },
   { to: "/price-lists", ic: "🏷", label: "قوائم الأسعار", perm: "products.read" },
   { to: "/receipts", ic: "💵", label: "سندات القبض", perm: "payments.read" },
+  { to: "/collections", ic: "📞", label: "التحصيل والمتابعة", perm: "sales.read" },
   { group: "المشتريات" },
   { to: "/purchases/invoices", ic: "📦", label: "فواتير المشتريات", perm: "purchases.read" },
   { to: "/purchases/orders", ic: "📋", label: "أوامر الشراء", perm: "purchases.read" },
@@ -36,6 +39,8 @@ const NAV = [
   { group: "المخزون" },
   { to: "/products", ic: "🏷", label: "الأصناف", perm: "products.read" },
   { to: "/inventory", ic: "🏬", label: "المستودعات والجرد", perm: "inventory.read" },
+  { to: "/reorder", ic: "🔔", label: "إعادة الطلب", perm: "inventory.read" },
+  { to: "/labels", ic: "🏷", label: "ملصقات الباركود", perm: "products.read" },
   { group: "المحاسبة" },
   { to: "/accounts", ic: "🌳", label: "دليل الحسابات", perm: "accounting.read" },
   { to: "/journals", ic: "📒", label: "القيود اليومية", perm: "accounting.read" },
@@ -125,6 +130,8 @@ export function App() {
                 <Route path="/expenses" element={<ExpensesPage />} />
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/reorder" element={<ReorderPage />} />
+                <Route path="/labels" element={<LabelsPage />} />
                 <Route path="/accounts" element={<AccountsPage />} />
                 <Route path="/journals" element={<JournalsPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
@@ -136,6 +143,7 @@ export function App() {
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
+                <Route path="/collections" element={<CollectionsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />
                 <Route path="/budgets/:id" element={<BudgetsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
