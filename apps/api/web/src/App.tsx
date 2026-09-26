@@ -2,11 +2,12 @@ import React, { useEffect, useState } from "react";
 import { Routes, Route, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select } from "./lib";
 import { Dashboard } from "./pages/Dashboard";
-import { DocumentsPage, DocumentView } from "./pages/Documents";
+import { DocumentsPage, DocumentView, PublicInvoice } from "./pages/Documents";
 import { PosPage } from "./pages/Pos";
 import { PartnersPage, ProductsPage, InventoryPage } from "./pages/Master";
 import { PaymentsPage, ExpensesPage, AssetsPage } from "./pages/Money";
 import { AccountsPage, JournalsPage, PeriodsPage } from "./pages/Accounting";
+import { BankPage } from "./pages/Bank";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -33,6 +34,7 @@ const NAV = [
   { group: "المحاسبة" },
   { to: "/accounts", ic: "🌳", label: "دليل الحسابات", perm: "accounting.read" },
   { to: "/journals", ic: "📒", label: "القيود اليومية", perm: "accounting.read" },
+  { to: "/bank", ic: "🏦", label: "التسوية البنكية", perm: "accounting.read" },
   { to: "/assets", ic: "🏢", label: "الأصول الثابتة", perm: "assets.read" },
   { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
@@ -65,6 +67,7 @@ export function App() {
   const reload = () => api("/auth/me").then(setMe).catch(() => { session.token = null; setMe(null); }).finally(() => setLoading(false));
   useEffect(() => { if (session.token) reload(); const h = () => { setMe(null); nav("/login"); }; window.addEventListener("mz-logout", h); return () => window.removeEventListener("mz-logout", h); }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
+  if (loc.pathname.startsWith("/p/")) return <Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
   if (!me) return <Routes><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
@@ -116,6 +119,7 @@ export function App() {
                 <Route path="/accounts" element={<AccountsPage />} />
                 <Route path="/journals" element={<JournalsPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
+                <Route path="/bank" element={<BankPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
                 <Route path="/reports" element={<ReportsPage />} />

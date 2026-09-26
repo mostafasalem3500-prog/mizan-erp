@@ -8,6 +8,7 @@ import { AppError } from "./lib/core";
 import { auth, admin } from "./routes/auth";
 import { master } from "./routes/master";
 import { ops } from "./routes/ops";
+import { pub, extra } from "./routes/extra";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
 const app = express();
@@ -24,10 +25,12 @@ app.get("/api/health", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+app.use("/api/public", pub);
 app.use("/api/auth", auth);
 app.use("/api/admin", admin);
 app.use("/api", master);
 app.use("/api", ops);
+app.use("/api", extra);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 

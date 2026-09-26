@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, fmtDate, fmtDT, fileToDataUrl, confirmDlg, ZATCA_AR, session } from "../lib";
 
-const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "audit", label: "سجل التدقيق" }];
+const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
 
 export function SettingsPage() {
   const { tab = "company" } = useParams();
@@ -15,6 +15,7 @@ export function SettingsPage() {
       {tab === "users" && <Users />}
       {tab === "license" && <License />}
       {tab === "demo" && <DemoData />}
+      {tab === "backup" && <Backup />}
       {tab === "audit" && <Audit />}
     </div>
   );
@@ -124,6 +125,18 @@ function DemoData() {
         {!st.data.demoLoaded ? <button className="btn primary" disabled={busy || (job && !job.done && !job.error)} onClick={() => run(async () => { await api("/demo/load", { body: {} }); st.reload(); })}>تحميل البيانات التجريبية</button>
           : <button className="btn danger" disabled={busy} onClick={() => run(async () => { if (!confirmDlg("حذف كل البيانات التجريبية (المستندات والقيود والأصناف والعملاء الموسومة تجريبي)؟")) return; await api("/demo/purge", { body: {} }); st.reload(); reload(); }, "تم حذف البيانات التجريبية")}>حذف البيانات التجريبية نهائياً</button>}
       </div>}
+    </div></div>
+  );
+}
+
+function Backup() {
+  const { me } = useCompanyContext();
+  const owner = ["OWNER", "ADMIN"].includes(me.role) || me.superAdmin;
+  return (
+    <div className="card"><div className="card-h"><h3>النسخ الاحتياطي</h3></div><div className="card-b">
+      <p>قاعدة البيانات مستضافة على PostgreSQL في Railway مع نسخ احتياطي على مستوى الخادم. إضافة لذلك يمكن للمالك تنزيل نسخة كاملة من بيانات المنشأة (دليل الحسابات، القيود، الأطراف، الأصناف، المخزون، المستندات، السندات، المصروفات، الأصول، الإقرارات، سجل التدقيق) بصيغة JSON للاحتفاظ بها خارج النظام أو لأغراض التدقيق.</p>
+      {owner ? <a className="btn primary" href={`/api/backup?token=${localStorage.getItem("mz_token")}`}>⬇ تنزيل نسخة كاملة (JSON)</a> : <div className="alert warn">النسخ الاحتياطي متاح للمالك ومدير النظام فقط.</div>}
+      <div className="hint mt">للتصدير الجزئي بصيغة Excel استخدم زر Excel في كل شاشة (الأصناف، العملاء، الفواتير، القيود، التقارير…).</div>
     </div></div>
   );
 }

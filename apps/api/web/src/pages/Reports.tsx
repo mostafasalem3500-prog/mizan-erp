@@ -5,7 +5,7 @@ import { StatementModal } from "./Master";
 
 const TABS = [
   { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
-  { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
+  { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
 ];
 
 export function ReportsPage() {
@@ -23,6 +23,8 @@ export function ReportsPage() {
       {tab === "cash-flow" && <CashFlow from={from} to={to} />}
       {tab === "aging" && <Aging to={to} />}
       {tab === "sales" && <SalesAnalysis from={from} to={to} />}
+      {tab === "expenses" && <ExpensesAnalysis from={from} to={to} />}
+      {tab === "salespersons" && <Salespersons from={from} to={to} />}
       {tab === "statements" && <Statements />}
       {tab === "integrity" && <Integrity />}
     </div>
@@ -128,6 +130,29 @@ function SalesAnalysis({ from, to }: { from: string; to: string }) {
         <div className="card"><Head title="المبيعات حسب العميل" sub={`${from} — ${to}`} rows={d.byCustomer.map((r: any) => ({ العميل: r.name, الفواتير: r.invoices, الإجمالي: r.total }))} /><div className="table-wrap"><table className="tbl compact"><thead><tr><th>العميل</th><th className="n">عدد الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{d.byCustomer.map((r: any) => <tr key={r.name}><td>{r.name}</td><td className="n">{r.invoices}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
         <div className="card"><Head title="المبيعات اليومية" sub={`${from} — ${to}`} rows={d.byDay.map((r: any) => ({ التاريخ: r.date, الفواتير: r.count, الإجمالي: r.total }))} /><div className="table-wrap" style={{ maxHeight: 400 }}><table className="tbl compact"><thead><tr><th>اليوم</th><th className="n">الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{d.byDay.map((r: any) => <tr key={r.date}><td>{fmtDate(r.date)}</td><td className="n">{r.count}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
       </div>
+    </div>
+  );
+}
+
+function ExpensesAnalysis({ from, to }: { from: string; to: string }) {
+  const { data: d } = useFetch(`/reports/expenses-by-account${q({ from, to })}`);
+  if (!d) return <Loading />;
+  return (
+    <div className="grid c2">
+      <div className="card"><Head title="المصروفات حسب الحساب" sub={`${from} — ${to}`} rows={d.byAccount.map((r: any) => ({ الحساب: r.code, الاسم: r.nameAr, المبلغ: r.amount }))} />
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">المبلغ</th><th className="n">النسبة</th></tr></thead><tbody>{d.byAccount.map((r: any) => <tr key={r.code}><td><span className="num muted">{r.code}</span> {r.nameAr}</td><td className="n"><Money v={r.amount} /></td><td className="n">{d.total ? Math.round((r.amount / d.total) * 100) + "%" : ""}</td></tr>)}</tbody><tfoot><tr><td>الإجمالي</td><td className="n"><Money v={d.total} /></td><td /></tr></tfoot></table></div></div>
+      <div className="card"><Head title="المصروفات حسب مركز التكلفة" sub={`${from} — ${to}`} rows={d.byCostCenter.map((r: any) => ({ "مركز التكلفة": r.costCenter, المبلغ: r.amount }))} />
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>مركز التكلفة</th><th className="n">المبلغ</th></tr></thead><tbody>{d.byCostCenter.map((r: any) => <tr key={r.costCenter}><td>{r.costCenter}</td><td className="n"><Money v={r.amount} /></td></tr>)}</tbody></table></div></div>
+    </div>
+  );
+}
+
+function Salespersons({ from, to }: { from: string; to: string }) {
+  const { data: d } = useFetch(`/reports/salespersons${q({ from, to })}`);
+  if (!d) return <Loading />;
+  return (
+    <div className="card"><Head title="المبيعات حسب المندوب / الكاشير" sub={`${from} — ${to}`} rows={d.map((r: any) => ({ المندوب: r.salesperson, الفواتير: r.invoices, "تذاكر POS": r.posTickets, الإجمالي: r.total, "مجمل الربح": r.grossProfit }))} />
+      {!d.length ? <Empty /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>المستخدم</th><th className="n">عدد الفواتير</th><th className="n">منها نقاط بيع</th><th className="n">إجمالي المبيعات</th><th className="n">مجمل الربح</th><th className="n">الهامش</th></tr></thead><tbody>{d.map((r: any) => <tr key={r.salesperson}><td><b>{r.salesperson}</b></td><td className="n">{r.invoices}</td><td className="n">{r.posTickets}</td><td className="n"><Money v={r.total} /></td><td className="n"><Money v={r.grossProfit} sign /></td><td className="n">{Number(r.total) ? Math.round((r.grossProfit / (r.total / 1.15)) * 100) + "%" : ""}</td></tr>)}</tbody></table></div>}
     </div>
   );
 }

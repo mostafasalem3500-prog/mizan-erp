@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { amountToArabicWords } from "../shared/tafqeet";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg } from "../lib";
 
 // ─── payments (receipt / payment vouchers) ─────────────────────────────────
@@ -79,7 +80,7 @@ function VoucherPrint({ p, direction, onClose }: { p: any; direction: string; on
         <div className="head"><div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && <>الرقم الضريبي: {me.company.vatNumber}</>}</div></div><div><h2 style={{ color: "var(--primary)" }}>{direction === "IN" ? "سند قبض" : "سند صرف"}</h2><div>رقم: <b className="num">{p.number}</b></div><div>التاريخ: <span className="num">{fmtDate(p.date)}</span></div></div></div>
         <table><tbody>
           <tr><td style={{ width: 160 }}>{direction === "IN" ? "استلمنا من السيد/السادة" : "صرفنا إلى السيد/السادة"}</td><td><b>{p.partnerName}</b></td></tr>
-          <tr><td>مبلغاً وقدره</td><td><b className="num" style={{ fontSize: 18 }}>{money(p.amount)} ريال سعودي</b></td></tr>
+          <tr><td>مبلغاً وقدره</td><td><b className="num" style={{ fontSize: 18 }}>{money(p.amount)} ريال سعودي</b><div className="small">{amountToArabicWords(Number(p.amount))}</div></td></tr>
           <tr><td>طريقة الدفع</td><td>{METHOD_AR[p.method]} — {p.accountName}{p.reference && <> — مرجع: <span className="num">{p.reference}</span></>}</td></tr>
           <tr><td>وذلك عن</td><td>{p.notes || (p.allocations?.length ? "سداد فواتير" : "دفعة على الحساب")}</td></tr>
         </tbody></table>

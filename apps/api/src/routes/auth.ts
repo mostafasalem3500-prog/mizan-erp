@@ -68,8 +68,23 @@ auth.post(
   h(async (req) => {
     const email = String(need(req.body, "email", "البريد الإلكتروني")).trim().toLowerCase();
     const password = String(need(req.body, "password", "كلمة المرور"));
+    const attempt = await db.maybe(`SELECT * FROM login_attempts WHERE key=$1`, [email]);
+    if (attempt?.lockedUntil && new Date(attempt.lockedUntil) > new Date()) {
+      const mins = Math.ceil((new Date(attempt.lockedUntil).getTime() - Date.now()) / 60000);
+      throw new AppError(429, `تم إيقاف محاولات الدخول مؤقتاً بعد محاولات فاشلة متكررة — حاول بعد ${mins} دقيقة`, "LOCKED");
+    }
     const u = await db.maybe(`SELECT * FROM users WHERE email=$1`, [email]);
-    if (!u || !(await bcrypt.compare(password, u.passwordHash))) throw new AppError(401, "بيانات الدخول غير صحيحة", "BAD_CREDENTIALS");
+    if (!u || !(await bcrypt.compare(password, u.passwordHash))) {
+      await db.exec(
+        `INSERT INTO login_attempts(key, failures, locked_until) VALUES ($1, 1, NULL)
+         ON CONFLICT (key) DO UPDATE SET failures = CASE WHEN login_attempts.updated_at < now() - interval '15 minutes' THEN 1 ELSE login_attempts.failures + 1 END,
+           locked_until = CASE WHEN (CASE WHEN login_attempts.updated_at < now() - interval '15 minutes' THEN 1 ELSE login_attempts.failures + 1 END) >= 5 THEN now() + interval '15 minutes' ELSE NULL END,
+           updated_at = now()`,
+        [email],
+      );
+      throw new AppError(401, "بيانات الدخول غير صحيحة", "BAD_CREDENTIALS");
+    }
+    await db.exec(`DELETE FROM login_attempts WHERE key=$1`, [email]);
     if (!u.isActive) throw new AppError(403, "الحساب موقوف", "INACTIVE");
     await db.exec(`UPDATE users SET last_login_at=now() WHERE id=$1`, [u.id]);
     const companies = await companiesOf(u.id);

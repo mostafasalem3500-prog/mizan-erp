@@ -174,7 +174,7 @@ export async function getInvoice(t: Db, companyId: string, id: string) {
 }
 
 /** Posts an INVOICE / CREDIT_NOTE / DEBIT_NOTE: numbering, stock, journal, ZATCA stamp. */
-export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string } = {}) {
+export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean } = {}) {
   const companyId = company.id;
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المستند غير موجود");
   if (inv.status !== "DRAFT") throw conflict("المستند مرحل مسبقاً");
@@ -190,6 +190,16 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
 
   const origin = inv.originId ? await t.maybe(`SELECT * FROM invoices WHERE id=$1`, [inv.originId]) : null;
   const originLines = origin ? await t.rows(`SELECT * FROM invoice_lines WHERE invoice_id=$1`, [origin.id]) : [];
+
+  // credit-limit control for credit sales (spec: block when partner has a limit unless overridden by a manager)
+  if (isSale && inv.kind === "INVOICE" && !opts.tenders?.length && inv.partnerId && !opts.overrideCreditLimit) {
+    const partner = await t.one(`SELECT credit_limit, name FROM partners WHERE id=$1`, [inv.partnerId]);
+    if (Number(partner.creditLimit) > 0) {
+      const bal = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key='AR' AND e.status='POSTED'`, [companyId, inv.partnerId]);
+      const after = r2(D(bal.b).plus(inv.total));
+      if (after > Number(partner.creditLimit) + 0.001) throw new AppError(409, `تجاوز حد الائتمان للعميل «${partner.name}»: الرصيد بعد الفاتورة ${after.toFixed(2)} والحد ${Number(partner.creditLimit).toFixed(2)}. يمكن للمالك/المدير الترحيل مع التجاوز.`, "CREDIT_LIMIT", { balance: Number(bal.b), after, limit: Number(partner.creditLimit) });
+    }
+  }
 
   if (isReturn && origin) {
     // cannot return more than was invoiced (net of previous returns)

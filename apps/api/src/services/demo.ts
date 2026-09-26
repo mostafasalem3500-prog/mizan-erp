@@ -61,7 +61,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     const wh = await t.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC LIMIT 1`, [companyId]);
     const customers: any[] = [];
     for (const [i, [name, vat, isCo]] of CUSTOMERS.entries())
-      customers.push(await t.insert("partners", { companyId, code: `C-D${String(i + 1).padStart(3, "0")}`, name, isCustomer: true, kind: isCo ? "COMPANY" : "INDIVIDUAL", vatNumber: vat, crNumber: isCo ? `10100${between(10000, 99999)}` : null, phone: `05${between(10000000, 99999999)}`, city: pick(["مكة المكرمة", "جدة", "الرياض", "الطائف"]), district: "الحي التجاري", street: "شارع الملك فهد", buildingNo: String(between(1000, 9999)), postalCode: String(between(21000, 24999)), creditLimit: isCo ? 50000 : 0, paymentTerms: isCo ? 30 : 0, isDemo: true }));
+      customers.push(await t.insert("partners", { companyId, code: `C-D${String(i + 1).padStart(3, "0")}`, name, isCustomer: true, kind: isCo ? "COMPANY" : "INDIVIDUAL", vatNumber: vat, crNumber: isCo ? `10100${between(10000, 99999)}` : null, phone: `05${between(10000000, 99999999)}`, city: pick(["مكة المكرمة", "جدة", "الرياض", "الطائف"]), district: "الحي التجاري", street: "شارع الملك فهد", buildingNo: String(between(1000, 9999)), postalCode: String(between(21000, 24999)), creditLimit: isCo ? 150000 : 0, paymentTerms: isCo ? 30 : 0, isDemo: true }));
     const suppliers: any[] = [];
     for (const [i, [name, vat, city]] of SUPPLIERS.entries())
       suppliers.push(await t.insert("partners", { companyId, code: `S-D${String(i + 1).padStart(3, "0")}`, name, isSupplier: true, vatNumber: vat, city, country: vat ? "SA" : "AE", paymentTerms: 30, isDemo: true }));
@@ -131,7 +131,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
             salesInvoices.push(await postInvoice(t, c, d.id, userName));
           });
         } catch (e: any) {
-          if (e.code !== "INSUFFICIENT_STOCK") throw e;
+          if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "CREDIT_LIMIT") throw e;
         }
       }
       // ── POS: ~5 sessions/month, 6-14 tickets each ──

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ImportModal } from "./Import";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
@@ -9,11 +10,12 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
   const [stmt, setStmt] = useState<any>(null);
+  const [imp, setImp] = useState(false);
   const { data, loading, reload } = useFetch(`/partners${q({ role, q: dq, limit: 500, active: "all" })}`);
   const label = role === "CUSTOMER" ? "العملاء" : "الموردون";
   return (
     <div className="card">
-      <div className="card-h"><h3>{label} <span className="muted small">({data?.length || 0})</span></h3>{can("partners.write") && <button className="btn primary sm" onClick={() => setEdit({})}>＋ {role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"}</button>}</div>
+      <div className="card-h"><h3>{label} <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("partners.write") && <button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button>}{can("partners.write") && <button className="btn primary sm" onClick={() => setEdit({})}>＋ {role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"}</button>}</div></div>
       <div className="card-b">
         <div className="toolbar"><div className="search"><span className="ic">🔍</span><Input placeholder="بحث" value={search} onChange={(e) => setSearch(e.target.value)} /></div><div className="grow" />{data && <ExportBtn name={label} rows={() => data.map((p: any) => ({ الكود: p.code, الاسم: p.name, النوع: p.kind === "COMPANY" ? "منشأة" : "فرد", "الرقم الضريبي": p.vatNumber, الجوال: p.phone, المدينة: p.city, "حد الائتمان": p.creditLimit, "أيام السداد": p.paymentTerms, الرصيد: p.balance }))} />}</div>
         {loading && !data ? <Loading /> : !data?.length ? <Empty /> : (
@@ -27,6 +29,7 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
       </div>
       {edit && <PartnerEditor role={role} p={edit} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
       {stmt && <StatementModal partner={stmt} role={role} onClose={() => setStmt(null)} />}
+      {imp && <ImportModal kind="partners" role={role} onClose={(d) => { setImp(false); if (d) reload(); }} />}
     </div>
   );
 }
@@ -95,11 +98,12 @@ export function ProductsPage() {
   const [edit, setEdit] = useState<any>(null);
   const [card, setCard] = useState<any>(null);
   const [cats, setCats] = useState(false);
+  const [imp, setImp] = useState(false);
   const categories = useFetch("/categories");
   const { data, loading, reload } = useFetch(`/products${q({ q: dq, categoryId: cat, limit: 1000, active: "all" })}`);
   return (
     <div className="card">
-      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setCats(true)}>التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
+      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button><button className="btn sm" onClick={() => setCats(true)}>التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
       <div className="card-b">
         <div className="toolbar">
           <div className="search"><span className="ic">🔍</span><Input placeholder="بحث بالاسم / الرمز / الباركود" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
@@ -122,6 +126,7 @@ export function ProductsPage() {
       {edit && <ProductEditor p={edit} categories={categories.data || []} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
       {card && <StockCardModal p={card} onClose={() => setCard(null)} />}
       {cats && <CategoriesModal onClose={() => { setCats(false); categories.reload(); reload(); }} />}
+      {imp && <ImportModal kind="products" onClose={(d) => { setImp(false); if (d) { reload(); categories.reload(); } }} />}
     </div>
   );
 }

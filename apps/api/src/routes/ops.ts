@@ -63,7 +63,9 @@ ops.get("/invoices/:id", perm("sales.read"), h(async (req) => {
 ops.post("/invoices", dyn(true), h(async (req) => { const d = await tx((t) => inv.saveDraft(t, req.company, actor(req), req.body)); await audit(req, "CREATE", "invoice", d.id, { kind: d.kind, number: d.number }); return inv.getInvoice(db, cid(req), d.id); }));
 ops.put("/invoices/:id", dyn(true), h(async (req) => { await tx((t) => inv.saveDraft(t, req.company, actor(req), req.body, p(req).id)); return inv.getInvoice(db, cid(req), p(req).id); }));
 ops.post("/invoices/:id/post", dyn(true), h(async (req) => {
-  const doc = await tx((t) => inv.postInvoice(t, req.company, p(req).id, actor(req), { tenders: req.body?.tenders }));
+  const override = !!req.body?.overrideCreditLimit && (["OWNER", "ADMIN"].includes(req.auth.role || "") || req.auth.superAdmin);
+  const doc = await tx((t) => inv.postInvoice(t, req.company, p(req).id, actor(req), { tenders: req.body?.tenders, overrideCreditLimit: override }));
+  if (override) await audit(req, "CREDIT_LIMIT_OVERRIDE", "invoice", doc.id, { number: doc.number });
   await audit(req, "POST", "invoice", doc.id, { number: doc.number, total: doc.total, isDemo: doc.isDemo });
   if (doc.direction === "SALE" && doc.zatcaStatus === "PENDING") submitInvoice(req.company, doc.id).catch(() => undefined);
   return inv.getInvoice(db, cid(req), doc.id);
