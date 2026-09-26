@@ -8,6 +8,7 @@ import { PartnersPage, ProductsPage, InventoryPage } from "./pages/Master";
 import { PaymentsPage, ExpensesPage, AssetsPage } from "./pages/Money";
 import { AccountsPage, JournalsPage, PeriodsPage } from "./pages/Accounting";
 import { BankPage } from "./pages/Bank";
+import { ChequesPage, RecurringPage } from "./pages/Round3";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -34,7 +35,9 @@ const NAV = [
   { group: "المحاسبة" },
   { to: "/accounts", ic: "🌳", label: "دليل الحسابات", perm: "accounting.read" },
   { to: "/journals", ic: "📒", label: "القيود اليومية", perm: "accounting.read" },
+  { to: "/cheques", ic: "🧾", label: "الشيكات", perm: "payments.read" },
   { to: "/bank", ic: "🏦", label: "التسوية البنكية", perm: "accounting.read" },
+  { to: "/recurring", ic: "🔁", label: "القيود الدورية", perm: "accounting.read" },
   { to: "/assets", ic: "🏢", label: "الأصول الثابتة", perm: "assets.read" },
   { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
@@ -120,6 +123,8 @@ export function App() {
                 <Route path="/journals" element={<JournalsPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/bank" element={<BankPage />} />
+                <Route path="/cheques" element={<ChequesPage />} />
+                <Route path="/recurring" element={<RecurringPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
                 <Route path="/reports" element={<ReportsPage />} />

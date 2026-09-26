@@ -23,7 +23,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
   const amount = r2(num(p.amount));
   if (amount <= 0) throw bad("المبلغ يجب أن يكون أكبر من صفر");
   const partner = await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [p.partnerId, companyId], "الطرف غير موجود");
-  const account = await t.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2 AND is_cash_bank AND NOT is_group`, [p.accountId, companyId], "اختر حساب صندوق أو بنك صحيح");
+  const account = await t.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2 AND (is_cash_bank OR system_key IN ('NOTES_REC','NOTES_PAY')) AND NOT is_group`, [p.accountId, companyId], "اختر حساب صندوق أو بنك صحيح");
   const role = p.direction === "IN" ? "CUSTOMER" : "SUPPLIER";
   const dir = p.direction === "IN" ? "SALE" : "PURCHASE";
 

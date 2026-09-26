@@ -2,10 +2,11 @@ import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg } from "../lib";
 import { StatementModal } from "./Master";
+import { ZakatReport } from "./Round3";
 
 const TABS = [
   { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
-  { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
+  { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "zakat", label: "الزكاة" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
 ];
 
 export function ReportsPage() {
@@ -25,6 +26,7 @@ export function ReportsPage() {
       {tab === "sales" && <SalesAnalysis from={from} to={to} />}
       {tab === "expenses" && <ExpensesAnalysis from={from} to={to} />}
       {tab === "salespersons" && <Salespersons from={from} to={to} />}
+      {tab === "zakat" && <ZakatReport from={from} to={to} />}
       {tab === "statements" && <Statements />}
       {tab === "integrity" && <Integrity />}
     </div>

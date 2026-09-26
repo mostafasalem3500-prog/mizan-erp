@@ -9,6 +9,8 @@ import { auth, admin } from "./routes/auth";
 import { master } from "./routes/master";
 import { ops } from "./routes/ops";
 import { pub, extra } from "./routes/extra";
+import { r3 } from "./routes/round3";
+import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
 const app = express();
@@ -31,6 +33,7 @@ app.use("/api/admin", admin);
 app.use("/api", master);
 app.use("/api", ops);
 app.use("/api", extra);
+app.use("/api", r3);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 
@@ -61,6 +64,7 @@ migrate()
   .then(() => {
     app.listen(port, "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
     seedDemoAccount().catch((e) => console.error("[demo-account]", e));
+    startRecurringScheduler();
   })
   .catch((e) => {
     console.error("migration failed", e);
