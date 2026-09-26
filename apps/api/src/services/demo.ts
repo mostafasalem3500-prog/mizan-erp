@@ -11,6 +11,9 @@ import { createExpense } from "./expenses";
 import { createAsset, runDepreciation } from "./assets";
 import { openSession, posSale, posReturn, closeSession } from "./pos";
 import { stockAdjustment, fileVatReturn } from "./misc";
+import { createRun, postRun, payRun } from "./payroll";
+import { employeePosition, addLeave, createLoan, createProvision, postProvision, createSettlement, postSettlement, paySettlement } from "./hr";
+import { createBudget, fillFromActuals, getBudget } from "./budgets";
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -163,7 +166,6 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
       }
       // ── expenses ──
       await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 7000, taxCode: "S", payAccountId: ids.bank, isDemo: true });
-      await createExpense(t, companyId, userName, { date: mEnd, accountId: await expAcc(t, "5201"), payee: "الموظفون", description: `رواتب شهر ${mStart.slice(0, 7)}`, amount: 16500, taxCode: "O", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5205"), payee: "الشركة السعودية للكهرباء", description: "فاتورة كهرباء", amount: r2(1800 + rand() * 900), taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5206"), payee: "STC", description: "اتصالات وإنترنت", amount: 650, taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(2, 25)), accountId: await expAcc(t, "5213"), payee: "متفرقات", description: "مصروفات نثرية", amount: r2(200 + rand() * 400), taxCode: "S", payAccountId: ids.cash, isDemo: true });
@@ -214,6 +216,70 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     });
   }
 
+  // ── HR: employees, opening provisions, monthly payroll & provisions, a loan, leaves, one final settlement, a budget ──
+  await log(companyId, "الموظفون والرواتب والمخصصات", 88);
+  await tx(async (t) => {
+    const EMPS: [string, string, string, string, number, number, number, number][] = [
+      ["أحمد العتيبي", "مدير المبيعات", "المبيعات", "SAUDI", 5000, 1250, 400, 4],
+      ["سارة القحطاني", "محاسبة", "المالية", "SAUDI", 4500, 1125, 350, 7],
+      ["محمد الزهراني", "أمين المستودع", "المستودع", "SAUDI", 3200, 800, 300, 2],
+      ["Rahul Kumar", "كاشير", "المعرض", "NON_SAUDI", 2200, 550, 200, 5],
+      ["Joseph Mathew", "سائق توصيل", "المستودع", "NON_SAUDI", 2000, 500, 200, 12],
+    ];
+    const HIRE = ["2019-02-01", "2022-06-15", "2024-01-10", "2021-09-01", "2020-05-20"];
+    const emps: any[] = [];
+    for (const [i, [name, job, dept, nat, basic, housing, transport, leaveOpen]] of EMPS.entries()) {
+      emps.push(await t.insert("employees", { companyId, code: `E-D${String(i + 1).padStart(3, "0")}`, name, jobTitle: job, department: dept, nationality: nat, hireDate: HIRE[i], iban: `SA${between(10, 99)}80000${between(100000000, 999999999)}${between(100000, 999999)}`, bankName: pick(["مصرف الراجحي", "البنك الأهلي السعودي", "بنك الرياض"]), basic, housing, transport, otherAllow: 0, gosi: true, leaveDaysPerYear: 21, leaveOpening: leaveOpen, leaveBalanceDate: addDays(start, -1), isDemo: true }));
+    }
+    // opening provision balances as at the day before the window (Dr opening equity / Cr provisions), mirrored in the employee ledger
+    const dayBefore = addDays(start, -1);
+    let eosbOpen = 0, leaveOpen = 0;
+    const ledger: any[] = [];
+    for (const e of emps) {
+      const p = await employeePosition(t, companyId, e, dayBefore);
+      eosbOpen = r2(eosbOpen + p.eosbDue); leaveOpen = r2(leaveOpen + p.leaveDue);
+      if (p.eosbDue) ledger.push({ companyId, employeeId: e.id, type: "EOSB", date: dayBefore, amount: p.eosbDue, sourceType: "OPENING", isDemo: true });
+      if (p.leaveDue) ledger.push({ companyId, employeeId: e.id, type: "LEAVE", date: dayBefore, amount: p.leaveDue, sourceType: "OPENING", isDemo: true });
+    }
+    await post(t, companyId, { date: start, type: "OPENING", memo: "أرصدة افتتاحية لمخصصات نهاية الخدمة والإجازات", createdBy: userName, isDemo: true, lines: [
+      { key: "OPENING_EQUITY", debit: r2(eosbOpen + leaveOpen), description: "أرصدة افتتاحية المخصصات" },
+      { key: "EOSB_PROVISION", credit: eosbOpen, description: "مخصص نهاية الخدمة - افتتاحي" },
+      { key: "LEAVE_PROVISION", credit: leaveOpen, description: "مخصص الإجازات - افتتاحي" },
+    ] });
+    await t.insertMany("employee_provision_ledger", ledger.map((l) => ({ ...l, date: start })));
+    for (const [mi, mStart] of months.entries()) {
+      const mEnd = monthEnd(mStart);
+      const period = mStart.slice(0, 7);
+      if (mi === 1) await createLoan(t, companyId, userName, { employeeId: emps[3].id, date: addDays(mStart, 9), amount: 3000, installment: 500, startPeriod: addMonths(mStart, 1).slice(0, 7), accountId: ids.cash, notes: "سلفة شخصية", isDemo: true });
+      if (mi === 2) await addLeave(t, companyId, userName, { employeeId: emps[0].id, type: "ANNUAL", fromDate: addDays(mStart, 6), toDate: addDays(mStart, 10), isDemo: true });
+      if (mi === 3) { await addLeave(t, companyId, userName, { employeeId: emps[1].id, type: "ANNUAL", fromDate: addDays(mStart, 12), toDate: addDays(mStart, 14), isDemo: true }); await addLeave(t, companyId, userName, { employeeId: emps[4].id, type: "ANNUAL", fromDate: addDays(mStart, 1), toDate: addDays(mStart, 21), isDemo: true }); }
+      if (mi === 4) {
+        const st = await createSettlement(t, companyId, userName, { employeeId: emps[4].id, date: addDays(mStart, 4), reason: "CONTRACT_END", salaryDays: 5, notes: "انتهاء عقد العمل", isDemo: true });
+        await postSettlement(t, companyId, userName, st.id);
+        await paySettlement(t, companyId, userName, st.id, ids.bank, addDays(mStart, 6));
+      }
+      if (mEnd > end && Number(end.slice(8, 10)) < 25) break; // current month not yet due
+      const payDate = mEnd > end ? end : addDays(mStart, 26) > mEnd ? mEnd : addDays(mStart, 26);
+      const run = await createRun(t, companyId, userName, { period, date: mEnd > end ? end : mEnd, adjustments: mi === 2 ? { [emps[0].id]: { bonus: 800, note: "مكافأة تحقيق المستهدف" } } : {}, isDemo: true });
+      await postRun(t, companyId, userName, run.id);
+      await payRun(t, companyId, userName, run.id, ids.bank, payDate);
+      const pv = await createProvision(t, companyId, userName, { period, date: mEnd > end ? end : mEnd, isDemo: true });
+      try { await postProvision(t, companyId, userName, pv.id); } catch { await t.exec(`DELETE FROM hr_provisions WHERE id=$1`, [pv.id]); }
+    }
+    // budget for the current year: actuals × per-account factor, so budget-vs-actual shows realistic variances
+    const year = Number(end.slice(0, 4));
+    const b = await createBudget(t, companyId, userName, { name: `موازنة ${year}`, year, notes: "موازنة تقديرية (بيانات تجريبية)", isDemo: true });
+    await fillFromActuals(t, companyId, b.id, year, 0);
+    const full = await getBudget(t, companyId, b.id);
+    for (const l of full.lines) {
+      const f = 0.9 + rand() * 0.25;
+      const avg = l.months.filter((x: number) => x).reduce((a: number, x: number) => a + x, 0) / Math.max(1, l.months.filter((x: number) => x).length);
+      const months12 = l.months.map((x: number, i: number) => r2((x || (i + 1 > Number(end.slice(5, 7)) ? avg : 0)) * f));
+      await t.exec(`UPDATE budget_lines SET months=$2 WHERE id=$1`, [l.id, JSON.stringify(months12)]);
+    }
+    await t.exec(`UPDATE budgets SET status='APPROVED' WHERE id=$1`, [b.id]);
+  });
+
   // quarterly VAT return for the first completed quarter inside the window (if 3 full months elapsed)
   await log(companyId, "إقرار الضريبة وفحص التطابق", 92);
   await tx(async (t) => {
@@ -231,6 +297,14 @@ function daysBetween(a: string, b: string) {
 export async function purgeDemo(companyId: string) {
   await tx(async (t) => {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
+    await t.exec(`DELETE FROM employee_settlements WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM hr_provisions WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM employee_provision_ledger WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM employee_loans WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM employee_leaves WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM payroll_runs WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM employees WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM budgets WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM invoices WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM payments WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM expenses WHERE company_id=$1 AND is_demo`, [companyId]);

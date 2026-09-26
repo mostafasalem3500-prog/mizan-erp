@@ -10,6 +10,7 @@ import { AccountsPage, JournalsPage, PeriodsPage } from "./pages/Accounting";
 import { BankPage } from "./pages/Bank";
 import { ChequesPage, RecurringPage } from "./pages/Round3";
 import { PayrollPage } from "./pages/Payroll";
+import { BudgetsPage } from "./pages/Budgets";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -43,6 +44,7 @@ const NAV = [
   { to: "/assets", ic: "🏢", label: "الأصول الثابتة", perm: "assets.read" },
   { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
+  { to: "/budgets", ic: "🎯", label: "الموازنات التقديرية", perm: "reports.read" },
   { to: "/reports", ic: "📊", label: "التقارير", perm: "reports.read" },
   { group: "الإعدادات" },
   { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read" },
@@ -99,7 +101,7 @@ export function App() {
           <div className="main">
             <div className="topbar">
               <button className="btn sm burger" onClick={() => setMenu((m) => !m)}>☰</button>
-              <div className="title">{NAV.find((n: any) => n.to === loc.pathname)?.label || ""}</div>
+              <div className="title">{(NAV.find((n: any) => n.to === loc.pathname) || NAV.find((n: any) => n.to && n.to !== "/" && loc.pathname.startsWith(n.to + "/")))?.label || ""}</div>
               <div className="grow" />
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
@@ -128,8 +130,11 @@ export function App() {
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />
                 <Route path="/payroll" element={<PayrollPage />} />
+                <Route path="/payroll/:tab" element={<PayrollPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
+                <Route path="/budgets" element={<BudgetsPage />} />
+                <Route path="/budgets/:id" element={<BudgetsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/reports/:tab" element={<ReportsPage />} />
                 <Route path="/zatca" element={<ZatcaPage />} />

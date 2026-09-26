@@ -1,5 +1,47 @@
 import React, { useEffect, useState } from "react";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState } from "../lib";
+import { amountToArabicWords } from "../shared/tafqeet";
+
+// ─── cheque printing (positions in mm, saved per browser) ──────────────────
+const CHEQUE_DEFAULT = { w: 175, h: 80, date: { x: 125, y: 10 }, payee: { x: 45, y: 24 }, words: { x: 40, y: 36 }, words2: { x: 30, y: 44 }, digits: { x: 10, y: 34 }, font: 12, cross: true, dateSep: "  " };
+export function ChequePrint({ c, onClose }: { c: any; onClose: () => void }) {
+  const [L, setL] = useLocalState<any>("mz_cheque_layout", CHEQUE_DEFAULT);
+  const [payee, setPayee] = useState(c.partnerName || "");
+  const [date, setDate] = useState(fmtDate(c.dueDate));
+  const set = (k: string, ax: "x" | "y", v: string) => setL({ ...L, [k]: { ...L[k], [ax]: Number(v) || 0 } });
+  const words = amountToArabicWords(Number(c.amount)).replace(/^فقط\s*/, "").replace(/\s*لا غير\s*$/, "");
+  const split = (t: string) => { if (t.length <= 60) return [t, ""]; const i = t.lastIndexOf(" ", 60); return [t.slice(0, i), t.slice(i + 1)]; };
+  const [w1, w2] = split(words);
+  const dateStr = date.split("-").reverse().join(L.dateSep || " ");
+  // Arabic fields are anchored from the RIGHT edge (x = mm from right); date & digits from the LEFT edge
+  const P = ({ k, children, ltr }: { k: string; children: React.ReactNode; ltr?: boolean }) => <div style={{ position: "absolute", top: L[k].y + "mm", ...(ltr ? { left: L[k].x + "mm" } : { right: L[k].x + "mm" }), whiteSpace: "nowrap", direction: ltr ? "ltr" : "rtl", fontSize: L.font + "pt" }} dir={ltr ? "ltr" : "rtl"}>{children}</div>;
+  return (
+    <Modal wide title={`طباعة شيك رقم ${c.chequeNo} — ${c.bankName || ""}`} onClose={onClose} footer={<><button className="btn" onClick={() => setL(CHEQUE_DEFAULT)}>إعادة الضبط</button><div className="grow" /><button className="btn" onClick={onClose}>إغلاق</button><button className="btn primary" onClick={() => window.print()}>🖨 طباعة</button></>}>
+      <style>{`@media print { @page { size: ${L.w}mm ${L.h}mm; margin: 0; } .cheque-sheet { border: none !important; box-shadow: none !important; } }`}</style>
+      <div className="no-print grid" style={{ marginBottom: 12 }}>
+        <div className="form-grid">
+          <Field label="المستفيد"><Input value={payee} onChange={(e) => setPayee(e.target.value)} /></Field>
+          <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+          <Field label="عرض الشيك (مم)"><NumInput value={L.w} onChange={(e) => setL({ ...L, w: Number(e.target.value) || 175 })} /></Field>
+          <Field label="ارتفاعه (مم)"><NumInput value={L.h} onChange={(e) => setL({ ...L, h: Number(e.target.value) || 80 })} /></Field>
+          <Field label="حجم الخط (pt)"><NumInput value={L.font} onChange={(e) => setL({ ...L, font: Number(e.target.value) || 12 })} /></Field>
+          <Field label="تسطير"><label className="check"><input type="checkbox" checked={!!L.cross} onChange={(e) => setL({ ...L, cross: e.target.checked })} /> «يُصرف للمستفيد الأول»</label></Field>
+        </div>
+        <details><summary className="small muted" style={{ cursor: "pointer" }}>ضبط مواضع الحقول بالمليمتر (الأفقي ثم الرأسي من الأعلى) — الحقول العربية تُقاس من يمين الشيك، والتاريخ والمبلغ رقماً من يساره — يُحفظ في هذا الجهاز</summary>
+          <div className="form-grid mt">{[["date", "التاريخ"], ["payee", "المستفيد"], ["words", "المبلغ كتابةً (1)"], ["words2", "المبلغ كتابةً (2)"], ["digits", "المبلغ رقماً"]].map(([k, l]) => <Field key={k} label={l}><div className="row"><NumInput style={{ width: 80 }} value={L[k].x} onChange={(e) => set(k, "x", e.target.value)} /><NumInput style={{ width: 80 }} value={L[k].y} onChange={(e) => set(k, "y", e.target.value)} /></div></Field>)}</div>
+        </details>
+      </div>
+      <div className="cheque-sheet" style={{ position: "relative", width: L.w + "mm", height: L.h + "mm", border: "1px dashed #999", background: "#fff", color: "#000", margin: "0 auto", overflow: "hidden", direction: "ltr" }}>
+        <P k="date" ltr>{dateStr}</P>
+        <P k="payee">{payee}</P>
+        <P k="words">{w1}</P>
+        <P k="words2">{w2 ? w2 + " لا غير" : "لا غير"}</P>
+        <P k="digits" ltr><b>{"**" + money(c.amount) + "**"}</b></P>
+        {L.cross && <div style={{ position: "absolute", left: "3mm", top: "14mm", transform: "rotate(-35deg)", transformOrigin: "left top", fontSize: "7pt", borderTop: "1px solid #000", borderBottom: "1px solid #000", padding: "1px 4px", direction: "rtl" }}>يُصرف للمستفيد الأول</div>}
+      </div>
+    </Modal>
+  );
+}
 
 // ─── cheques ───────────────────────────────────────────────────────────────
 const CH_STATUS: Record<string, string> = { PENDING: "قيد الانتظار", DEPOSITED: "مودع للتحصيل", CLEARED: "محصّل / مصروف", BOUNCED: "مرتجع (بدون رصيد)", CANCELLED: "ملغى" };
@@ -11,6 +53,7 @@ export function ChequesPage() {
   const [status, setStatus] = useState("");
   const [add, setAdd] = useState<"IN" | "OUT" | null>(null);
   const [act, setAct] = useState<{ c: any; mode: "deposit" | "clear" } | null>(null);
+  const [prn, setPrn] = useState<any>(null);
   const { data, loading, reload } = useFetch(`/cheques${q({ direction: dir, status })}`);
   const { run, busy } = useAction();
   const sum = (d: string, s: string[]) => (data?.summary || []).filter((x: any) => x.direction === d && s.includes(x.status)).reduce((a: number, x: any) => a + Number(x.amount), 0);
@@ -33,7 +76,7 @@ export function ChequesPage() {
           <div className="table-wrap"><table className="tbl"><thead><tr><th>النوع</th><th>رقم الشيك</th><th>البنك</th><th>الطرف</th><th className="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>السند</th><th>الحالة</th><th /></tr></thead>
             <tbody>{data.rows.map((c: any) => { const overdue = ["PENDING", "DEPOSITED"].includes(c.status) && c.dueDate < today(); return (
               <tr key={c.id}><td>{c.direction === "IN" ? <span className="badge green">مستلم</span> : <span className="badge red">صادر</span>}</td><td className="num"><b>{c.chequeNo}</b></td><td>{c.bankName}</td><td>{c.partnerName}</td><td className="n"><Money v={c.amount} /></td><td>{fmtDate(c.receivedDate)}</td><td className={overdue ? "neg-val bold" : ""}>{fmtDate(c.dueDate)}</td><td className="small">{c.voucherNumber}</td><td><span className={"badge " + chColor(c.status)}>{CH_STATUS[c.status]}</span></td>
-                <td className="row" style={{ gap: 4 }}>{can("payments.write") && ["PENDING", "DEPOSITED"].includes(c.status) && <>
+                <td className="row" style={{ gap: 4 }}>{c.direction === "OUT" && c.status !== "CANCELLED" && <button className="btn sm" title="طباعة الشيك" onClick={() => setPrn(c)}>🖨</button>}{can("payments.write") && ["PENDING", "DEPOSITED"].includes(c.status) && <>
                   {c.direction === "IN" && c.status === "PENDING" && <button className="btn sm ghost" onClick={() => setAct({ c, mode: "deposit" })}>إيداع</button>}
                   <button className="btn sm primary" onClick={() => setAct({ c, mode: "clear" })}>{c.direction === "IN" ? "تحصيل" : "صرف"}</button>
                   <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { if (confirmDlg(c.direction === "IN" ? "تسجيل الشيك كمرتجع (بدون رصيد)؟ سيُعاد فتح فواتير العميل." : "إلغاء الشيك الصادر؟")) { await api(`/cheques/${c.id}/bounce`, { body: { cancelled: c.direction === "OUT" } }); reload(); } })}>{c.direction === "IN" ? "مرتجع" : "إلغاء"}</button>
@@ -42,6 +85,7 @@ export function ChequesPage() {
       </div>
       {add && <ChequeForm direction={add} onClose={(s) => { setAdd(null); if (s) reload(); }} />}
       {act && <ChequeAction c={act.c} mode={act.mode} onClose={(s) => { setAct(null); if (s) reload(); }} />}
+      {prn && <ChequePrint c={prn} onClose={() => setPrn(null)} />}
     </div>
   );
 }

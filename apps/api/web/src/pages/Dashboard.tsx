@@ -15,6 +15,11 @@ export function Dashboard() {
       {!me.company.demoLoaded && !d.recent?.length && (
         <div className="alert info">مرحباً بك في ميزان! ابدأ بإضافة الأصناف والعملاء، أو <Link to="/settings/demo">حمّل البيانات التجريبية</Link> لاستكشاف النظام بأرقام كاملة (يمكن حذفها لاحقاً بضغطة واحدة).</div>
       )}
+      {!!d.alerts?.items?.length && (
+        <div className="card"><div className="card-h"><h3>تنبيهات المحاسب</h3><span className="small muted">{d.alerts.items.length} تنبيه · الإقرار الضريبي القادم: {d.alerts.vat.filed ? "مقدَّم ✓" : `مستحق ${d.alerts.vat.dueDate}`}</span></div>
+          <div className="ok-list">{d.alerts.items.map((a: any, i: number) => <Link key={i} to={a.to} className="item" style={{ textDecoration: "none", color: "inherit" }}><span style={{ fontSize: 18 }}>{a.level === "err" ? "🔴" : a.level === "warn" ? "🟠" : "🔵"}</span><span className="grow">{a.text}</span><span className="muted">←</span></Link>)}</div>
+        </div>
+      )}
       <div className="grid c4">
         <div className="card kpi"><div className="icon">🧾</div><div className="label">مبيعات الشهر</div><div className="value"><Money v={d.salesMonth} /></div><div className="sub">اليوم: {money(d.salesToday)} ر.س</div></div>
         <div className="card kpi info"><div className="icon">📦</div><div className="label">مشتريات الشهر</div><div className="value"><Money v={d.purchMonth} /></div><div className="sub">مصروفات الشهر: {money(d.expMonth)}</div></div>

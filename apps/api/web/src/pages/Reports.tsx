@@ -3,9 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg } from "../lib";
 import { StatementModal } from "./Master";
 import { ZakatReport } from "./Round3";
+import { BudgetVsActual } from "./Budgets";
 
 const TABS = [
-  { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
+  { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "income-compare", label: "قائمة دخل مقارنة" }, { key: "cost-centers", label: "مراكز التكلفة" }, { key: "budget", label: "الموازنة مقابل الفعلي" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
   { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "zakat", label: "الزكاة" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
 ];
 
@@ -20,6 +21,9 @@ export function ReportsPage() {
       {tab !== "integrity" && tab !== "statements" && <div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>}
       {tab === "trial-balance" && <TrialBalance from={from} to={to} />}
       {tab === "income" && <Income from={from} to={to} />}
+      {tab === "income-compare" && <IncomeCompare from={from} to={to} />}
+      {tab === "cost-centers" && <CostCenters from={from} to={to} />}
+      {tab === "budget" && <BudgetVsActual from={from} to={to} />}
       {tab === "balance-sheet" && <BalanceSheet to={to} />}
       {tab === "cash-flow" && <CashFlow from={from} to={to} />}
       {tab === "aging" && <Aging to={to} />}
@@ -70,6 +74,47 @@ function Income({ from, to }: { from: string; to: string }) {
         <Section s={d.otherIncome} /><Section s={d.otherExp} /><T label="الربح قبل الزكاة" v={d.beforeZakat} />
         <Section s={d.zakat} /><T label={`صافي الربح / (الخسارة) — هامش ${d.netMargin}%`} v={d.net} big />
       </tbody></table></div>
+    </div>
+  );
+}
+
+function IncomeCompare({ from, to }: { from: string; to: string }) {
+  const [mode, setMode] = useState("prev");
+  const { data: d } = useFetch(`/reports/income-compare${q({ from, to, compare: mode })}`);
+  if (!d) return <Loading />;
+  const Pct = ({ v }: { v: number | null }) => <td className={"n " + (v === null ? "" : v < 0 ? "neg-val" : "pos-val")}>{v === null ? "" : `${v > 0 ? "+" : ""}${v}%`}</td>;
+  const Rows = ({ arr, title }: { arr: any[]; title: string }) => !arr.length ? null : <><tr className="group"><td>{title}</td><td colSpan={4} /></tr>{arr.map((r) => <tr key={r.code} className="sub"><td><span className="num muted">{r.code}</span> {r.name}</td><td className="n"><Money v={r.cur} /></td><td className="n"><Money v={r.prev} /></td><td className="n"><Money v={r.change} sign /></td><Pct v={r.pct} /></tr>)}</>;
+  const T = ({ label, x, big }: { label: string; x: any; big?: boolean }) => <tr style={big ? { fontWeight: 700, background: "var(--primary-soft)" } : { fontWeight: 600 }}><td>{label}</td><td className="n"><Money v={x.cur} sign={big} /></td><td className="n"><Money v={x.prev} sign={big} /></td><td className="n"><Money v={x.change} sign /></td><Pct v={x.pct} /></tr>;
+  return (
+    <div className="card"><Head title="قائمة الدخل المقارنة" sub={`${from} — ${to} مقابل ${d.prevFrom} — ${d.prevTo}`} rows={[...d.sales, ...d.returns, ...d.cogs, ...d.opex, ...d.otherIncome, ...d.otherExp, ...d.zakat].map((r: any) => ({ الحساب: r.code, الاسم: r.name, "الفترة الحالية": r.cur, "فترة المقارنة": r.prev, التغير: r.change, "%": r.pct }))} />
+      <div className="card-b no-print"><Select value={mode} onChange={(e) => setMode(e.target.value)} style={{ width: 260 }}><option value="prev">مقارنة بالفترة السابقة المماثلة</option><option value="year">مقارنة بنفس الفترة من العام الماضي</option></Select></div>
+      <div className="table-wrap"><table className="tbl compact"><thead><tr><th>البند</th><th className="n">الفترة الحالية</th><th className="n">فترة المقارنة</th><th className="n">التغير</th><th className="n">%</th></tr></thead><tbody>
+        <Rows arr={d.sales} title="المبيعات" /><Rows arr={d.returns} title="مردودات المبيعات" /><T label="صافي المبيعات" x={d.netSales} />
+        <Rows arr={d.cogs} title="تكلفة المبيعات" /><T label={`مجمل الربح (${d.grossMargin.cur}% مقابل ${d.grossMargin.prev}%)`} x={d.grossProfit} big />
+        <Rows arr={d.opex} title="المصروفات التشغيلية" /><T label="الربح التشغيلي" x={d.operating} big />
+        <Rows arr={d.otherIncome} title="إيرادات أخرى" /><Rows arr={d.otherExp} title="مصروفات أخرى" /><T label="الربح قبل الزكاة" x={d.beforeZakat} />
+        <Rows arr={d.zakat} title="الزكاة" /><T label={`صافي الربح / (الخسارة) — هامش ${d.netMargin.cur}% مقابل ${d.netMargin.prev}%`} x={d.net} big />
+      </tbody></table></div>
+    </div>
+  );
+}
+
+function CostCenters({ from, to }: { from: string; to: string }) {
+  const [sel, setSel] = useState<string | null | undefined>(undefined); // undefined = none selected; null = unallocated
+  const { data: d } = useFetch(`/reports/cost-centers${q({ from, to, costCenterId: sel === undefined ? undefined : sel || "" })}`);
+  if (!d) return <Loading />;
+  const selRow = sel === undefined ? null : d.rows.find((r: any) => (r.id || null) === sel);
+  return (
+    <div className="grid c2">
+      <div className="card"><Head title="الأرباح والخسائر حسب مركز التكلفة" sub={`${from} — ${to}`} rows={d.rows.map((r: any) => ({ المركز: r.name, الإيرادات: r.revenue, "تكلفة المبيعات": r.cogs, المصروفات: r.expenses, "مجمل الربح": r.gross, "صافي الربح": r.net }))} />
+        {!d.rows.length ? <Empty text="لا توجد حركة في الفترة" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>مركز التكلفة</th><th className="n">الإيرادات</th><th className="n">تكلفة المبيعات</th><th className="n">المصروفات</th><th className="n">صافي الربح</th><th className="n">الهامش</th></tr></thead>
+          <tbody>{d.rows.map((r: any) => <tr key={r.id || "none"} style={{ cursor: "pointer", background: selRow === r ? "var(--primary-soft)" : undefined }} onClick={() => setSel(r.id || null)}><td><b>{r.name}</b>{r.code !== "—" && <span className="small muted"> {r.code}</span>}</td><td className="n"><Money v={r.revenue} /></td><td className="n"><Money v={r.cogs} /></td><td className="n"><Money v={r.expenses} /></td><td className="n"><Money v={r.net} sign /></td><td className="n">{r.revenue ? Math.round((r.net / r.revenue) * 100) + "%" : ""}</td></tr>)}</tbody>
+          <tfoot><tr><td>الإجمالي</td><td className="n"><Money v={d.totals.revenue} /></td><td className="n"><Money v={d.totals.cogs} /></td><td className="n"><Money v={d.totals.expenses} /></td><td className="n"><Money v={d.totals.net} sign /></td><td /></tr></tfoot></table></div>}
+        <div className="card-b small muted no-print">اضغط على مركز لعرض تفاصيله حسب الحساب. تُوزَّع الحركة على المراكز من حقل «مركز التكلفة» في المصروفات والقيود اليدوية.</div>
+      </div>
+      <div className="card"><div className="card-h"><h3>{selRow ? `تفاصيل: ${selRow.name}` : "تفاصيل المركز"}</h3></div>
+        {!selRow ? <Empty text="اختر مركز تكلفة من الجدول" /> : !d.detail.length ? <Empty /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">المبلغ</th></tr></thead><tbody>{d.detail.map((x: any) => <tr key={x.code}><td><span className="num muted">{x.code}</span> {x.nameAr}<span className="small muted"> · {x.type === "REVENUE" ? "إيراد" : "مصروف"}</span></td><td className="n"><Money v={x.amount} /></td></tr>)}</tbody></table></div>}
+      </div>
     </div>
   );
 }

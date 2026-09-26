@@ -1,6 +1,7 @@
 /** Financial reports, all computed from journal_lines (single source of truth). */
 import { Db } from "../db/pool";
-import { bad, r2, D, isDate, today, addDays } from "../lib/core";
+import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
+import { provisionTotals } from "./hr";
 import { debitNature, SUBTYPE_AR } from "../accounting/coa";
 
 const dateRange = (q: any) => {
@@ -117,6 +118,55 @@ export async function incomeStatement(t: Db, companyId: string, q: any) {
   const zakat = group(rows, ["ZAKAT"], 1);
   const net = r2(beforeZakat - zakat.total);
   return { from, to, sales, returns, netSales, cogs, grossProfit, grossMargin: netSales ? r2((grossProfit / netSales) * 100) : 0, opex, operating, otherIncome, otherExp, beforeZakat, zakat, net, netMargin: netSales ? r2((net / netSales) * 100) : 0 };
+}
+
+/** Income statement with a comparison column: previous period of equal length, or the same period last year. */
+export async function incomeStatementCompare(t: Db, companyId: string, q: any) {
+  const { from, to } = dateRange(q);
+  let pFrom: string, pTo: string;
+  if (q.compare === "year") { pFrom = addMonths(from, -12); pTo = addMonths(to, -12); }
+  else if (from.endsWith("-01") && to === monthEnd(to)) { const months = (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1; pTo = addDays(from, -1); pFrom = addMonths(from, -months); }
+  else { const len = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1; pTo = addDays(from, -1); pFrom = addDays(pTo, -(len - 1)); }
+  const [current, previous] = await Promise.all([incomeStatement(t, companyId, { from, to }), incomeStatement(t, companyId, { from: pFrom, to: pTo })]);
+  const merge = (a: any, b: any) => {
+    const codes = new Map<string, any>();
+    for (const sec of a.sections) for (const i of sec.items) codes.set(i.code, { code: i.code, name: i.name, section: sec.name, cur: i.amount, prev: 0 });
+    for (const sec of b.sections) for (const i of sec.items) { const x = codes.get(i.code) || { code: i.code, name: i.name, section: sec.name, cur: 0, prev: 0 }; x.prev = i.amount; codes.set(i.code, x); }
+    return [...codes.values()].sort((x, y) => x.code.localeCompare(y.code)).map((x) => ({ ...x, change: r2(x.cur - x.prev), pct: x.prev ? r2(((x.cur - x.prev) / Math.abs(x.prev)) * 100) : null }));
+  };
+  const line = (k: string) => ({ cur: current[k], prev: previous[k], change: r2(current[k] - previous[k]), pct: previous[k] ? r2(((current[k] - previous[k]) / Math.abs(previous[k])) * 100) : null });
+  return {
+    from, to, prevFrom: pFrom, prevTo: pTo, mode: q.compare === "year" ? "year" : "prev",
+    sales: merge(current.sales, previous.sales), returns: merge(current.returns, previous.returns), cogs: merge(current.cogs, previous.cogs), opex: merge(current.opex, previous.opex),
+    otherIncome: merge(current.otherIncome, previous.otherIncome), otherExp: merge(current.otherExp, previous.otherExp), zakat: merge(current.zakat, previous.zakat),
+    netSales: line("netSales"), grossProfit: line("grossProfit"), operating: line("operating"), beforeZakat: line("beforeZakat"), net: line("net"),
+    grossMargin: { cur: current.grossMargin, prev: previous.grossMargin }, netMargin: { cur: current.netMargin, prev: previous.netMargin },
+  };
+}
+
+/** Profit & loss by cost center (journal lines carrying a cost center; the rest is "غير موزع"). */
+export async function costCenterPnl(t: Db, companyId: string, q: any) {
+  const { from, to } = dateRange(q);
+  const rows = await t.rows(
+    `SELECT c.id, c.code, c.name,
+       COALESCE(SUM(CASE WHEN a.type='REVENUE' THEN l.credit-l.debit END),0) revenue,
+       COALESCE(SUM(CASE WHEN a.subtype='COGS' THEN l.debit-l.credit END),0) cogs,
+       COALESCE(SUM(CASE WHEN a.type='EXPENSE' AND a.subtype<>'COGS' THEN l.debit-l.credit END),0) expenses
+     FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN cost_centers c ON c.id=l.cost_center_id
+     WHERE a.company_id=$1 AND a.type IN ('REVENUE','EXPENSE') AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date BETWEEN $2 AND $3
+     GROUP BY c.id, c.code, c.name ORDER BY c.code NULLS LAST`, [companyId, from, to]);
+  const list = rows.map((r) => ({ id: r.id, code: r.code || "—", name: r.name || "غير موزع على مركز تكلفة", revenue: r2(r.revenue), cogs: r2(r.cogs), expenses: r2(r.expenses), gross: r2(r.revenue - r.cogs), net: r2(r.revenue - r.cogs - r.expenses) }));
+  let detail: any[] = [];
+  if (q.costCenterId !== undefined) {
+    detail = await t.rows(
+      `SELECT a.code, a.name_ar, a.type, a.subtype, SUM(CASE WHEN a.type='REVENUE' THEN l.credit-l.debit ELSE l.debit-l.credit END) amount
+       FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+       WHERE a.company_id=$1 AND a.type IN ('REVENUE','EXPENSE') AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date BETWEEN $2 AND $3 AND ${q.costCenterId ? "l.cost_center_id=$4" : "l.cost_center_id IS NULL"}
+       GROUP BY a.id HAVING SUM(l.debit-l.credit) <> 0 ORDER BY a.code`, q.costCenterId ? [companyId, from, to, q.costCenterId] : [companyId, from, to]);
+    detail = detail.map((d) => ({ ...d, amount: r2(d.amount) }));
+  }
+  const tot = (k: string) => r2(list.reduce((a, r: any) => a + r[k], 0));
+  return { from, to, rows: list, detail, totals: { revenue: tot("revenue"), cogs: tot("cogs"), expenses: tot("expenses"), gross: tot("gross"), net: tot("net") } };
 }
 
 export async function balanceSheet(t: Db, companyId: string, q: any) {
@@ -306,6 +356,13 @@ export async function integrity(t: Db, companyId: string) {
   const faGl = await t.one(`SELECT COALESCE(SUM(CASE WHEN a.subtype='FIXED_ASSET' THEN l.debit-l.credit END),0) c, COALESCE(SUM(CASE WHEN a.subtype='ACC_DEPRECIATION' THEN l.credit-l.debit END),0) d FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED'`, [companyId]);
   checks.push({ name: "سجل الأصول الثابتة = حسابات الأصول الثابتة", ok: Math.abs(Number(fa.c) - Number(faGl.c)) < 0.01, a: r2(fa.c), b: r2(faGl.c) });
   checks.push({ name: "مجمع الإهلاك في السجل = حساب مجمع الإهلاك", ok: Math.abs(Number(fa.d) - Number(faGl.d)) < 0.01, a: r2(fa.d), b: r2(faGl.d) });
+  const prov = await provisionTotals(t, companyId);
+  const provGl = await t.rows(`SELECT a.system_key k, COALESCE(SUM(l.credit-l.debit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key IN ('EOSB_PROVISION','LEAVE_PROVISION','EMP_ADVANCES') AND e.status='POSTED' GROUP BY 1`, [companyId]);
+  const g = (k: string) => r2(provGl.find((x) => x.k === k)?.b || 0);
+  checks.push({ name: "سجل مخصص نهاية الخدمة للموظفين = حساب مخصص نهاية الخدمة", ok: Math.abs(prov.EOSB - g("EOSB_PROVISION")) < 0.01, a: prov.EOSB, b: g("EOSB_PROVISION") });
+  checks.push({ name: "سجل مخصص الإجازات للموظفين = حساب مخصص الإجازات", ok: Math.abs(prov.LEAVE - g("LEAVE_PROVISION")) < 0.01, a: prov.LEAVE, b: g("LEAVE_PROVISION") });
+  const loans = await t.one(`SELECT COALESCE(SUM(amount-paid),0) b FROM employee_loans WHERE company_id=$1 AND status='ACTIVE'`, [companyId]);
+  checks.push({ name: "سلف الموظفين القائمة = حساب سلف وعهد الموظفين", ok: Math.abs(Number(loans.b) + g("EMP_ADVANCES")) < 0.01, a: r2(loans.b), b: r2(-g("EMP_ADVANCES")), note: "العهد النقدية المسجلة يدوياً على نفس الحساب تظهر كفرق" });
   return { ok: checks.every((c) => c.ok), checks };
 }
 
@@ -342,5 +399,43 @@ export async function dashboard(t: Db, companyId: string) {
   const recent = await t.rows(`SELECT id, number, kind, direction, partner_name, total, date, status, payment_status FROM invoices WHERE company_id=$1 AND status='POSTED' ORDER BY created_at DESC LIMIT 8`, [companyId]);
   const openSession = await t.maybe(`SELECT number, user_name, opened_at, cash_sales, card_sales, orders_count FROM pos_sessions WHERE company_id=$1 AND status='OPEN' ORDER BY opened_at DESC LIMIT 1`, [companyId]);
   const zatca = await t.rows(`SELECT zatca_status s, COUNT(*)::int c FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND zatca_status IS NOT NULL GROUP BY 1`, [companyId]);
-  return { salesMonth: r2(salesMonth), salesToday: r2(salesToday), purchMonth: r2(purchMonth), expMonth: r2(expMonth), ar: r2(ar), ap: r2(ap), cash: cash.map((c) => ({ ...c, bal: r2(c.bal) })), cashTotal: r2(cash.reduce((a, c) => a + Number(c.bal), 0)), vatDue: r2(vatOut - vatIn), inventory: r2(inventory), trend, pnl: pnl.map((p) => ({ ...p, revenue: r2(p.revenue), expense: r2(p.expense), profit: r2(p.revenue - p.expense) })), topProducts, topCustomers, lowStock, overdue, recent, openSession, zatca };
+  const alerts = await accountantAlerts(t, companyId, td);
+  return { alerts, salesMonth: r2(salesMonth), salesToday: r2(salesToday), purchMonth: r2(purchMonth), expMonth: r2(expMonth), ar: r2(ar), ap: r2(ap), cash: cash.map((c) => ({ ...c, bal: r2(c.bal) })), cashTotal: r2(cash.reduce((a, c) => a + Number(c.bal), 0)), vatDue: r2(vatOut - vatIn), inventory: r2(inventory), trend, pnl: pnl.map((p) => ({ ...p, revenue: r2(p.revenue), expense: r2(p.expense), profit: r2(p.revenue - p.expense) })), topProducts, topCustomers, lowStock, overdue, recent, openSession, zatca };
+}
+
+/** Things an accountant should act on today. */
+export async function accountantAlerts(t: Db, companyId: string, td: string) {
+  const co = await t.one(`SELECT vat_period, plan, subscription_ends_at, created_at FROM companies WHERE id=$1`, [companyId]);
+  const n = async (sql: string, params: any[]) => (await t.one(sql, params));
+  const drafts = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(total),0) v FROM invoices WHERE company_id=$1 AND status='DRAFT' AND kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE')`, [companyId]);
+  const overdue = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(total-amount_paid),0) v FROM invoices WHERE company_id=$1 AND direction='SALE' AND kind='INVOICE' AND status='POSTED' AND total-amount_paid>0.001 AND due_date < $2`, [companyId, td]);
+  const payables = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(total-amount_paid),0) v FROM invoices WHERE company_id=$1 AND direction='PURCHASE' AND kind='INVOICE' AND status='POSTED' AND total-amount_paid>0.001 AND due_date <= $2`, [companyId, addDays(td, 7)]);
+  const lowStock = await n(`SELECT COUNT(*)::int c FROM (SELECT p.id FROM products p LEFT JOIN stock_balances b ON b.product_id=p.id WHERE p.company_id=$1 AND p.type='STOCK' AND p.is_active GROUP BY p.id HAVING COALESCE(SUM(b.qty),0) <= p.reorder_level) x`, [companyId]);
+  const zatcaPending = await n(`SELECT COUNT(*)::int c FROM invoices WHERE company_id=$1 AND status='POSTED' AND zatca_status IN ('PENDING','FAILED','REJECTED')`, [companyId]);
+  const cheques = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(amount),0) v FROM cheques WHERE company_id=$1 AND status IN ('PENDING','DEPOSITED') AND due_date <= $2`, [companyId, addDays(td, 7)]);
+  const staleSessions = await n(`SELECT COUNT(*)::int c FROM pos_sessions WHERE company_id=$1 AND status='OPEN' AND opened_at < now() - interval '20 hours'`, [companyId]);
+  const payroll = await n(`SELECT COUNT(*)::int c FROM payroll_runs WHERE company_id=$1 AND period=$2`, [companyId, td.slice(0, 7)]);
+  const emps = await n(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active`, [companyId]);
+  // next VAT return: last completed period (month or quarter) not yet filed
+  const monthly = co.vatPeriod === "MONTHLY";
+  const m = Number(td.slice(5, 7)), y = Number(td.slice(0, 4));
+  const endMonth = monthly ? (m === 1 ? 12 : m - 1) : (Math.ceil(m / 3) - 1) * 3 || 12;
+  const endYear = endMonth > m || (monthly ? m === 1 : m <= 3) ? y - 1 : y;
+  const periodTo = monthEnd(`${endYear}-${String(endMonth).padStart(2, "0")}-01`);
+  const periodFrom = monthly ? periodTo.slice(0, 8) + "01" : `${endYear}-${String(endMonth - 2).padStart(2, "0")}-01`;
+  const dueDate = monthEnd(addDays(periodTo, 1));
+  const filed = await t.maybe(`SELECT id FROM vat_returns WHERE company_id=$1 AND period_to >= $2`, [companyId, periodTo]);
+  const daysToVat = Math.round((Date.parse(dueDate) - Date.parse(td)) / 86400000);
+  const items: { level: "err" | "warn" | "info"; text: string; to: string; count?: number }[] = [];
+  if (!filed) items.push({ level: daysToVat < 0 ? "err" : daysToVat <= 15 ? "warn" : "info", text: `إقرار ضريبة القيمة المضافة عن الفترة ${periodFrom} — ${periodTo} ${daysToVat < 0 ? `متأخر ${-daysToVat} يوم` : `مستحق خلال ${daysToVat} يوم (${dueDate})`}`, to: "/vat" });
+  if (overdue.c) items.push({ level: "err", text: `${overdue.c} فاتورة مبيعات متأخرة السداد بإجمالي ${r2(overdue.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/reports/aging", count: overdue.c });
+  if (payables.c) items.push({ level: "warn", text: `${payables.c} فاتورة موردين تستحق خلال 7 أيام بإجمالي ${r2(payables.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/purchases/invoices", count: payables.c });
+  if (cheques.c) items.push({ level: "warn", text: `${cheques.c} شيك يستحق خلال 7 أيام (${r2(cheques.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س)`, to: "/cheques", count: cheques.c });
+  if (drafts.c) items.push({ level: "info", text: `${drafts.c} مستند غير مرحّل (مسودات) بقيمة ${r2(drafts.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/sales/invoices", count: drafts.c });
+  if (zatcaPending.c) items.push({ level: "warn", text: `${zatcaPending.c} فاتورة لم تُرسل أو رُفضت في منصة فاتورة`, to: "/zatca", count: zatcaPending.c });
+  if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
+  if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
+  if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
+  if (co.plan === "TRIAL" && co.subscriptionEndsAt) { const dl = Math.round((new Date(co.subscriptionEndsAt).getTime() - Date.parse(td)) / 86400000); if (dl <= 7) items.push({ level: dl < 0 ? "err" : "warn", text: dl < 0 ? "انتهت الفترة التجريبية — فعّل الترخيص" : `تنتهي الفترة التجريبية خلال ${dl} يوم`, to: "/settings/license" }); }
+  return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed } };
 }

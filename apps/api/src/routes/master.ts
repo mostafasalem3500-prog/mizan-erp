@@ -259,7 +259,7 @@ master.put(
     const row = await db.update("companies", { id: cid(req) }, {
       nameAr: b.nameAr, nameEn: b.nameEn, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone, email: b.email, website: b.website, logo: b.logo, street: b.street, buildingNo: b.buildingNo, additionalNo: b.additionalNo,
       district: b.district, city: b.city, postalCode: b.postalCode, fiscalYearStart: b.fiscalYearStart === undefined ? undefined : Math.min(12, Math.max(1, Math.round(num(b.fiscalYearStart)))),
-      allowNegativeStock: b.allowNegativeStock, pricesIncludeVat: b.pricesIncludeVat, invoiceFooter: b.invoiceFooter, invoiceTerms: b.invoiceTerms, invoiceTemplate: b.invoiceTemplate, updatedAt: new Date(),
+      allowNegativeStock: b.allowNegativeStock, pricesIncludeVat: b.pricesIncludeVat, vatPeriod: b.vatPeriod === undefined ? undefined : b.vatPeriod === "MONTHLY" ? "MONTHLY" : "QUARTERLY", invoiceFooter: b.invoiceFooter, invoiceTerms: b.invoiceTerms, invoiceTemplate: b.invoiceTemplate, updatedAt: new Date(),
     });
     await audit(req, "UPDATE", "settings", cid(req));
     return row;

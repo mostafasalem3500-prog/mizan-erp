@@ -1,7 +1,8 @@
 /** Payroll lite: employees, monthly run with GOSI, accrual journal, salary payment, WPS file. */
 import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, isDate, today, monthEnd } from "../lib/core";
-import { post, accountByKey } from "../accounting/engine";
+import { post } from "../accounting/engine";
+import { loanInstallments, applyLoanInstallments } from "./hr";
 
 // GOSI (2024+ new rates for Saudis: total 21.5% on basic+housing → 9.75% employee / 11.75% employer incl. hazards & SANED;
 // non-Saudis: 2% occupational hazards, employer only). Rates are configurable per company later; sane defaults here.
@@ -10,21 +11,25 @@ export const GOSI = { SAUDI: { employee: 0.0975, employer: 0.1175 }, NON_SAUDI: 
 export interface RunInput {
   period: string; // YYYY-MM
   date?: string; // posting date (default: month end)
-  adjustments?: Record<string, { bonus?: number; overtime?: number; deduction?: number; absence?: number; note?: string }>; // by employee id
+  adjustments?: Record<string, { bonus?: number; overtime?: number; deduction?: number; absence?: number; loan?: number; note?: string }>; // by employee id; loan overrides the automatic installment
   notes?: string;
   isDemo?: boolean;
 }
 
-export function computeLine(e: any, adj: any = {}) {
+export function computeLine(e: any, adj: any = {}, loans: { id: string; amount: number }[] = []) {
   const basic = Number(e.basic), housing = Number(e.housing), transport = Number(e.transport), other = Number(e.otherAllow);
   const bonus = r2(num(adj.bonus)), overtime = r2(num(adj.overtime)), deduction = r2(num(adj.deduction)), absence = r2(num(adj.absence));
+  const autoLoan = r2(loans.reduce((a, l) => a + l.amount, 0));
+  const loan = adj.loan === undefined || adj.loan === null || adj.loan === "" ? autoLoan : Math.max(0, Math.min(autoLoan, r2(num(adj.loan))));
+  // spread an overridden (smaller) installment over the loans in order
+  let rem = loan; const loanItems = loans.map((l) => { const a = r2(Math.min(l.amount, rem)); rem = r2(rem - a); return { id: l.id, amount: a }; }).filter((l) => l.amount > 0);
   const gross = r2(D(basic).plus(housing).plus(transport).plus(other).plus(bonus).plus(overtime));
   const rates = e.gosi ? (GOSI as any)[e.nationality] || GOSI.NON_SAUDI : { employee: 0, employer: 0 };
   const gosiBase = Math.min(r2(D(basic).plus(housing)), 45000); // GOSI ceiling
   const gosiEmp = r2(gosiBase * rates.employee);
   const gosiEr = r2(gosiBase * rates.employer);
-  const net = r2(D(gross).minus(gosiEmp).minus(deduction).minus(absence));
-  return { employeeId: e.id, code: e.code, name: e.name, iban: e.iban, bankName: e.bankName, nationality: e.nationality, basic, housing, transport, other, bonus, overtime, deduction, absence, gross, gosiBase, gosiEmp, gosiEr, net, note: adj.note || null };
+  const net = r2(D(gross).minus(gosiEmp).minus(deduction).minus(absence).minus(loan));
+  return { employeeId: e.id, code: e.code, name: e.name, iban: e.iban, bankName: e.bankName, nationality: e.nationality, basic, housing, transport, other, bonus, overtime, deduction, absence, loan, loanItems, gross, gosiBase, gosiEmp, gosiEr, net, note: adj.note || null };
 }
 
 export async function createRun(t: Db, companyId: string, user: string, r: RunInput) {
@@ -34,9 +39,10 @@ export async function createRun(t: Db, companyId: string, user: string, r: RunIn
   if (dup) throw conflict(`يوجد مسير رواتب لشهر ${r.period} مسبقاً`);
   const emps = await t.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [companyId]);
   if (!emps.length) throw bad("لا يوجد موظفون نشطون");
-  const lines = emps.map((e) => computeLine(e, r.adjustments?.[e.id]));
+  const loans = await loanInstallments(t, companyId, r.period);
+  const lines = emps.map((e) => computeLine(e, r.adjustments?.[e.id], loans[e.id] || []));
   const sum = (k: string) => r2(lines.reduce((a, l: any) => a + l[k], 0));
-  return t.insert("payroll_runs", { companyId, period: r.period, date, lines, totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence")), totalNet: sum("net"), notes: r.notes || null, isDemo: !!r.isDemo, createdBy: user });
+  return t.insert("payroll_runs", { companyId, period: r.period, date, lines, totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence") + sum("loan")), totalNet: sum("net"), notes: r.notes || null, isDemo: !!r.isDemo, createdBy: user });
 }
 
 /** Accrual: Dr salaries (basic) + allowances + GOSI employer / Cr salaries payable (net) + GOSI payable (emp+er) + other deductions → salaries payable is net only; deductions reduce expense? No: deductions/absence reduce the expense (unpaid days). */
@@ -47,14 +53,17 @@ export async function postRun(t: Db, companyId: string, user: string, id: string
   const basic = r2(L.reduce((a, l) => a + l.basic + l.bonus + l.overtime - l.deduction - l.absence, 0));
   const allow = r2(L.reduce((a, l) => a + l.housing + l.transport + l.other, 0));
   const gosiEmp = Number(run.totalGosiEmp), gosiEr = Number(run.totalGosiEr), net = Number(run.totalNet);
+  const loans = r2(L.reduce((a, l) => a + (l.loan || 0), 0));
   const lines: any[] = [
     { key: "SALARIES", debit: basic, description: `رواتب أساسية ${run.period}` },
     { key: "ALLOWANCES", debit: allow, description: `بدلات ${run.period}` },
     { key: "GOSI_EXPENSE", debit: gosiEr, description: `تأمينات حصة المنشأة ${run.period}` },
     { key: "SALARIES_PAYABLE", credit: net, description: `صافي رواتب مستحقة ${run.period}` },
     { key: "GOSI_PAYABLE", credit: r2(gosiEmp + gosiEr), description: `تأمينات مستحقة ${run.period}` },
+    { key: "EMP_ADVANCES", credit: loans, description: `أقساط سلف الموظفين ${run.period}` },
   ];
   const e = await post(t, companyId, { date: run.date, type: "PAYROLL", sourceType: "PAYROLL", sourceId: run.id, reference: run.period, memo: `مسير رواتب ${run.period}`, createdBy: user, isDemo: run.isDemo, lines });
+  await applyLoanInstallments(t, companyId, L.flatMap((l) => l.loanItems || []));
   return t.update("payroll_runs", { id }, { status: "POSTED", journalId: e!.id });
 }
 
@@ -80,7 +89,7 @@ export async function deleteRun(t: Db, companyId: string, id: string) {
 export function wpsCsv(company: any, run: any): string {
   const L: any[] = run.lines;
   const head = ["Employee Name", "Employee ID", "IBAN", "Bank Name", "Basic Salary", "Housing Allowance", "Other Earnings", "Deductions", "Net Salary", "Period", "Employer Name", "Employer CR", "Establishment ID"];
-  const rows = L.map((l) => [l.name, l.code, l.iban || "", l.bankName || "", l.basic.toFixed(2), l.housing.toFixed(2), (l.transport + l.other + l.bonus + l.overtime).toFixed(2), (l.gosiEmp + l.deduction + l.absence).toFixed(2), l.net.toFixed(2), run.period, company.nameAr, company.crNumber || "", ""]);
+  const rows = L.map((l) => [l.name, l.code, l.iban || "", l.bankName || "", l.basic.toFixed(2), l.housing.toFixed(2), (l.transport + l.other + l.bonus + l.overtime).toFixed(2), (l.gosiEmp + l.deduction + l.absence + (l.loan || 0)).toFixed(2), l.net.toFixed(2), run.period, company.nameAr, company.crNumber || "", ""]);
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   return "﻿" + [head, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
 }
