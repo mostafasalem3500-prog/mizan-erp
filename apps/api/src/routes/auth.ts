@@ -54,7 +54,7 @@ auth.post(
     const passwordHash = await bcrypt.hash(password, 10);
     const first = await db.one(`SELECT COUNT(*)::int c FROM users`);
     const out = await tx(async (t) => {
-      const u = await t.insert("users", { email, passwordHash, fullName, phone: b.phone || null, isSuperAdmin: first.c === 0 || email === (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase() });
+      const u = await t.insert("users", { email, passwordHash, fullName, phone: b.phone || null, isSuperAdmin: process.env.SUPER_ADMIN_EMAIL ? email === process.env.SUPER_ADMIN_EMAIL.toLowerCase() : first.c === 0 });
       const c = await bootstrapCompany(t, { nameAr: companyName, nameEn: b.companyNameEn, vatNumber: b.vatNumber, crNumber: b.crNumber, city: b.city, phone: b.phone, email }, u.id);
       await t.insert("audit_logs", { companyId: c.id, userId: u.id, userName: fullName, action: "REGISTER", entity: "company", entityId: c.id, details: { nameAr: c.nameAr } });
       return { u, c };

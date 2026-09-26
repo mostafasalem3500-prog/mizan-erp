@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run build:api && npm run build:web",
     "build:api": "tsc -p tsconfig.json",
-    "build:web": "cd web && npm install --no-audit --no-fund && npm run build",
+    "build:web": "cd web && npm install --include=dev --no-audit --no-fund && npm run build",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
     "migrate": "node dist/db/migrate.js",
