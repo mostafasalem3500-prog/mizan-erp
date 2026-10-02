@@ -18,6 +18,7 @@ import { CustomerPortal } from "./pages/Integrations";
 import { LotsPage } from "./pages/Lots";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
+import { GlobalSearch } from "./pages/Search";
 
 const NAV = [
   { group: "الرئيسية" },
@@ -118,6 +119,7 @@ export function App() {
               <button className="btn sm burger" onClick={() => setMenu((m) => !m)}>☰</button>
               <div className="title">{(NAV.find((n: any) => n.to === loc.pathname) || NAV.find((n: any) => n.to && n.to !== "/" && loc.pathname.startsWith(n.to + "/")))?.label || ""}</div>
               <div className="grow" />
+              <GlobalSearch />
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
             </div>

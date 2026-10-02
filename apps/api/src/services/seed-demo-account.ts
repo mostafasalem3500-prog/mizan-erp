@@ -7,17 +7,23 @@ import { db, tx } from "../db/pool";
 import { bootstrapCompany } from "../routes/auth";
 import { loadDemo, DEMO_VERSION, resetShowcaseCompany } from "./demo";
 import { newSallaToken, processEvent, sampleOrder } from "./salla";
+import { createPayout } from "./payouts";
 
-/** Showcase only: a connected Salla store with a few processed orders, so the integration screen is not empty. */
+/** Showcase only: connected Salla and Zid stores with processed orders and one platform payout, so the screens are not empty. */
 async function showcaseSalla(companyId: string) {
-  let conn = await db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1`, [companyId]);
-  if (!conn) {
-    const wh = await db.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
-    conn = await db.insert("salla_connections", { companyId, token: newSallaToken(), storeName: "متجر الأفق على سلة (تجريبي)", warehouseId: wh.id });
+  const wh = await db.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
+  for (const [platform, name, orders] of [["SALLA", "متجر الأفق على سلة (تجريبي)", [false, true, false]], ["ZID", "متجر الأفق على زد (تجريبي)", [false, true]]] as const) {
+    let conn = await db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1 AND platform=$2`, [companyId, platform]);
+    if (!conn) conn = await db.insert("salla_connections", { companyId, platform, token: newSallaToken(), storeName: name, warehouseId: wh.id });
+    for (const cod of orders) await processEvent(conn, await sampleOrder(companyId, { cod, warehouseId: conn.warehouseId, platform }), { eventHint: "order.create" });
   }
-  for (const cod of [false, true, false]) {
-    const body = await sampleOrder(companyId, { cod, warehouseId: conn.warehouseId });
-    await processEvent(conn, body);
+  // the platform transfers the collected balance minus a 2.5% commission (+15% VAT on it)
+  const clr = await db.one(`SELECT a.id, COALESCE(SUM(l.debit-l.credit),0) bal FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id WHERE a.company_id=$1 AND a.system_key='ESTORE_CLEARING' GROUP BY a.id`, [companyId]);
+  const gross = Math.round(Number(clr.bal) * 0.8 * 100) / 100;
+  if (gross > 10) {
+    const fees = Math.round(gross * 0.025 * 100) / 100, feeVat = Math.round(fees * 0.15 * 100) / 100;
+    const bank = await db.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='BANK'`, [companyId]);
+    await tx((t) => createPayout(t, companyId, "مستخدم تجريبي", { platform: "SALLA", net: Math.round((gross - fees - feeVat) * 100) / 100, fees, feeVat, bankAccountId: bank.id, reference: "تحويل سلة الأسبوعي", isDemo: true }));
   }
 }
 

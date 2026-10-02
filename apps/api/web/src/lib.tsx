@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { useLocation } from "react-router-dom";
 
 // ─── api ───────────────────────────────────────────────────────────────────
 export const session = {
@@ -264,3 +265,11 @@ export function fileToDataUrl(file: File, maxPx = 512): Promise<string> {
 }
 
 export function useMemoOnce<T>(f: () => T) { return useMemo(f, []); }
+
+/** Search box state that can be pre-filled from ?q= (used by the global search to land on a filtered list). */
+export function useUrlSearch(): [string, (v: string) => void] {
+  const loc = useLocation();
+  const [v, setV] = useState(() => new URLSearchParams(loc.search).get("q") || "");
+  useEffect(() => { const x = new URLSearchParams(loc.search).get("q"); if (x !== null) setV(x); }, [loc.search]);
+  return [v, setV];
+}

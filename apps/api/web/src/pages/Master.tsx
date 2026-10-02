@@ -2,12 +2,12 @@ import { PortalLinkBtn } from "./Integrations";
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ImportModal } from "./Import";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
 export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const { can } = useCompanyContext();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
   const [stmt, setStmt] = useState<any>(null);
@@ -97,7 +97,7 @@ export function StatementModal({ partner, role, onClose }: { partner: any; role:
 // ─── products ──────────────────────────────────────────────────────────────
 export function ProductsPage() {
   const { can } = useCompanyContext();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlSearch();
   const [cat, setCat] = useState("");
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);

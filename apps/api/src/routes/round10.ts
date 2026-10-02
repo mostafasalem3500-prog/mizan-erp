@@ -5,7 +5,8 @@ import { h, bad, conflict, req as need, AppError } from "../lib/core";
 import { authenticate, perm, cid, actor, p } from "../lib/auth";
 import { audit } from "./master";
 import { branchPnl } from "../services/reports";
-import { newSallaToken, getConnection, verifySignature, processEvent, sampleOrder } from "../services/salla";
+import { newSallaToken, getConnection, verifySignature, processEvent, sampleOrder, PLATFORMS } from "../services/salla";
+import { createPayout, cancelPayout } from "../services/payouts";
 
 export const r10 = Router();
 r10.use(authenticate);
@@ -74,30 +75,45 @@ r10.delete("/branches/:id", perm("settings.write"), h(async (req) => {
 
 r10.get("/reports/branches", perm("reports.read"), h(async (req) => branchPnl(db, cid(req), req.query)));
 
-// ── Salla connector (management) ─────────────────────────────────────────────
-const sallaView = async (req: any) => {
-  const conn = await getConnection(cid(req));
+// ── e-store connectors: Salla & Zid (management) ───────────────────────────
+const plat = (req: any): string => {
+  const v = String(req.params.platform || "").toUpperCase();
+  if (!PLATFORMS[v]) throw new AppError(404, "المنصة غير مدعومة", "NOT_FOUND");
+  return v;
+};
+const SUPPORTED: Record<string, string[]> = {
+  SALLA: ["order.created", "order.updated", "order.status.updated", "order.refunded", "order.cancelled", "product.created", "product.updated"],
+  ZID: ["order.create", "order.status.update", "order.payment_status.update", "product.create", "product.update"],
+};
+const storeView = async (req: any) => {
+  const pf = plat(req);
+  const conn = await getConnection(cid(req), pf);
   const events = await db.rows(
     `SELECT e.id, e.event, e.salla_id, e.reference, e.status, e.message, e.invoice_id, e.credit_note_id, e.attempts, e.is_test, e.created_at,
        i.number AS invoice_number, i.total AS invoice_total, i.status AS invoice_status, cn.number AS credit_note_number
      FROM salla_events e LEFT JOIN invoices i ON i.id=e.invoice_id LEFT JOIN invoices cn ON cn.id=e.credit_note_id
-     WHERE e.company_id=$1 ORDER BY e.created_at DESC LIMIT 60`, [cid(req)]);
+     WHERE e.company_id=$1 AND e.platform=$2 ORDER BY e.created_at DESC LIMIT 60`, [cid(req), pf]);
   const stats = await db.one(
     `SELECT COUNT(*)::int orders, COALESCE(SUM(total),0) total, COALESCE(SUM(total-amount_paid),0) open
-     FROM invoices WHERE company_id=$1 AND channel='SALLA' AND kind='INVOICE' AND status='POSTED'`, [cid(req)]);
+     FROM invoices WHERE company_id=$1 AND channel=$2 AND kind='INVOICE' AND status='POSTED'`, [cid(req), PLATFORMS[pf].channel]);
   const clearing = await db.maybe(
     `SELECT a.id, a.code, a.name_ar, COALESCE((SELECT SUM(l.debit-l.credit) FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED' WHERE l.account_id=a.id),0) balance
      FROM accounts a WHERE a.company_id=$1 AND a.id=COALESCE($2::uuid, (SELECT id FROM accounts WHERE company_id=$1 AND system_key='ESTORE_CLEARING'))`, [cid(req), conn?.depositAccountId || null]);
+  const payouts = await db.rows(
+    `SELECT p.*, b.name_ar AS bank_name, j.number AS journal_number FROM estore_payouts p JOIN accounts b ON b.id=p.bank_account_id LEFT JOIN journal_entries j ON j.id=p.journal_id
+     WHERE p.company_id=$1 AND p.platform=$2 ORDER BY p.date DESC, p.created_at DESC LIMIT 50`, [cid(req), pf]);
+  const base = `${origin(req)}/api/hooks/${PLATFORMS[pf].prefix}/`;
   return {
-    connection: conn ? { ...conn, webhookUrl: `${origin(req)}/api/hooks/salla/${conn.token}` } : null,
-    events, stats, clearing,
-    supportedEvents: ["order.created", "order.updated", "order.status.updated", "order.refunded", "order.cancelled", "product.created", "product.updated"],
+    platform: pf, platformName: PLATFORMS[pf].ar,
+    connection: conn ? { ...conn, webhookUrl: base + conn.token } : null,
+    events, stats, clearing, payouts, supportedEvents: SUPPORTED[pf],
   };
 };
 
-r10.get("/integrations/salla", perm("settings.read"), h(async (req) => sallaView(req)));
+r10.get("/integrations/:platform", perm("settings.read"), h(async (req) => storeView(req)));
 
-r10.post("/integrations/salla", perm("settings.write"), h(async (req) => {
+r10.post("/integrations/:platform", perm("settings.write"), h(async (req) => {
+  const pf = plat(req);
   const b = req.body || {};
   const own = async (table: string, id: any, extra = "") => {
     if (!id) return null;
@@ -116,56 +132,72 @@ r10.post("/integrations/salla", perm("settings.write"), h(async (req) => {
     depositAccountId: b.depositAccountId === undefined ? undefined : await own("accounts", b.depositAccountId, "AND is_cash_bank AND NOT is_group"),
     createProducts: b.createProducts ?? undefined,
   };
-  const existing = await getConnection(cid(req));
-  if (existing) await db.update("salla_connections", { companyId: cid(req) }, vals);
+  const existing = await getConnection(cid(req), pf);
+  if (existing) await db.update("salla_connections", { companyId: cid(req), platform: pf }, vals);
   else {
-    const wh = vals.warehouseId || (await db.one(`SELECT id, branch_id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [cid(req)])).id;
-    await db.insert("salla_connections", { companyId: cid(req), token: newSallaToken(), ...vals, warehouseId: wh });
+    const wh = vals.warehouseId || (await db.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [cid(req)])).id;
+    await db.insert("salla_connections", { companyId: cid(req), platform: pf, token: newSallaToken(), ...vals, warehouseId: wh });
   }
-  await audit(req, existing ? "UPDATE" : "CREATE", "salla_connection", cid(req), { ...vals, secret: vals.secret ? "***" : vals.secret });
-  return sallaView(req);
+  await audit(req, existing ? "UPDATE" : "CREATE", "estore_connection", cid(req), { platform: pf, ...vals, secret: vals.secret ? "***" : vals.secret });
+  return storeView(req);
 }));
 
-r10.post("/integrations/salla/rotate", perm("settings.write"), h(async (req) => {
-  await db.exec(`UPDATE salla_connections SET token=$2 WHERE company_id=$1`, [cid(req), newSallaToken()]);
-  await audit(req, "ROTATE", "salla_connection", cid(req));
-  return sallaView(req);
+r10.post("/integrations/:platform/rotate", perm("settings.write"), h(async (req) => {
+  await db.exec(`UPDATE salla_connections SET token=$3 WHERE company_id=$1 AND platform=$2`, [cid(req), plat(req), newSallaToken()]);
+  await audit(req, "ROTATE", "estore_connection", cid(req), { platform: plat(req) });
+  return storeView(req);
 }));
 
-r10.delete("/integrations/salla", perm("settings.write"), h(async (req) => {
-  await db.exec(`DELETE FROM salla_connections WHERE company_id=$1`, [cid(req)]);
-  await audit(req, "DELETE", "salla_connection", cid(req));
+r10.delete("/integrations/:platform", perm("settings.write"), h(async (req) => {
+  await db.exec(`DELETE FROM salla_connections WHERE company_id=$1 AND platform=$2`, [cid(req), plat(req)]);
+  await audit(req, "DELETE", "estore_connection", cid(req), { platform: plat(req) });
   return { ok: true };
 }));
 
-/** Feeds a realistic sample order through the full pipeline (draft only unless `post` is true). */
-r10.post("/integrations/salla/test", perm("settings.write"), h(async (req) => {
-  const conn = await getConnection(cid(req));
+/** Feeds a realistic sample order (in the platform's own payload format) through the full pipeline. */
+r10.post("/integrations/:platform/test", perm("settings.write"), h(async (req) => {
+  const pf = plat(req);
+  const conn = await getConnection(cid(req), pf);
   if (!conn) throw bad("فعّل الربط أولاً");
-  const body = await sampleOrder(cid(req), { cod: !!req.body?.cod, warehouseId: conn.warehouseId });
-  const r = await processEvent(conn, body, { isTest: !req.body?.post, sample: true });
-  return { result: r, view: await sallaView(req) };
+  const body = await sampleOrder(cid(req), { cod: !!req.body?.cod, warehouseId: conn.warehouseId, platform: pf });
+  const r = await processEvent(conn, body, { isTest: !req.body?.post, sample: true, eventHint: "order.create" });
+  return { result: r, view: await storeView(req) };
 }));
 
-r10.post("/integrations/salla/events/:id/retry", perm("settings.write"), h(async (req) => {
-  const conn = await getConnection(cid(req));
+r10.post("/integrations/:platform/events/:id/retry", perm("settings.write"), h(async (req) => {
+  const conn = await getConnection(cid(req), plat(req));
   if (!conn) throw bad("الربط غير مفعل");
   const ev = await db.one(`SELECT * FROM salla_events WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الحدث غير موجود");
   if (ev.status === "DONE") throw conflict("الحدث معالج بنجاح");
   const r = await processEvent(conn, ev.payload, { eventId: ev.id, sample: ev.isTest });
-  await audit(req, "RETRY", "salla_event", ev.id, { result: r.status });
+  await audit(req, "RETRY", "estore_event", ev.id, { result: r.status });
   return r;
 }));
 
-// ── Salla webhook receiver (public; authenticated by the URL token + optional signature) ──
-export const hooks = Router();
-hooks.post("/salla/:token", h(async (req: any) => {
-  const token = String(req.params.token || "");
-  const conn = token.length >= 16 ? await db.maybe(`SELECT * FROM salla_connections WHERE token=$1`, [token]) : null;
-  if (!conn) throw new AppError(404, "رابط غير صحيح", "NOT_FOUND");
-  if (!verifySignature(conn, req.rawBody, req.headers)) throw new AppError(401, "توقيع سلة غير صحيح", "BAD_SIGNATURE");
-  const body = req.body || {};
-  if (!body.event) throw bad("event مطلوب");
-  const r = await processEvent(conn, body);
-  return { ok: true, status: r.status, message: r.message };
+// payouts: platform transfers its collected balance to the bank minus commission (+ VAT on the commission)
+r10.post("/integrations/:platform/payouts", perm("payments.write"), h(async (req) => {
+  const r = await tx((t) => createPayout(t, cid(req), actor(req), { ...req.body, platform: plat(req) }));
+  await audit(req, "CREATE", "estore_payout", r.id, { number: r.number, net: r.net });
+  return r;
 }));
+r10.post("/integrations/:platform/payouts/:id/cancel", perm("payments.write"), h(async (req) => {
+  const r = await tx((t) => cancelPayout(t, cid(req), actor(req), p(req).id));
+  await audit(req, "CANCEL", "estore_payout", p(req).id);
+  return r;
+}));
+
+// ── webhook receivers (public; authenticated by the secret URL token + optional Salla signature) ──
+export const hooks = Router();
+const receive = (platform: string) => h(async (req: any) => {
+  const token = String(req.params.token || "");
+  const conn = token.length >= 16 ? await db.maybe(`SELECT * FROM salla_connections WHERE token=$1 AND platform=$2`, [token, platform]) : null;
+  if (!conn) throw new AppError(404, "رابط غير صحيح", "NOT_FOUND");
+  if (platform === "SALLA" && !verifySignature(conn, req.rawBody, req.headers)) throw new AppError(401, "توقيع سلة غير صحيح", "BAD_SIGNATURE");
+  if (platform === "ZID" && conn.secret && String(req.headers["x-mizan-secret"] || req.query.secret || "") !== conn.secret) throw new AppError(401, "رمز التحقق غير صحيح", "BAD_SIGNATURE");
+  const body = req.body || {};
+  if (platform === "SALLA" && !body.event) throw bad("event مطلوب");
+  const r = await processEvent(conn, body, { eventHint: req.query.event ? String(req.query.event) : null });
+  return { ok: true, status: r.status, message: r.message };
+});
+hooks.post("/salla/:token", receive("SALLA"));
+hooks.post("/zid/:token", receive("ZID"));

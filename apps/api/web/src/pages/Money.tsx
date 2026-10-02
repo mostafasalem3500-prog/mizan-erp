@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch } from "../lib";
 
 // ─── payments (receipt / payment vouchers) ─────────────────────────────────
 export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
   const { can } = useCompanyContext();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
   const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
@@ -111,7 +111,7 @@ function VoucherPrint({ p, direction, onClose }: { p: any; direction: string; on
 // ─── expenses ──────────────────────────────────────────────────────────────
 export function ExpensesPage() {
   const { can } = useCompanyContext();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
   const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());

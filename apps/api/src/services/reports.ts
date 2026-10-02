@@ -360,6 +360,9 @@ export async function vatReturn(t: Db, companyId: string, q: any) {
     [companyId, from, to],
   );
   const exp = await t.rows(`SELECT tax_code, SUM(amount) net, SUM(vat_amount) vat FROM expenses WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3 GROUP BY tax_code`, [companyId, from, to]);
+  // e-store platform commissions (Salla/Zid payouts) carry deductible input VAT
+  const payoutFees = await t.rows(`SELECT 'S' tax_code, COALESCE(SUM(fees),0) net, COALESCE(SUM(fee_vat),0) vat FROM estore_payouts WHERE company_id=$1 AND status='POSTED' AND fee_vat > 0 AND date BETWEEN $2 AND $3`, [companyId, from, to]);
+  exp.push(...payoutFees.filter((r) => Number(r.vat) > 0));
   const assets = await t.rows(
     `SELECT COALESCE(SUM(l.debit - l.credit),0) vat FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
      WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.type='ASSET' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);

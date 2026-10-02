@@ -17,6 +17,7 @@ import { r7 } from "./routes/round7";
 import { r8, v1, portal } from "./routes/round8";
 import { r9 } from "./routes/round9";
 import { r10, hooks } from "./routes/round10";
+import { r12 } from "./routes/round12";
 import { runZatcaSelfTest } from "./zatca/selftest";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
@@ -66,6 +67,7 @@ app.use("/api", r7);
 app.use("/api", r8);
 app.use("/api", r9);
 app.use("/api", r10);
+app.use("/api", r12);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 

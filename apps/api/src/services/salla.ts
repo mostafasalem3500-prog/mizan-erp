@@ -22,15 +22,20 @@ import { nextCode } from "../routes/master";
 import { submitInvoice } from "../zatca/stamp";
 import { reqCtx } from "../lib/context";
 
-const ACTOR = "متجر سلة (تكامل آلي)";
+/** Platforms share one pipeline; Zid payloads are normalised to the Salla shape first (see zidToCommon). */
+export const PLATFORMS: Record<string, { ar: string; channel: string; prefix: string; cust: string; actor: string }> = {
+  SALLA: { ar: "سلة", channel: "ZID", prefix: "salla", cust: "SL", actor: "متجر سلة (تكامل آلي)" },
+  ZID: { ar: "زد", channel: "ZID", prefix: "zid", cust: "ZD", actor: "متجر زد (تكامل آلي)" },
+};
+const PF = (conn: any) => PLATFORMS[conn?.platform || "SALLA"] || PLATFORMS.SALLA;
 const DONE_STATUSES = ["completed", "delivered", "shipped", "delivering"];
 const CANCEL_STATUSES = ["canceled", "cancelled", "refunded", "restored", "restoring"];
 const VAT = 0.15;
 
 export const newSallaToken = () => crypto.randomBytes(18).toString("base64url");
 
-export async function getConnection(companyId: string) {
-  return db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1`, [companyId]);
+export async function getConnection(companyId: string, platform = "SALLA") {
+  return db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1 AND platform=$2`, [companyId, platform]);
 }
 
 /** Webhook authenticity: path token always; when a secret is set, also the Salla signature (or token strategy header). */
@@ -62,11 +67,11 @@ const orderDate = (o: any) => {
 const isCod = (o: any) => /cod|cash/i.test(String(o?.payment_method || o?.payment?.method || ""));
 const orderRef = (o: any) => String(o?.reference_id || o?.id || "");
 
-async function upsertSallaCustomer(t: Db, companyId: string, c: any) {
+async function upsertSallaCustomer(t: Db, companyId: string, c: any, pf = PLATFORMS.SALLA) {
   if (!c) c = {};
-  const name = [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.name || "عميل متجر سلة";
+  const name = [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.name || `عميل متجر ${pf.ar}`;
   const phone = c.mobile ? `${c.mobile_code ? String(c.mobile_code).replace(/^\+?/, "+") : ""}${c.mobile}`.replace(/\s/g, "") : null;
-  const sallaCode = c.id ? `SL-${c.id}` : null;
+  const sallaCode = c.id ? `${pf.cust}-${c.id}` : null;
   let found = sallaCode ? await t.maybe(`SELECT * FROM partners WHERE company_id=$1 AND code=$2`, [companyId, sallaCode]) : null;
   if (!found && phone) found = await t.maybe(`SELECT * FROM partners WHERE company_id=$1 AND is_customer AND (phone=$2 OR phone=$3) LIMIT 1`, [companyId, phone, String(c.mobile || "")]);
   if (!found && c.email) found = await t.maybe(`SELECT * FROM partners WHERE company_id=$1 AND is_customer AND lower(email)=lower($2) LIMIT 1`, [companyId, c.email]);
@@ -76,7 +81,7 @@ async function upsertSallaCustomer(t: Db, companyId: string, c: any) {
   }
   return t.insert("partners", {
     companyId, code: sallaCode || (await nextCode(companyId, "C")), name, isCustomer: true, kind: "INDIVIDUAL",
-    phone, email: c.email || null, city: c.city || null, country: c.country_code || c.country || "SA", notes: "عميل من متجر سلة",
+    phone, email: c.email || null, city: c.city || null, country: c.country_code || c.country || "SA", notes: `عميل من متجر ${pf.ar}`,
   });
 }
 
@@ -110,7 +115,7 @@ async function orderLines(t: Db, companyId: string, conn: any, o: any) {
     const gross = unit * qty;
     const zeroRated = it?.amounts?.tax && amt(it.amounts.tax.amount ?? it.amounts.tax) === 0 && amt(it?.amounts?.tax?.percent) === 0 && it?.amounts?.tax?.percent !== undefined;
     lines.push({
-      productId: prod?.id || null, description: String(it.name || prod?.name || "صنف من متجر سلة") + (it.sku && !prod ? ` (${it.sku})` : ""),
+      productId: prod?.id || null, description: String(it.name || prod?.name || `صنف من متجر ${PF(conn).ar}`) + (it.sku && !prod ? ` (${it.sku})` : ""),
       qty, unitPrice: r2(unit), discountPct: gross > 0 && disc > 0 ? Math.min(100, r2((disc / gross) * 100)) : 0, taxCode: zeroRated ? "Z" : prod?.taxCode || "S",
     });
   }
@@ -122,7 +127,7 @@ async function orderLines(t: Db, companyId: string, conn: any, o: any) {
     for (const l of lines) l.discountPct = r2(100 - (100 - l.discountPct) * (1 - pct / 100));
   }
   const shipping = amt(o?.amounts?.shipping_cost);
-  if (shipping > 0) lines.push({ productId: null, description: `رسوم الشحن — ${o?.shipping?.company || o?.shipping?.courier_name || "سلة"}`, qty: 1, unitPrice: r2(shipping / (1 + VAT)), discountPct: 0, taxCode: "S" });
+  if (shipping > 0) lines.push({ productId: null, description: `رسوم الشحن — ${o?.shipping?.company || o?.shipping?.courier_name || PF(conn).ar}`, qty: 1, unitPrice: r2(shipping / (1 + VAT)), discountPct: 0, taxCode: "S" });
   const codFee = amt(o?.amounts?.cash_on_delivery);
   if (codFee > 0) lines.push({ productId: null, description: "رسوم الدفع عند الاستلام", qty: 1, unitPrice: r2(codFee / (1 + VAT)), discountPct: 0, taxCode: "S" });
   return lines;
@@ -138,9 +143,9 @@ async function settle(t: Db, conn: any, inv: any, o: any) {
   const acc = conn.depositAccountId
     ? await t.one(`SELECT id FROM accounts WHERE id=$1`, [conn.depositAccountId])
     : await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='ESTORE_CLEARING'`, [inv.companyId]);
-  return createPayment(t, inv.companyId, ACTOR, {
+  return createPayment(t, inv.companyId, PF(conn).actor, {
     direction: "IN", partnerId: inv.partnerId, date: inv.date, amount: due, method: isCod(o) ? "CASH" : "BANK", accountId: acc.id,
-    reference: `سلة ${orderRef(o)}`, notes: `تحصيل طلب سلة رقم ${orderRef(o)} — ${o?.payment_method || ""}`, allocations: [{ invoiceId: inv.id, amount: due }], branchId: inv.branchId, isDemo: !!inv.isDemo,
+    reference: `${PF(conn).ar} ${orderRef(o)}`, notes: `تحصيل طلب ${PF(conn).ar} رقم ${orderRef(o)} — ${o?.payment_method || ""}`, allocations: [{ invoiceId: inv.id, amount: due }], branchId: inv.branchId, isDemo: !!inv.isDemo,
   });
 }
 
@@ -154,7 +159,7 @@ async function afterPost(companyId: string, invoiceId: string) {
 
 /** Create (and normally post) the invoice for a Salla order. Idempotent on salla:<order id>. */
 async function handleOrderCreated(conn: any, o: any, opts: { forceDraft?: boolean; sample?: boolean } = {}) {
-  const ext = `salla:${o?.id ?? orderRef(o)}`;
+  const ext = `${PF(conn).prefix}:${o?.id ?? orderRef(o)}`;
   const existing = await db.maybe(`SELECT id, status, number FROM invoices WHERE company_id=$1 AND external_ref=$2 AND kind='INVOICE'`, [conn.companyId, ext]);
   if (existing) return { status: "IGNORED", message: `الطلب مسجل مسبقاً في المستند ${existing.number}`, invoiceId: existing.id };
   if (CANCEL_STATUSES.includes(statusSlug(o))) return { status: "IGNORED", message: "طلب ملغى — لم يُسجل" };
@@ -162,11 +167,11 @@ async function handleOrderCreated(conn: any, o: any, opts: { forceDraft?: boolea
   const shouldPost = !opts.forceDraft && conn.autoPost && (conn.postOnStatus === "created" || DONE_STATUSES.includes(statusSlug(o)));
   // 1) the draft (always succeeds if lines are valid)
   const draft = await tx(async (t) => {
-    const partner = await upsertSallaCustomer(t, conn.companyId, o.customer);
+    const partner = await upsertSallaCustomer(t, conn.companyId, o.customer, PF(conn));
     const lines = await orderLines(t, conn.companyId, conn, o);
-    const d = await saveDraft(t, c, ACTOR, {
-      direction: "SALE", kind: "INVOICE", channel: "SALLA", date: orderDate(o), partnerId: partner.id, warehouseId: conn.warehouseId || null, branchId: conn.branchId || null,
-      notes: `طلب متجر سلة رقم ${orderRef(o)}${o?.payment_method ? ` — الدفع: ${o.payment_method}` : ""}`, pricesIncludeVat: false, lines, isDemo: !!opts.sample, // sample orders are tagged demo → removed with «حذف البيانات التجريبية»
+    const d = await saveDraft(t, c, PF(conn).actor, {
+      direction: "SALE", kind: "INVOICE", channel: PF(conn).channel, date: orderDate(o), partnerId: partner.id, warehouseId: conn.warehouseId || null, branchId: conn.branchId || null,
+      notes: `طلب متجر ${PF(conn).ar} رقم ${orderRef(o)}${o?.payment_method ? ` — الدفع: ${o.payment_method}` : ""}`, pricesIncludeVat: false, lines, isDemo: !!opts.sample, // sample orders are tagged demo → removed with «حذف البيانات التجريبية»
     } as any);
     await t.exec(`UPDATE invoices SET external_ref=$2 WHERE id=$1`, [d.id, ext]);
     return d;
@@ -175,23 +180,23 @@ async function handleOrderCreated(conn: any, o: any, opts: { forceDraft?: boolea
   // 2) post + settle prepaid orders; a posting failure (e.g. stock) leaves the draft for review
   try {
     await tx(async (t) => {
-      const posted = await postInvoice(t, c, draft.id, ACTOR, { overrideCreditLimit: true });
+      const posted = await postInvoice(t, c, draft.id, PF(conn).actor, { overrideCreditLimit: true });
       if (!isCod(o)) await settle(t, conn, posted, o);
     });
   } catch (e: any) {
     return { status: "FAILED", message: `حُفظت كمسودة ولم تُرحّل: ${e.message}`, invoiceId: draft.id };
   }
   const doc = await afterPost(conn.companyId, draft.id);
-  return { status: "DONE", message: `فاتورة ${doc.number} بقيمة ${Number(doc.total).toFixed(2)} ر.س${isCod(o) ? " (دفع عند الاستلام — مستحقة على العميل)" : " (مسددة عبر سلة)"}`, invoiceId: doc.id };
+  return { status: "DONE", message: `فاتورة ${doc.number} بقيمة ${Number(doc.total).toFixed(2)} ر.س${isCod(o) ? " (دفع عند الاستلام — مستحقة على العميل)" : ` (مسددة عبر ${PF(conn).ar})`}`, invoiceId: doc.id };
 }
 
-async function handleOrderStatus(conn: any, o: any) {
-  const ext = `salla:${o?.id ?? orderRef(o)}`;
+async function handleOrderStatus(conn: any, o: any, createOpts: { forceDraft?: boolean; sample?: boolean } = {}) {
+  const ext = `${PF(conn).prefix}:${o?.id ?? orderRef(o)}`;
   const inv = await db.maybe(`SELECT * FROM invoices WHERE company_id=$1 AND external_ref=$2 AND kind='INVOICE'`, [conn.companyId, ext]);
   const slug = statusSlug(o);
   if (!inv) {
     if (CANCEL_STATUSES.includes(slug)) return { status: "IGNORED", message: "طلب ملغى لم يُسجل سابقاً" };
-    return handleOrderCreated(conn, o); // first time we hear of this order
+    return handleOrderCreated(conn, o, createOpts); // first time we hear of this order
   }
   const c = await company(conn.companyId);
   if (CANCEL_STATUSES.includes(slug)) {
@@ -200,19 +205,19 @@ async function handleOrderStatus(conn: any, o: any) {
     if (already) return { status: "IGNORED", message: `مرتجع مسجل مسبقاً ${already.number}`, invoiceId: inv.id, creditNoteId: already.id };
     const full = await getInvoice(db, conn.companyId, inv.id);
     const cn = await tx(async (t) => {
-      const d = await saveDraft(t, c, ACTOR, {
-        direction: "SALE", kind: "CREDIT_NOTE", channel: "SALLA", partnerId: full.partnerId, warehouseId: full.warehouseId, branchId: full.branchId, originId: full.id, invoiceType: full.invoiceType, isDemo: !!full.isDemo,
-        reason: slug === "refunded" ? "استرجاع طلب متجر سلة" : "إلغاء طلب متجر سلة", pricesIncludeVat: false,
+      const d = await saveDraft(t, c, PF(conn).actor, {
+        direction: "SALE", kind: "CREDIT_NOTE", channel: PF(conn).channel, partnerId: full.partnerId, warehouseId: full.warehouseId, branchId: full.branchId, originId: full.id, invoiceType: full.invoiceType, isDemo: !!full.isDemo,
+        reason: slug === "refunded" ? `استرجاع طلب متجر ${PF(conn).ar}` : `إلغاء طلب متجر ${PF(conn).ar}`, pricesIncludeVat: false,
         lines: full.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, uomId: l.uomId || null })),
       } as any);
-      const posted = await postInvoice(t, c, d.id, ACTOR, {});
+      const posted = await postInvoice(t, c, d.id, PF(conn).actor, {});
       // money already collected for the order goes back through the same clearing account
       const cnOpen = r2(D(posted.total).minus(posted.amountPaid || 0));
       const refund = Math.min(Number(full.amountPaid), cnOpen);
       if (refund > 0.001) {
         const acc = conn.depositAccountId || (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='ESTORE_CLEARING'`, [conn.companyId])).id;
-        const memo = `رد مبلغ طلب سلة ${orderRef(o)} — ${posted.number}`;
-        await post(t, conn.companyId, { date: posted.date, type: "PAYMENT", sourceType: "INVOICE", sourceId: posted.id, branchId: full.branchId, reference: posted.number, memo, createdBy: ACTOR, isDemo: !!full.isDemo, lines: [
+        const memo = `رد مبلغ طلب ${PF(conn).ar} ${orderRef(o)} — ${posted.number}`;
+        await post(t, conn.companyId, { date: posted.date, type: "PAYMENT", sourceType: "INVOICE", sourceId: posted.id, branchId: full.branchId, reference: posted.number, memo, createdBy: PF(conn).actor, isDemo: !!full.isDemo, lines: [
           { key: "AR", debit: refund, partnerId: full.partnerId, description: memo }, { account: acc, credit: refund, description: memo },
         ] });
         await applySettlement(t, posted.id, refund);
@@ -225,7 +230,7 @@ async function handleOrderStatus(conn: any, o: any) {
   if (DONE_STATUSES.includes(slug)) {
     let msg = "";
     if (inv.status === "DRAFT" && conn.autoPost) {
-      try { await tx((t) => postInvoice(t, c, inv.id, ACTOR, { overrideCreditLimit: true })); } catch (e: any) { return { status: "FAILED", message: `تعذر ترحيل المسودة: ${e.message}`, invoiceId: inv.id }; }
+      try { await tx((t) => postInvoice(t, c, inv.id, PF(conn).actor, { overrideCreditLimit: true })); } catch (e: any) { return { status: "FAILED", message: `تعذر ترحيل المسودة: ${e.message}`, invoiceId: inv.id }; }
       await afterPost(conn.companyId, inv.id);
       msg = "رُحّلت الفاتورة عند اكتمال الطلب. ";
     }
@@ -254,11 +259,61 @@ async function handleProduct(conn: any, p: any) {
 }
 
 /** Dispatches one webhook payload; logs the outcome. Never throws for business errors (Salla would retry forever). */
-export async function processEvent(conn: any, body: any, opts: { eventId?: string; isTest?: boolean; sample?: boolean } = {}) {
+/** Parses Zid money values: numbers, "201.86", "201.86 SAR", {value}, {amount}. */
+const zn = (v: any): number => {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return v;
+  if (typeof v === "object") return zn(v.value ?? v.amount ?? 0);
+  const m = String(v).replace(/,/g, "").match(/-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) : 0;
+};
+const ZID_STATUS: Record<string, string> = { new: "under_review", preparing: "in_progress", ready: "in_progress", indelivery: "delivering", delivered: "delivered", completed: "completed", cancelled: "canceled", canceled: "canceled", reversed: "refunded", refunded: "refunded", "reverse_in_progress": "in_progress" };
+
+/**
+ * Zid → common (Salla-shaped) payload. Zid posts the order object itself (optionally wrapped in {order}/{data})
+ * per subscribed topic; the topic comes from ?event= on the target URL when present. Every order event is an
+ * upsert: unknown order → invoice, known order → status transition (post / collect COD / credit note).
+ */
+export function zidToCommon(body: any, eventHint?: string | null) {
+  const o = body?.order || body?.data || body || {};
+  const topic = String(eventHint || body?.event || "").toLowerCase();
+  if (topic.startsWith("product.") || (!o.products && (o.sku || o.price !== undefined) && !o.order_status)) {
+    return { event: topic === "product.create" ? "product.created" : "product.updated", data: { sku: o.sku, name: typeof o.name === "object" ? o.name.ar || o.name.en : o.name, price: { amount: zn(o.price) }, type: o.product_class || o.type } };
+  }
+  const code = String(o.order_status?.code || o.order_status?.slug || o.status || "new").toLowerCase();
+  const invoice: any[] = Array.isArray(o.payment?.invoice) ? o.payment.invoice : [];
+  const inv = (re: RegExp) => invoice.filter((x) => re.test(String(x.code || ""))).reduce((a, x) => a + zn(x.value ?? x.value_string), 0);
+  const shipping = o.shipping?.method?.price !== undefined ? zn(o.shipping.method.price) : inv(/shipping/i);
+  const discount = Math.abs(inv(/discount|coupon/i)) || zn(o.coupon?.discount) || 0;
+  const items = (Array.isArray(o.products) ? o.products : []).map((p: any) => {
+    const qty = zn(p.quantity) || 1;
+    const excl = p.price_without_tax !== undefined ? zn(p.price_without_tax) : p.net_price !== undefined ? zn(p.net_price) : null;
+    return {
+      name: typeof p.name === "object" ? p.name.ar || p.name.en : p.name, sku: p.sku, quantity: qty, product_type: p.product_class,
+      ...(excl !== null ? { amounts: { price_without_tax: { amount: excl } } } : { price: { amount: zn(p.price ?? p.price_string) } }),
+    };
+  });
+  const cust = o.customer || {};
+  return {
+    event: "order.status.updated",
+    data: {
+      id: o.id, reference_id: o.code || o.id, date: { date: o.created_at }, status: { slug: ZID_STATUS[code] || "under_review", name: o.order_status?.name || code },
+      payment_method: String(o.payment?.method?.code || o.payment?.method?.name || o.payment_method || ""),
+      customer: { id: cust.id, first_name: cust.name, mobile: cust.mobile, email: cust.email, city: cust.city?.name || o.shipping?.address?.city?.name },
+      shipping: { company: o.shipping?.method?.name || "زد" },
+      amounts: { shipping_cost: { amount: shipping }, cash_on_delivery: { amount: inv(/^cod|cash_on_delivery/i) }, discounts: discount ? [{ discount: { amount: discount } }] : [] },
+      items,
+    },
+  };
+}
+
+export async function processEvent(conn: any, rawBody: any, opts: { eventId?: string; isTest?: boolean; sample?: boolean; eventHint?: string | null } = {}) {
+  const body = conn.platform === "ZID" ? zidToCommon(rawBody, opts.eventHint || rawBody?.__event) : rawBody;
   const event = String(body?.event || "unknown");
   const data = body?.data || {};
   let ev = opts.eventId ? await db.one(`SELECT * FROM salla_events WHERE id=$1`, [opts.eventId]) : null;
-  if (!ev) ev = await db.insert("salla_events", { companyId: conn.companyId, event, sallaId: data?.id ? String(data.id) : null, reference: data?.reference_id ? String(data.reference_id) : data?.sku || null, payload: body, isTest: !!opts.isTest || !!opts.sample });
+  const eventLabel = conn.platform === "ZID" ? String(opts.eventHint || rawBody?.__event || event) : event;
+  if (!ev) ev = await db.insert("salla_events", { companyId: conn.companyId, platform: conn.platform || "SALLA", event: eventLabel, sallaId: data?.id ? String(data.id) : null, reference: data?.reference_id ? String(data.reference_id) : data?.sku || null, payload: conn.platform === "ZID" ? { ...rawBody, __event: opts.eventHint || rawBody?.__event || null } : rawBody, isTest: !!opts.isTest || !!opts.sample });
   else await db.exec(`UPDATE salla_events SET attempts=attempts+1 WHERE id=$1`, [ev.id]);
   let r: any;
   try {
@@ -268,7 +323,7 @@ export async function processEvent(conn: any, body: any, opts: { eventId?: strin
       if (event === "order.updated" || event === "order.status.updated" || event === "order.refunded" || event === "order.cancelled" || event === "order.deleted") {
         if (event === "order.refunded") data.status = { slug: "refunded", name: "مسترجع" };
         if (event === "order.cancelled" || event === "order.deleted") data.status = { slug: "canceled", name: "ملغي" };
-        return handleOrderStatus(conn, data);
+        return handleOrderStatus(conn, data, { forceDraft: !!opts.isTest, sample: !!opts.sample || !!opts.isTest });
       }
       if (event === "product.created" || event === "product.updated") return handleProduct(conn, data);
       if (event === "app.store.authorize" || event === "app.installed") return { status: "IGNORED", message: "حدث تفويض التطبيق" };
@@ -280,12 +335,12 @@ export async function processEvent(conn: any, body: any, opts: { eventId?: strin
   await db.exec(`UPDATE salla_events SET status=$2, message=$3, invoice_id=$4, credit_note_id=$5, processed_at=now() WHERE id=$1`, [ev.id, r.status, r.message || null, r.invoiceId || null, r.creditNoteId || null]);
   // an earlier failure on the same order that this event has now resolved stops showing as pending work
   if (r.status === "DONE" && r.invoiceId) await db.exec(`UPDATE salla_events SET status='IGNORED', message=message || ' — عولج لاحقاً' WHERE company_id=$1 AND invoice_id=$2 AND status='FAILED' AND id<>$3`, [conn.companyId, r.invoiceId, ev.id]);
-  await db.exec(`UPDATE salla_connections SET last_event_at=now() WHERE company_id=$1`, [conn.companyId]);
+  await db.exec(`UPDATE salla_connections SET last_event_at=now() WHERE company_id=$1 AND platform=$2`, [conn.companyId, conn.platform || "SALLA"]);
   return { id: ev.id, event, ...r };
 }
 
 /** A realistic sample order built from the company's own products — lets the merchant see the full flow before going live. */
-export async function sampleOrder(companyId: string, opts: { cod?: boolean; warehouseId?: string | null } = {}) {
+export async function sampleOrder(companyId: string, opts: { cod?: boolean; warehouseId?: string | null; platform?: string } = {}) {
   // products that can actually ship from the store's warehouse (so the sample posts cleanly)
   let prods = await db.rows(
     `SELECT p.sku, p.name, p.sale_price FROM products p JOIN stock_balances b ON b.product_id=p.id AND b.warehouse_id=COALESCE($2::uuid, (SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1))
@@ -298,6 +353,16 @@ export async function sampleOrder(companyId: string, opts: { cod?: boolean; ware
     return { id: id + i, name: p.name, sku: p.sku, quantity: q, product_type: "product", amounts: { price_without_tax: { amount: unit, currency: "SAR" }, total_discount: { amount: 0 }, tax: { percent: "15.00", amount: { amount: r2(unit * q * VAT) } }, total: { amount: r2(unit * q * (1 + VAT)) } } };
   });
   const sub = items.reduce((a, i) => a + i.amounts.price_without_tax.amount * i.quantity, 0);
+  if (opts.platform === "ZID") {
+    return {
+      id, code: `ZD${String(id).slice(-6)}`, created_at: `${today()} 10:00:00`, currency_code: "SAR",
+      order_status: { code: "new", name: "جديد" },
+      payment: { method: { code: opts.cod ? "zid_cod" : "zid_mada", name: opts.cod ? "الدفع عند الاستلام" : "مدى" }, invoice: [{ code: "sub_totals", value: r2(sub * 1.15) }, { code: "shipping", value: 25 }, { code: "total", value: r2(sub * 1.15 + 25) }] },
+      customer: { id: 800001, name: "عميل تجريبي (زد)", mobile: "966500000002", email: "zid.test@example.com", city: { name: "جدة" } },
+      shipping: { method: { name: "أرامكس", price: 25 } },
+      products: items.map((i) => ({ sku: i.sku, name: i.name, quantity: i.quantity, price: r2(i.amounts.price_without_tax.amount * 1.15), product_class: "physical" })),
+    };
+  }
   return {
     event: "order.created", merchant: 0, created_at: new Date().toISOString(),
     data: {

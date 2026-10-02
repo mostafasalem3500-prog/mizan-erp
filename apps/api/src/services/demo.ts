@@ -45,7 +45,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 9;
+export const DEMO_VERSION = 10;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -369,6 +369,7 @@ export async function purgeDemo(companyId: string) {
   await tx(async (t) => {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM estore_payouts WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM stock_lots WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);
     await t.exec(`UPDATE partners SET price_list_id=NULL WHERE company_id=$1 AND price_list_id IN (SELECT id FROM price_lists WHERE company_id=$1 AND is_demo)`, [companyId]);
     await t.exec(`DELETE FROM price_lists WHERE company_id=$1 AND is_demo`, [companyId]);

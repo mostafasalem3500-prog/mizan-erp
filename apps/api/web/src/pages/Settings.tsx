@@ -1,11 +1,11 @@
 import { CurrenciesTab } from "./Pricing";
 import { IntegrationsTab } from "./Integrations";
-import { BranchesTab, SallaTab, BranchSelect } from "./Branches";
+import { BranchesTab, SallaTab, ZidTab, BranchSelect } from "./Branches";
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, fmtDate, fmtDT, fileToDataUrl, confirmDlg, ZATCA_AR, session } from "../lib";
 
-const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "currencies", label: "العملات" }, { key: "branches", label: "الفروع والمستودعات" }, { key: "integrations", label: "التكامل والربط (API)" }, { key: "salla", label: "متجر سلة" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
+const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "currencies", label: "العملات" }, { key: "branches", label: "الفروع والمستودعات" }, { key: "integrations", label: "التكامل والربط (API)" }, { key: "salla", label: "متجر سلة" }, { key: "zid", label: "متجر زد" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
 
 function MailStatus() {
   const { data } = useFetch("/mail/status");
@@ -25,6 +25,7 @@ export function SettingsPage() {
       {tab === "integrations" && <IntegrationsTab />}
       {tab === "branches" && <BranchesTab />}
       {tab === "salla" && <SallaTab />}
+      {tab === "zid" && <ZidTab />}
       {tab === "users" && <Users />}
       {tab === "license" && <License />}
       {tab === "demo" && <DemoData />}
