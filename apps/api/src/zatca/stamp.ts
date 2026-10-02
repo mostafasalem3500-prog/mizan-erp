@@ -64,7 +64,7 @@ export async function stampInvoice(t: Db, company: any, invoiceId: string) {
   inv.partner = inv.partnerId ? await t.maybe(`SELECT * FROM partners WHERE id=$1`, [inv.partnerId]) : null;
   const origin = inv.originId ? await t.maybe(`SELECT number FROM invoices WHERE id=$1`, [inv.originId]) : null;
   const { date, time } = tsOf(inv);
-  const ts = `${date}T${time}Z`;
+  const ts = `${date}T${time}`;
   const qrFields = { sellerName: company.nameAr, vat: company.vatNumber || "", timestamp: ts, total: Number(inv.total).toFixed(2), vatTotal: Number(inv.vatTotal).toFixed(2) };
 
   if (Number(cfg.phase) < 2) {
@@ -114,7 +114,7 @@ export async function submitInvoice(company: any, invoiceId: string) {
     let xml = inv.xml;
     if (!xml.includes("<ds:SignatureValue>")) {
       const { date, time } = tsOf(inv);
-      const s = signInvoice(xml, cert, cfg.privateKey, { sellerName: company.nameAr, vat: company.vatNumber || "", timestamp: `${date}T${time}Z`, total: Number(inv.total).toFixed(2), vatTotal: Number(inv.vatTotal).toFixed(2) });
+      const s = signInvoice(xml, cert, cfg.privateKey, { sellerName: company.nameAr, vat: company.vatNumber || "", timestamp: `${date}T${time}`, total: Number(inv.total).toFixed(2), vatTotal: Number(inv.vatTotal).toFixed(2) });
       xml = s.xml;
       await t.exec(`UPDATE invoices SET qr=$2, xml=$3 WHERE id=$1`, [invoiceId, s.qr, xml]);
     }

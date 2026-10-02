@@ -84,7 +84,7 @@ export async function runZatcaSelfTest(company: any, opts: { env?: "SANDBOX" | "
       };
       const doc: SelfTestDoc = { name: d.name, typeCode: d.typeCode, simplified: d.simplified, status: "", ok: false, errors: [], warnings: [] };
       try {
-        const signed = signInvoice(buildInvoiceXml(ubl), comp.cert, key, { sellerName: supplier.name, vat: supplier.vat!, timestamp: `${date}T${time}Z`, total: ubl.total.toFixed(2), vatTotal: vat.toFixed(2) });
+        const signed = signInvoice(buildInvoiceXml(ubl), comp.cert, key, { sellerName: supplier.name, vat: supplier.vat!, timestamp: `${date}T${time}`, total: ubl.total.toFixed(2), vatTotal: vat.toFixed(2) });
         pih = signed.hash;
         const r = await complianceCheck(env, comp.cert, comp.secret, signed.xml, signed.hash, ubl.uuid);
         const v = r.data?.validationResults || {};
