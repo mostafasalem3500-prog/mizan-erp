@@ -14,6 +14,7 @@ import { r4 } from "./routes/round4";
 import { r5 } from "./routes/round5";
 import { r6 } from "./routes/round6";
 import { r7 } from "./routes/round7";
+import { r8, v1, portal } from "./routes/round8";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
@@ -32,6 +33,8 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 app.use("/api/public", pub);
+app.use("/api/public", portal);
+app.use("/api/v1", v1);
 app.use("/api/auth", auth);
 app.use("/api/admin", admin);
 app.use("/api", master);
@@ -42,6 +45,7 @@ app.use("/api", r4);
 app.use("/api", r5);
 app.use("/api", r6);
 app.use("/api", r7);
+app.use("/api", r8);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 

@@ -12,7 +12,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//, /^\/p\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/p\//, /^\/c\//],
         runtimeCaching: [
           {
             // POS needs these while offline: catalog, categories, session, identity

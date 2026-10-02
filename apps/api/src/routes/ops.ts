@@ -14,6 +14,7 @@ import * as rep from "../services/reports";
 import { reverse } from "../accounting/engine";
 import { loadDemo, purgeDemo } from "../services/demo";
 import { ensureZatcaConfig, submitInvoice } from "../zatca/stamp";
+import { emit, invoiceDto } from "../services/integrations";
 import { generateKeyPair, generateCsr } from "../zatca/crypto";
 import { issueComplianceCsid, issueProductionCsid, complianceCheck } from "../zatca/api";
 
@@ -69,7 +70,9 @@ ops.post("/invoices/:id/post", dyn(true), h(async (req) => {
   if (override) await audit(req, "CREDIT_LIMIT_OVERRIDE", "invoice", doc.id, { number: doc.number });
   await audit(req, "POST", "invoice", doc.id, { number: doc.number, total: doc.total, isDemo: doc.isDemo });
   if (doc.direction === "SALE" && doc.zatcaStatus === "PENDING") submitInvoice(req.company, doc.id).catch(() => undefined);
-  return inv.getInvoice(db, cid(req), doc.id);
+  const full = await inv.getInvoice(db, cid(req), doc.id);
+  if (!full.isDemo) emit(cid(req), "invoice.posted", invoiceDto(full));
+  return full;
 }));
 ops.post("/invoices/:id/convert", dyn(true), h(async (req) => tx((t) => inv.convert(t, req.company, p(req).id, actor(req), req.body.kind || "INVOICE"))));
 ops.post("/invoices/:id/credit-note", dyn(true), h(async (req) => {
@@ -105,7 +108,7 @@ ops.get("/payments", perm("payments.read"), h(async (req) => {
   return db.rows(`SELECT p.*, pr.name AS partner_name, a.name_ar AS account_name FROM payments p JOIN partners pr ON pr.id=p.partner_id JOIN accounts a ON a.id=p.account_id WHERE ${where.join(" AND ")} ORDER BY p.date DESC, p.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
 ops.get("/payments/open-invoices/:partnerId", perm("payments.read"), h(async (req) => db.rows(`SELECT id, number, kind, date, due_date, total, amount_paid, total-amount_paid due, currency, exchange_rate, fc_total, fc_paid, COALESCE(fc_total,0)-fc_paid fc_due FROM invoices WHERE company_id=$1 AND partner_id=$2 AND direction=$3 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid>0.001 ORDER BY date`, [cid(req), p(req).partnerId, req.query.direction === "OUT" ? "PURCHASE" : "SALE"])));
-ops.post("/payments", perm("payments.write"), h(async (req) => { const p = await tx((t) => createPayment(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "payment", p.id, { number: p.number, amount: p.amount }); return p; }));
+ops.post("/payments", perm("payments.write"), h(async (req) => { const p = await tx((t) => createPayment(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "payment", p.id, { number: p.number, amount: p.amount }); emit(cid(req), "payment.created", { id: p.id, number: p.number, direction: p.direction, partnerId: p.partnerId, amount: Number(p.amount), currency: p.currency, date: p.date }); return p; }));
 ops.post("/payments/:id/cancel", perm("payments.write"), h(async (req) => { const r = await tx((t) => cancelPayment(t, cid(req), actor(req), p(req).id, req.body?.date)); await audit(req, "CANCEL", "payment", p(req).id); return r; }));
 
 // ─── expenses ──────────────────────────────────────────────────────────────
@@ -162,6 +165,7 @@ ops.get("/pos/session/:id/report", perm("pos.use"), h(async (req) => {
 ops.post("/pos/sale", perm("pos.use"), h(async (req) => {
   const r = await tx((t) => pos.posSale(t, req.company, { id: req.auth.userId, name: actor(req) }, req.body));
   if (r.zatcaStatus === "PENDING") submitInvoice(req.company, r.id).catch(() => undefined);
+  if (!(r as any).replayed) emit(cid(req), "pos.sale", invoiceDto(r));
   return r;
 }));
 ops.post("/pos/return", perm("pos.use"), h(async (req) => {

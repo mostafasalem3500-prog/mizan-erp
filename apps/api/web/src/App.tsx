@@ -14,6 +14,7 @@ import { BudgetsPage } from "./pages/Budgets";
 import { PriceListsPage } from "./pages/Pricing";
 import { LabelsPage, ReorderPage } from "./pages/Stock";
 import { CollectionsPage } from "./pages/Collections";
+import { CustomerPortal } from "./pages/Integrations";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -56,6 +57,7 @@ const NAV = [
   { group: "الإعدادات" },
   { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read" },
   { to: "/settings", ic: "⚙", label: "إعدادات المنشأة", perm: "settings.read" },
+  { to: "/settings/integrations", ic: "🔌", label: "التكامل والربط (API)", perm: "settings.read" },
 ];
 
 const ROLE_PERMS: Record<string, string[]> = {
@@ -82,6 +84,7 @@ export function App() {
   useEffect(() => { if (session.token) reload(); const h = () => { setMe(null); nav("/login"); }; window.addEventListener("mz-logout", h); return () => window.removeEventListener("mz-logout", h); }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
   if (loc.pathname.startsWith("/p/")) return <Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes>;
+  if (loc.pathname.startsWith("/c/")) return <Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
   if (!me) return <Routes><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);

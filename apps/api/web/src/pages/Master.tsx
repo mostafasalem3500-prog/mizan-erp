@@ -1,3 +1,4 @@
+import { PortalLinkBtn } from "./Integrations";
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ImportModal } from "./Import";
@@ -75,7 +76,7 @@ export function StatementModal({ partner, role, onClose }: { partner: any; role:
   const [to, setTo] = useState(today());
   const { data } = useFetch(`/reports/statement/${partner.id}${q({ role, from, to })}`);
   return (
-    <Modal wide title={`كشف حساب: ${partner.name}`} onClose={onClose} footer={<><PrintBtn />{data && <ExportBtn name={`كشف حساب ${partner.name}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, البيان: r.memo, مدين: r.debit, دائن: r.credit, الرصيد: r.balance }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
+    <Modal wide title={`كشف حساب: ${partner.name}`} onClose={onClose} footer={<><PortalLinkBtn partner={partner} /><div className="grow" /><PrintBtn />{data && <ExportBtn name={`كشف حساب ${partner.name}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, البيان: r.memo, مدين: r.debit, دائن: r.credit, الرصيد: r.balance }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
       <div className="no-print mb"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
       {!data ? <Loading /> : (
         <div className="print-doc" style={{ padding: 0 }}>

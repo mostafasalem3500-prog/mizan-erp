@@ -88,7 +88,7 @@ master.delete(
   }),
 );
 
-async function nextCode(companyId: string, prefix: string) {
+export async function nextCode(companyId: string, prefix: string) {
   const r = await db.one(`INSERT INTO sequences(company_id, key, next) VALUES ($1,$2,2) ON CONFLICT (company_id, key) DO UPDATE SET next=sequences.next+1 RETURNING next-1 AS n`, [companyId, `CODE-${prefix}`]);
   return `${prefix}-${String(r.n).padStart(4, "0")}`;
 }

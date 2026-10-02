@@ -1,9 +1,10 @@
 import { CurrenciesTab } from "./Pricing";
+import { IntegrationsTab } from "./Integrations";
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, fmtDate, fmtDT, fileToDataUrl, confirmDlg, ZATCA_AR, session } from "../lib";
 
-const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "currencies", label: "العملات" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
+const TABS = [{ key: "company", label: "بيانات المنشأة" }, { key: "invoice", label: "الفاتورة والطباعة" }, { key: "currencies", label: "العملات" }, { key: "integrations", label: "التكامل والربط (API)" }, { key: "users", label: "المستخدمون والصلاحيات" }, { key: "license", label: "الاشتراك والترخيص" }, { key: "demo", label: "البيانات التجريبية" }, { key: "backup", label: "النسخ الاحتياطي" }, { key: "audit", label: "سجل التدقيق" }];
 
 function MailStatus() {
   const { data } = useFetch("/mail/status");
@@ -20,6 +21,7 @@ export function SettingsPage() {
       {tab === "company" && <CompanyForm />}
       {tab === "invoice" && <InvoiceSettings />}
       {tab === "currencies" && <CurrenciesTab />}
+      {tab === "integrations" && <IntegrationsTab />}
       {tab === "users" && <Users />}
       {tab === "license" && <License />}
       {tab === "demo" && <DemoData />}
