@@ -19,6 +19,7 @@ import { r9 } from "./routes/round9";
 import { r10, hooks } from "./routes/round10";
 import { r12 } from "./routes/round12";
 import { runZatcaSelfTest } from "./zatca/selftest";
+import { runAccountingSelfCheck } from "./services/selfcheck";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
@@ -98,6 +99,12 @@ migrate()
   .then(() => {
     app.listen(port, "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
     seedDemoAccount().catch((e) => console.error("[demo-account]", e));
+    // every boot re-proves the accounting engine on a throw-away company (rolled back, nothing stored)
+    runAccountingSelfCheck().then((r) => {
+      console.log(`[selfcheck] ${r.ok ? "PASS" : "FAIL"} ${r.passed}/${r.passed + r.failed} in ${r.durationMs}ms`);
+      for (const c of r.checks.filter((x) => !x.ok)) console.log(`[selfcheck] ✘ [${c.group}] ${c.name} expected=${JSON.stringify(c.expected)} actual=${JSON.stringify(c.actual)}`);
+      if (r.error) console.log(`[selfcheck] error ${r.error}`);
+    }).catch((e) => console.error("[selfcheck]", e));
     if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
   })

@@ -3,6 +3,8 @@ import { Router } from "express";
 import { db } from "../db/pool";
 import { h } from "../lib/core";
 import { authenticate, perm, cid, can } from "../lib/auth";
+import { runAccountingSelfCheck } from "../services/selfcheck";
+import { AppError } from "../lib/core";
 
 export const r12 = Router();
 r12.use(authenticate);
@@ -46,4 +48,12 @@ r12.get("/search", perm("dashboard.read"), h(async (req) => {
   const q = raw.toLowerCase();
   out.sort((a, b) => Number(b.title.toLowerCase() === q) - Number(a.title.toLowerCase() === q));
   return { results: out };
+}));
+
+/** Runs the scripted dummy-company accounting cycle (rolled back) and returns every assertion. */
+let selfcheckRunning = false;
+r12.post("/selfcheck", perm("reports.read"), h(async () => {
+  if (selfcheckRunning) throw new AppError(429, "الفحص قيد التشغيل — حاول بعد ثوانٍ", "BUSY");
+  selfcheckRunning = true;
+  try { return await runAccountingSelfCheck(); } finally { selfcheckRunning = false; }
 }));

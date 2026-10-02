@@ -45,7 +45,7 @@ export function ReportsPage() {
       {tab === "salespersons" && <Salespersons from={from} to={to} />}
       {tab === "zakat" && <ZakatReport from={from} to={to} />}
       {tab === "statements" && <Statements />}
-      {tab === "integrity" && <Integrity />}
+      {tab === "integrity" && <><Integrity /><AccountingSelfCheck /></>}
     </div>
   );
 }
@@ -270,6 +270,27 @@ function Integrity() {
         <div className="ok-list card">{d.checks.map((c: any, i: number) => <div key={i} className="item"><span style={{ fontSize: 20 }}>{c.ok ? "✅" : "❌"}</span><div className="grow">{c.name}{c.note && <div className="small muted">{c.note}</div>}</div><span className="num">{money(c.a)}</span><span className="muted">=</span><span className="num">{money(c.b)}</span>{!c.ok && <span className="badge red">فرق {money(c.a - c.b)}</span>}</div>)}</div>
         <button className="btn sm mt no-print" onClick={reload}>إعادة الفحص</button>
       </div>
+    </div>
+  );
+}
+
+/** Scripted dummy-company cycle with hand-computed expectations (runs in a rolled-back transaction). */
+function AccountingSelfCheck() {
+  const { run, busy } = useAction();
+  const [r, setR] = useState<any>(null);
+  const [onlyFail, setOnlyFail] = useState(false);
+  const groups = r ? [...new Set(r.checks.map((c: any) => c.group))] as string[] : [];
+  const fmt = (v: any) => (typeof v === "number" ? money(v) : v === true ? "نعم" : v === false ? "لا" : String(v));
+  return (
+    <div className="card"><div className="card-h"><div><h3>اختبار الدورة المحاسبية بحسابات وهمية</h3><div className="small muted">يُنشئ شركة وهمية مؤقتة ويُمرّر عليها سنة كاملة من الحركات عبر نفس محرك البرنامج، ثم يقارن كل رصيد وتقرير بأرقام محسوبة يدوياً، ويُلغي كل شيء في النهاية دون المساس ببياناتك.</div></div>
+      <button className="btn primary sm no-print" disabled={busy} onClick={() => run(async () => setR(await api("/selfcheck", { body: {} })))}>{busy ? "جارٍ الاختبار…" : r ? "إعادة الاختبار" : "تشغيل الاختبار"}</button></div>
+      {r && <div className="card-b">
+        <div className={"alert " + (r.ok ? "ok" : "err")} style={{ marginTop: 0 }}>{r.ok ? `✓ نجحت كل الفحوص (${r.passed}) — القيود والمبيعات والمشتريات والموردون والعملاء والمخزون والإقرار والحسابات الختامية والإقفال متطابقة` : `✗ ${r.failed} فحص فاشل من ${r.passed + r.failed}`}{r.error && <div className="small">خطأ: {r.error}</div>} <span className="small muted">({r.durationMs} مللي ثانية)</span></div>
+        <details className="mb"><summary className="small" style={{ cursor: "pointer" }}>سيناريو الحركات الوهمية ({r.scenario.length} خطوة)</summary><ol className="small" style={{ margin: "6px 0", paddingInlineStart: 20, lineHeight: 1.9 }}>{r.scenario.map((x: string, i: number) => <li key={i}>{x.replace(/^\d+\)\s*/, "")}</li>)}</ol></details>
+        <label className="check small no-print"><input type="checkbox" checked={onlyFail} onChange={(e) => setOnlyFail(e.target.checked)} /> إظهار الفاشل فقط</label>
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th style={{ width: 28 }} /><th>الفحص</th><th className="n">المتوقع (محسوب يدوياً)</th><th className="n">الفعلي من البرنامج</th></tr></thead>
+          <tbody>{groups.map((g) => { const rows = r.checks.filter((c: any) => c.group === g && (!onlyFail || !c.ok)); if (!rows.length) return null; return <React.Fragment key={g}><tr className="group"><td colSpan={4}>{g} <span className="small muted">({rows.filter((c: any) => c.ok).length}/{rows.length})</span></td></tr>{rows.map((c: any, i: number) => <tr key={i}><td>{c.ok ? "✅" : "❌"}</td><td>{c.name}</td><td className="n">{fmt(c.expected)}</td><td className="n small">{fmt(c.actual)}</td></tr>)}</React.Fragment>; })}</tbody></table></div>
+      </div>}
     </div>
   );
 }

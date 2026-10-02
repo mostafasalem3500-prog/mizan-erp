@@ -79,10 +79,12 @@ export const addDays = (s: string, n: number) => {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 };
+/** Calendar month shift that clamps to the target month's last day (31 Jan + 1 → 28/29 Feb, never 3 Mar). */
 export const addMonths = (s: string, n: number) => {
-  const d = new Date(s + "T00:00:00Z");
-  d.setUTCMonth(d.getUTCMonth() + n);
-  return d.toISOString().slice(0, 10);
+  const y = Number(s.slice(0, 4)), m = Number(s.slice(5, 7)) - 1 + n, day = Number(s.slice(8, 10));
+  const ty = y + Math.floor(m / 12), tm = ((m % 12) + 12) % 12;
+  const last = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(ty, tm, Math.min(day, last))).toISOString().slice(0, 10);
 };
 export const monthEnd = (s: string) => {
   const d = new Date(s.slice(0, 7) + "-01T00:00:00Z");

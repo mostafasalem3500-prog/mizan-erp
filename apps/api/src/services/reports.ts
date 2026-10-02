@@ -103,9 +103,10 @@ export async function journalBook(t: Db, companyId: string, q: any) {
   return { from, to, total: total.c, rows: entries };
 }
 
-async function balancesByType(t: Db, companyId: string, from: string, to: string, branchId?: string) {
+async function balancesByType(t: Db, companyId: string, from: string, to: string, branchId?: string, excludeClosing = false) {
   const params: any[] = [companyId, from, to];
-  const bc = branchCond({ branchId }, params);
+  // the income statement must show the year's revenue & expenses even after the year-end closing entry zeroed them
+  const bc = branchCond({ branchId }, params) + (excludeClosing ? " AND e.type <> 'CLOSING'" : "");
   return t.rows(
     `SELECT a.id, a.code, a.name_ar, a.type, a.subtype, a.parent_id, COALESCE(SUM(l.debit - l.credit),0) bal
      FROM accounts a JOIN journal_lines l ON l.account_id=a.id JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'
@@ -124,7 +125,7 @@ function group(rows: any[], subtypes: string[], sign: 1 | -1) {
 
 export async function incomeStatement(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
-  const rows = (await balancesByType(t, companyId, from, to, q.branchId)).filter((r) => r.type === "REVENUE" || r.type === "EXPENSE");
+  const rows = (await balancesByType(t, companyId, from, to, q.branchId, true)).filter((r) => r.type === "REVENUE" || r.type === "EXPENSE");
   const sales = group(rows, ["SALES"], -1);
   const returns = group(rows, ["SALES_RETURNS"], -1);
   const netSales = r2(sales.total + returns.total);

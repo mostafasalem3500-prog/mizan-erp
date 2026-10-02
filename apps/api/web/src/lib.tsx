@@ -55,7 +55,13 @@ export const today = () => { const d = new Date(Date.now() + 3 * 3600 * 1000); r
 export const fmtDate = (d: any) => (d ? String(d).slice(0, 10) : "");
 export const fmtDT = (d: any) => (d ? new Date(d).toLocaleString("ar-SA-u-nu-latn", { dateStyle: "medium", timeStyle: "short" }) : "");
 export const monthStart = () => today().slice(0, 7) + "-01";
-export const addMonths = (s: string, n: number) => { const d = new Date(s + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+/** Calendar month shift that clamps to the target month's last day (31 Jan + 1 → 28/29 Feb, never 3 Mar). */
+export const addMonths = (s: string, n: number) => {
+  const y = Number(s.slice(0, 4)), m = Number(s.slice(5, 7)) - 1 + n, day = Number(s.slice(8, 10));
+  const ty = y + Math.floor(m / 12), tm = ((m % 12) + 12) % 12;
+  const last = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(ty, tm, Math.min(day, last))).toISOString().slice(0, 10);
+};
 export const yearStart = () => today().slice(0, 4) + "-01-01";
 
 export const KIND_AR: Record<string, string> = { QUOTATION: "عرض سعر", ORDER: "أمر", INVOICE: "فاتورة", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" };
