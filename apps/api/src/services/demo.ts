@@ -332,6 +332,18 @@ function daysBetween(a: string, b: string) {
   return Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000);
 }
 
+/** Showcase account only: treat every record of the company as demo so a refresh starts from a clean slate (visitors may post real documents there). */
+export async function resetShowcaseCompany(companyId: string) {
+  await tx(async (t) => {
+    const tables = await t.rows(`SELECT c1.table_name FROM information_schema.columns c1 JOIN information_schema.columns c2 ON c2.table_name=c1.table_name AND c2.table_schema=c1.table_schema AND c2.column_name='is_demo' WHERE c1.table_schema='public' AND c1.column_name='company_id'`);
+    for (const r of tables) await t.exec(`UPDATE "${r.tableName}" SET is_demo=true WHERE company_id=$1`, [companyId]);
+    await t.exec(`DELETE FROM reminders WHERE company_id=$1`, [companyId]);
+    await t.exec(`DELETE FROM bank_statement_lines WHERE company_id=$1`, [companyId]);
+    await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1`, [companyId]);
+    await t.exec(`DELETE FROM cheques WHERE company_id=$1`, [companyId]);
+  });
+}
+
 /** Deletes everything tagged is_demo for the company, in dependency order, in one transaction. */
 export async function purgeDemo(companyId: string) {
   const real = await db.one(`SELECT COUNT(*)::int c FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id WHERE i.company_id=$1 AND NOT i.is_demo AND i.status='POSTED' AND p.is_demo`, [companyId]);
