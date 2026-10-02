@@ -63,7 +63,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
 }
 
 // ─── editor ────────────────────────────────────────────────────────────────
-type Line = { key: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
+type Line = { key: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; lotNo?: string; expiryDate?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
 const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S", uom: null });
 
 function calc(l: Line, incl: boolean) {
@@ -114,7 +114,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
       setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1);
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
-      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [] } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
+      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
       setLoaded(true);
     }).catch((e) => toast(e.message, "err"));
   }, [id]);
@@ -140,7 +140,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
     upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
   const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null,
-    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null })) });
+    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null })) });
   const save = (post: boolean) => run(async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
     const d = id ? await api(`/invoices/${id}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
@@ -185,6 +185,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
               {isNote || (kind === "INVOICE" && !isSale && !l.product && l.description) ? null : null}
               <Picker value={l.product} onChange={(p) => pickProduct(l.key, p)} fetcher={productFetcher} label={(p: any) => `${p.name}${p.sku ? " (" + p.sku + ")" : ""}`} placeholder="ابحث عن صنف (أو اكتب بياناً حراً أدناه)" renderItem={(p: any) => <div className="row between"><span>{p.name} <span className="muted small">{p.sku}</span></span><span className="num small">{money(isSale ? p.salePrice : p.purchasePrice)}{p.type === "STOCK" ? ` · متاح ${Number(p.qty)}` : ""}</span></div>} />
               <Input style={{ marginTop: 4 }} placeholder="البيان" value={l.description} onChange={(e) => upd(l.key, { description: e.target.value })} />
+              {!isSale && l.product?.trackLots && kind !== "CREDIT_NOTE" && <div className="row" style={{ marginTop: 4, gap: 4 }}><Input placeholder="رقم الدفعة (Lot)" dir="ltr" value={l.lotNo || ""} onChange={(e) => upd(l.key, { lotNo: e.target.value })} /><Input type="date" title="تاريخ الانتهاء" value={l.expiryDate || ""} onChange={(e) => upd(l.key, { expiryDate: e.target.value })} /></div>}
               {!isSale && !l.product && <div style={{ marginTop: 4 }}><Picker value={l.account || null} onChange={(a) => upd(l.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.type === "ASSET")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="حساب المصروف/الأصل (للبنود غير المخزنية)" /></div>}
             </td>
             <td><NumInput value={l.qty} min={0} onChange={(e) => { const qty = Number(e.target.value); const lp = l.product && !l.uom && priceList?.kind === "FIXED" ? listPrice(l.product, qty) : null; upd(l.key, { qty, ...(lp !== null && lp !== undefined ? { unitPrice: fc ? Math.round((lp / rate) * 10000) / 10000 : lp } : {}) }); }} />

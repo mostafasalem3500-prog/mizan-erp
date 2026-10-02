@@ -15,6 +15,7 @@ import { r5 } from "./routes/round5";
 import { r6 } from "./routes/round6";
 import { r7 } from "./routes/round7";
 import { r8, v1, portal } from "./routes/round8";
+import { r9 } from "./routes/round9";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
@@ -46,6 +47,7 @@ app.use("/api", r5);
 app.use("/api", r6);
 app.use("/api", r7);
 app.use("/api", r8);
+app.use("/api", r9);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 

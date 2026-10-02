@@ -15,6 +15,7 @@ import { PriceListsPage } from "./pages/Pricing";
 import { LabelsPage, ReorderPage } from "./pages/Stock";
 import { CollectionsPage } from "./pages/Collections";
 import { CustomerPortal } from "./pages/Integrations";
+import { LotsPage } from "./pages/Lots";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 
@@ -40,6 +41,7 @@ const NAV = [
   { group: "المخزون" },
   { to: "/products", ic: "🏷", label: "الأصناف", perm: "products.read" },
   { to: "/inventory", ic: "🏬", label: "المستودعات والجرد", perm: "inventory.read" },
+  { to: "/lots", ic: "⏳", label: "الدفعات والصلاحية", perm: "inventory.read" },
   { to: "/reorder", ic: "🔔", label: "إعادة الطلب", perm: "inventory.read" },
   { to: "/labels", ic: "🏷", label: "ملصقات الباركود", perm: "products.read" },
   { group: "المحاسبة" },
@@ -133,6 +135,7 @@ export function App() {
                 <Route path="/expenses" element={<ExpensesPage />} />
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/lots" element={<LotsPage />} />
                 <Route path="/reorder" element={<ReorderPage />} />
                 <Route path="/labels" element={<LabelsPage />} />
                 <Route path="/accounts" element={<AccountsPage />} />

@@ -54,6 +54,7 @@ function CompanyForm() {
         <Field label="الرمز البريدي"><Input value={f.postalCode || ""} onChange={s("postalCode")} dir="ltr" /></Field>
         <Field label="بداية السنة المالية (شهر)"><Select value={f.fiscalYearStart} onChange={s("fiscalYearStart")}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</Select></Field>
         <Field label="خيارات المخزون"><label className="check"><input type="checkbox" checked={!!f.allowNegativeStock} onChange={s("allowNegativeStock")} /> السماح بالبيع بالسالب (رصيد مخزون سالب)</label></Field>
+        <Field label="الصلاحية"><label className="check"><input type="checkbox" checked={f.blockExpiredSales !== false} onChange={s("blockExpiredSales")} /> منع بيع الدفعات المنتهية الصلاحية</label></Field>
         <Field label="التسعير"><label className="check"><input type="checkbox" checked={!!f.pricesIncludeVat} onChange={s("pricesIncludeVat")} /> أسعار البيع شاملة الضريبة (للتجزئة)</label></Field>
         <Field label="البريد الصادر (SMTP)" hint="يُضبط من متغيرات الخادم SMTP_HOST/PORT/USER/PASS/FROM ثم يظهر زر «بريد» في الفواتير وشاشة التحصيل"><MailStatus /></Field>
         <Field label="دورية الإقرار الضريبي" hint="ربع سنوي للمنشآت دون 40 مليون ر.س، وشهري لمن فوقها"><Select value={f.vatPeriod || "QUARTERLY"} onChange={s("vatPeriod")}><option value="QUARTERLY">ربع سنوي</option><option value="MONTHLY">شهري</option></Select></Field>

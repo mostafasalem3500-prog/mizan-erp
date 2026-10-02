@@ -45,7 +45,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 7;
+export const DEMO_VERSION = 8;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -78,6 +78,9 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     const products: any[] = [];
     for (const [sku, name, ci, cost, price, unit, tax] of PRODUCTS)
       products.push(await t.insert("products", { companyId, sku, barcode: `629${String(between(100000000, 999999999))}`, name, type: sku.startsWith("SV") ? "SERVICE" : "STOCK", categoryId: cats[ci].id, unit, salePrice: price, purchasePrice: cost, taxCode: tax || "S", reorderLevel: sku.startsWith("SV") ? 0 : 20, isDemo: true }));
+    // perishables are lot-tracked with a default shelf life (expiry = receipt date + shelf life)
+    const SHELF: Record<string, number> = { "FD-006": 75, "FD-002": 365, "FD-005": 240, "BV-001": 300, "BV-002": 90, "MD-001": 540 };
+    for (const prod of products) if (SHELF[prod.sku]) { await t.exec(`UPDATE products SET track_lots=true, shelf_life_days=$2 WHERE id=$1`, [prod.id, SHELF[prod.sku]]); prod.trackLots = true; }
     // pack units for a few fast movers (carton / box) with their own barcodes
     const PACKS: [string, string, number][] = [["FD-006", "كرتون", 12], ["FD-003", "شد", 6], ["EL-001", "علبة", 10], ["ST-003", "ربطة", 12], ["FD-004", "كرتون", 24]];
     const uoms: Record<string, any> = {};
@@ -170,7 +173,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
             salesInvoices.push(await postInvoice(t, c, d.id, userName));
           });
         } catch (e: any) {
-          if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "CREDIT_LIMIT") throw e;
+          if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "CREDIT_LIMIT" && e.code !== "EXPIRED_STOCK") throw e;
         }
       }
       // ── POS: ~5 sessions/month, 6-14 tickets each ──
@@ -186,7 +189,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
             const inv = await t.savepoint(() => posSale(t, c, user, { sessionId: session.id, lines, tenders: [{ method: method as any, amount: null }], isDemo: true, date, partnerId: rand() < 0.2 ? pick(ids.customers.filter((x) => x.kind === "INDIVIDUAL")).id : null, discountPct: rand() < 0.1 ? 5 : 0 }));
             tickets.push(inv);
           } catch (e: any) {
-            if (e.code !== "INSUFFICIENT_STOCK") throw e;
+            if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "EXPIRED_STOCK") throw e;
           }
         }
         if (tickets.length && rand() < 0.5) {
@@ -336,6 +339,7 @@ export async function purgeDemo(companyId: string) {
   await tx(async (t) => {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM stock_lots WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);
     await t.exec(`UPDATE partners SET price_list_id=NULL WHERE company_id=$1 AND price_list_id IN (SELECT id FROM price_lists WHERE company_id=$1 AND is_demo)`, [companyId]);
     await t.exec(`DELETE FROM price_lists WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employee_settlements WHERE company_id=$1 AND is_demo`, [companyId]);

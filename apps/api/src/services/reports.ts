@@ -363,6 +363,8 @@ export async function integrity(t: Db, companyId: string) {
   checks.push({ name: "سجل مخصص الإجازات للموظفين = حساب مخصص الإجازات", ok: Math.abs(prov.LEAVE - g("LEAVE_PROVISION")) < 0.01, a: prov.LEAVE, b: g("LEAVE_PROVISION") });
   const loans = await t.one(`SELECT COALESCE(SUM(amount-paid),0) b FROM employee_loans WHERE company_id=$1 AND status='ACTIVE'`, [companyId]);
   checks.push({ name: "سلف الموظفين القائمة = حساب سلف وعهد الموظفين", ok: Math.abs(Number(loans.b) + g("EMP_ADVANCES")) < 0.01, a: r2(loans.b), b: r2(-g("EMP_ADVANCES")), note: "العهد النقدية المسجلة يدوياً على نفس الحساب تظهر كفرق" });
+  const lots = await t.one(`SELECT COALESCE(SUM(b.qty),0) s, COALESCE((SELECT SUM(l.qty) FROM stock_lots l JOIN products p2 ON p2.id=l.product_id WHERE l.company_id=$1 AND p2.track_lots),0) l FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 AND p.track_lots`, [companyId]);
+  checks.push({ name: "أرصدة الدفعات (Lots) = كميات المخزون للأصناف المتتبعة", ok: Math.abs(Number(lots.s) - Number(lots.l)) < 0.001, a: r2(lots.l), b: r2(lots.s) });
   return { ok: checks.every((c) => c.ok), checks };
 }
 
@@ -433,6 +435,9 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (cheques.c) items.push({ level: "warn", text: `${cheques.c} شيك يستحق خلال 7 أيام (${r2(cheques.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س)`, to: "/cheques", count: cheques.c });
   if (drafts.c) items.push({ level: "info", text: `${drafts.c} مستند غير مرحّل (مسودات) بقيمة ${r2(drafts.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/sales/invoices", count: drafts.c });
   if (zatcaPending.c) items.push({ level: "warn", text: `${zatcaPending.c} فاتورة لم تُرسل أو رُفضت في منصة فاتورة`, to: "/zatca", count: zatcaPending.c });
+  const exp = await n(`SELECT COUNT(*) FILTER (WHERE expiry_date < $2)::int expired, COUNT(*) FILTER (WHERE expiry_date BETWEEN $2 AND $3)::int soon FROM stock_lots WHERE company_id=$1 AND qty > 0`, [companyId, td, addDays(td, 30)]);
+  if (exp.expired) items.push({ level: "err", text: `${exp.expired} دفعة منتهية الصلاحية ما زالت في المخزون — أتلفها أو أرجعها للمورد`, to: "/lots", count: exp.expired });
+  if (exp.soon) items.push({ level: "warn", text: `${exp.soon} دفعة تنتهي صلاحيتها خلال 30 يوماً`, to: "/lots", count: exp.soon });
   if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });

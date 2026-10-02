@@ -23,6 +23,8 @@ export interface LineInput {
   discountPct?: number;
   taxCode?: string;
   uomId?: string | null; // product_uoms.id (pack); omitted → base unit
+  lotNo?: string | null; // purchases of lot-tracked products
+  expiryDate?: string | null;
 }
 
 export interface InvoiceInput {
@@ -86,6 +88,8 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
       qty,
       uom: u ? u.name : null,
       factor,
+      lotNo: input.direction === "PURCHASE" && l.lotNo ? String(l.lotNo).trim().slice(0, 60) : null,
+      expiryDate: input.direction === "PURCHASE" && isDate(l.expiryDate) ? l.expiryDate : null,
       unitPrice,
       fcUnitPrice,
       discountPct,
@@ -186,7 +190,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   await t.insertMany(
     "invoice_lines",
     lines.map((l) => ({
-      invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, uom: l.uom, factor: l.factor,
+      invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, uom: l.uom, factor: l.factor, lotNo: l.lotNo, expiryDate: l.expiryDate,
       unitPrice: l.unitPrice, fcUnitPrice: l.fcUnitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
       netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort,
     })),
@@ -197,7 +201,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
 export async function getInvoice(t: Db, companyId: string, id: string) {
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId], "المستند غير موجود");
   inv.lines = await t.rows(
-    `SELECT l.*, p.sku, p.unit, p.barcode, u.id AS uom_id FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id LEFT JOIN product_uoms u ON u.product_id=l.product_id AND u.name=l.uom WHERE l.invoice_id=$1 ORDER BY l.sort`,
+    `SELECT l.*, p.sku, p.unit, p.barcode, p.track_lots, u.id AS uom_id FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id LEFT JOIN product_uoms u ON u.product_id=l.product_id AND u.name=l.uom WHERE l.invoice_id=$1 ORDER BY l.sort`,
     [id],
   );
   return inv;
@@ -258,9 +262,14 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     } else if (isSale && isReturn) {
       const ol = originLines.find((o) => o.productId === l.productId);
       const unit = ol ? Number(ol.unitCost) : await avgCost(t, companyId, l.productId, inv.warehouseId);
-      cost = await stockIn(t, companyId, { ...base, sourceType: "SALE_RETURN", unitCost: unit });
+      // put returned units back into the lots they were sold from (latest-expiry first), when tracked
+      const sold = origin ? await t.rows(`SELECT lots FROM stock_moves WHERE source_id=$1 AND product_id=$2 AND lots IS NOT NULL`, [origin.id, l.productId]) : [];
+      let need = q; const back: any[] = [];
+      for (const a of sold.flatMap((x: any) => x.lots).sort((x: any, y: any) => String(y.expiry || "9").localeCompare(String(x.expiry || "9")))) { if (need <= 1e-9) break; const take = r3(Math.min(Number(a.qty), need)); back.push({ lotNo: a.lotNo, expiry: a.expiry, qty: take }); need = r3(need - take); }
+      if (need > 1e-9 && back.length) back[0].qty = r3(back[0].qty + need);
+      cost = await stockIn(t, companyId, { ...base, sourceType: "SALE_RETURN", unitCost: unit, lots: back.length ? back : undefined, lotNo: back.length ? undefined : "RETURN" });
     } else if (!isSale && !isReturn) {
-      cost = await stockIn(t, companyId, { ...base, sourceType: "PURCHASE", value: Number(l.netAmount) });
+      cost = await stockIn(t, companyId, { ...base, sourceType: "PURCHASE", value: Number(l.netAmount), lotNo: l.lotNo, expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : null });
     } else {
       cost = await stockOut(t, companyId, { ...base, sourceType: "PURCHASE_RETURN", allowNegative: false, productName: l.pname });
     }

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
-import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppError } from "../lib/core";
+import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppError, today } from "../lib/core";
 import { authenticate, perm, cid, actor, p, ROLES } from "../lib/auth";
 import { TYPE_BY_CLASS, SUBTYPE_AR } from "../accounting/coa";
 
@@ -140,6 +140,7 @@ master.post(
     const row = await db.insert("products", {
       companyId: cid(req), sku, barcode: b.barcode || null, name, nameEn: b.nameEn || null, type: b.type === "SERVICE" ? "SERVICE" : "STOCK", categoryId: b.categoryId || null, unit: b.unit || "حبة",
       salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image: b.image || null,
+      trackLots: b.type !== "SERVICE" && !!b.trackLots, shelfLifeDays: b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف (SKU) مستخدم مسبقاً"); throw e; });
     if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
     if (b.openingQty && row.type === "STOCK") {
@@ -160,8 +161,10 @@ master.put(
     const row = await db.update("products", { id: p(req).id, companyId: cid(req) }, {
       sku: b.sku, barcode: b.barcode ?? null, name: b.name, nameEn: b.nameEn ?? null, categoryId: b.categoryId ?? null, unit: b.unit, salePrice: b.salePrice === undefined ? undefined : num(b.salePrice),
       purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image: b.image, isActive: b.isActive, type: b.type,
+      trackLots: b.trackLots === undefined ? undefined : !!b.trackLots, shelfLifeDays: b.shelfLifeDays === undefined ? undefined : b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف مستخدم مسبقاً"); throw e; });
     if (!row) throw notFound();
+    if (row.trackLots) { const { openLotsForExisting } = require("../accounting/stock") as typeof import("../accounting/stock"); await tx((t) => openLotsForExisting(t, cid(req), row.id, today())); }
     if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
     return row;
   }),
@@ -281,7 +284,7 @@ master.put(
     const row = await db.update("companies", { id: cid(req) }, {
       nameAr: b.nameAr, nameEn: b.nameEn, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone, email: b.email, website: b.website, logo: b.logo, street: b.street, buildingNo: b.buildingNo, additionalNo: b.additionalNo,
       district: b.district, city: b.city, postalCode: b.postalCode, fiscalYearStart: b.fiscalYearStart === undefined ? undefined : Math.min(12, Math.max(1, Math.round(num(b.fiscalYearStart)))),
-      allowNegativeStock: b.allowNegativeStock, pricesIncludeVat: b.pricesIncludeVat, vatPeriod: b.vatPeriod === undefined ? undefined : b.vatPeriod === "MONTHLY" ? "MONTHLY" : "QUARTERLY", invoiceFooter: b.invoiceFooter, invoiceTerms: b.invoiceTerms, invoiceTemplate: b.invoiceTemplate, updatedAt: new Date(),
+      allowNegativeStock: b.allowNegativeStock, pricesIncludeVat: b.pricesIncludeVat, blockExpiredSales: b.blockExpiredSales, vatPeriod: b.vatPeriod === undefined ? undefined : b.vatPeriod === "MONTHLY" ? "MONTHLY" : "QUARTERLY", invoiceFooter: b.invoiceFooter, invoiceTerms: b.invoiceTerms, invoiceTemplate: b.invoiceTemplate, updatedAt: new Date(),
     });
     await audit(req, "UPDATE", "settings", cid(req));
     return row;

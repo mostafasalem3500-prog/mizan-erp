@@ -42,7 +42,7 @@ export interface AdjustmentInput {
   kind?: "COUNT" | "OPENING" | "TRANSFER";
   toWarehouse?: string;
   notes?: string;
-  lines: { productId: string; qty: number; unitCost?: number }[]; // COUNT: qty = counted (actual) qty ; OPENING: qty to add ; TRANSFER: qty to move
+  lines: { productId: string; qty: number; unitCost?: number; lotNo?: string; expiryDate?: string }[]; // COUNT: qty = counted (actual) qty ; OPENING: qty to add ; TRANSFER: qty to move
   isDemo?: boolean;
 }
 
@@ -61,14 +61,15 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
     const qty = num(l.qty);
     if (kind === "TRANSFER") {
       if (!a.toWarehouse || a.toWarehouse === wh) throw bad("حدد المستودع المستلم");
-      const v = await stockOut(t, companyId, { productId: p.id, warehouseId: wh, qty, date, sourceType: "TRANSFER", reference: number, isDemo: a.isDemo, productName: p.name });
-      await stockIn(t, companyId, { productId: p.id, warehouseId: a.toWarehouse, qty, date, sourceType: "TRANSFER", reference: number, value: v, isDemo: a.isDemo });
+      let moved: any[] | undefined;
+      const v = await stockOut(t, companyId, { productId: p.id, warehouseId: wh, qty, date, sourceType: "TRANSFER", reference: number, isDemo: a.isDemo, productName: p.name, onLots: (l) => (moved = l) });
+      await stockIn(t, companyId, { productId: p.id, warehouseId: a.toWarehouse, qty, date, sourceType: "TRANSFER", reference: number, value: v, isDemo: a.isDemo, lots: moved });
       out.push({ productId: p.id, name: p.name, qty, value: v });
       continue;
     }
     if (kind === "OPENING") {
       const cost = num(l.unitCost ?? p.purchasePrice);
-      const v = await stockIn(t, companyId, { productId: p.id, warehouseId: wh, qty, date, sourceType: "OPENING", reference: number, unitCost: cost, isDemo: a.isDemo });
+      const v = await stockIn(t, companyId, { productId: p.id, warehouseId: wh, qty, date, sourceType: "OPENING", reference: number, unitCost: cost, isDemo: a.isDemo, lotNo: (l as any).lotNo, expiryDate: (l as any).expiryDate });
       jl.push({ key: "INVENTORY", debit: v, description: `رصيد افتتاحي ${p.name}` });
       totalValue = r2(totalValue + v);
       out.push({ productId: p.id, name: p.name, qty, value: v });
@@ -80,7 +81,7 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
     const diff = r2(qty - cur);
     if (Math.abs(diff) < 0.0005) continue;
     if (diff > 0) {
-      const v = await stockIn(t, companyId, { productId: p.id, warehouseId: wh, qty: diff, date, sourceType: "ADJUSTMENT", reference: number, unitCost: num(l.unitCost ?? p.purchasePrice), isDemo: a.isDemo });
+      const v = await stockIn(t, companyId, { productId: p.id, warehouseId: wh, qty: diff, date, sourceType: "ADJUSTMENT", reference: number, unitCost: num(l.unitCost ?? p.purchasePrice), isDemo: a.isDemo, lotNo: (l as any).lotNo, expiryDate: (l as any).expiryDate });
       jl.push({ key: "INVENTORY", debit: v, description: `زيادة جرد ${p.name}` }, { key: "INV_GAIN", credit: v, description: `زيادة جرد ${p.name}` });
       totalValue = r2(totalValue + v);
       out.push({ productId: p.id, name: p.name, qty: diff, value: v });
