@@ -65,7 +65,7 @@ export const TAX_AR: Record<string, string> = { S: "خاضع 15%", Z: "نسبة 
 export const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 export const METHOD_AR: Record<string, string> = { CASH: "نقدي", CARD: "شبكة/بطاقة", BANK: "تحويل بنكي", CHEQUE: "شيك", CREDIT: "آجل" };
 
-export const badgeColor = (s: string) => ({ POSTED: "green", PAID: "green", REPORTED: "green", CLEARED: "green", ACTIVE: "green", OPEN: "green", SETTLED: "green", DRAFT: "gray", UNPAID: "red", REJECTED: "red", FAILED: "red", CANCELLED: "red", PARTIAL: "amber", PENDING: "amber", WARNING: "amber", NOT_ONBOARDED: "amber", CONVERTED: "blue", CLOSED: "blue", LOCKED: "blue", NOT_REQUIRED: "teal", FILED: "blue" } as any)[s] || "gray";
+export const badgeColor = (s: string) => ({ POSTED: "green", PAID: "green", REPORTED: "green", CLEARED: "green", ACTIVE: "green", OPEN: "green", SETTLED: "green", DONE: "green", IGNORED: "gray", DRAFT: "gray", UNPAID: "red", REJECTED: "red", FAILED: "red", CANCELLED: "red", PARTIAL: "amber", PENDING: "amber", WARNING: "amber", NOT_ONBOARDED: "amber", CONVERTED: "blue", CLOSED: "blue", LOCKED: "blue", NOT_REQUIRED: "teal", FILED: "blue" } as any)[s] || "gray";
 
 // ─── toast ─────────────────────────────────────────────────────────────────
 type Toast = { id: number; msg: string; kind: "ok" | "err" | "info" };

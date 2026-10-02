@@ -18,8 +18,8 @@ export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?:
     plan, subscriptionEndsAt: plan === "TRIAL" ? new Date(Date.now() + TRIAL_DAYS * 86400000) : null,
   });
   await t.insert("memberships", { companyId: company.id, userId: ownerUserId, role: "OWNER" });
-  await t.insert("branches", { companyId: company.id, code: "MAIN", name: "الفرع الرئيسي" });
-  await t.insert("warehouses", { companyId: company.id, code: "MAIN", name: "المستودع الرئيسي", isDefault: true });
+  const branch = await t.insert("branches", { companyId: company.id, code: "MAIN", name: "الفرع الرئيسي", isMain: true, city: input.city || null });
+  await t.insert("warehouses", { companyId: company.id, code: "MAIN", name: "المستودع الرئيسي", isDefault: true, branchId: branch.id });
   await seedChartOfAccounts(t, company.id);
   await seedCurrencies(t, company.id);
   await ensureFiscalYear(t, company.id, today());

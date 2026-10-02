@@ -193,9 +193,16 @@ master.delete(
   }),
 );
 
-master.get("/warehouses", perm("inventory.read"), h(async (req) => db.rows(`SELECT * FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code`, [cid(req)])));
-master.post("/warehouses", perm("inventory.write"), h(async (req) => db.insert("warehouses", { companyId: cid(req), code: String(need(req.body, "code", "الكود")), name: String(need(req.body, "name", "الاسم")) }).catch((e) => { if (e.code === "23505") throw conflict("الكود مستخدم"); throw e; })));
-master.put("/warehouses/:id", perm("inventory.write"), h(async (req) => { if (req.body.isDefault) await db.exec(`UPDATE warehouses SET is_default=false WHERE company_id=$1`, [cid(req)]); return db.update("warehouses", { id: p(req).id, companyId: cid(req) }, { name: req.body.name, code: req.body.code, isDefault: req.body.isDefault, isActive: req.body.isActive }); }));
+master.get("/warehouses", perm("inventory.read"), h(async (req) => db.rows(`SELECT w.*, b.name AS branch_name FROM warehouses w LEFT JOIN branches b ON b.id=w.branch_id WHERE w.company_id=$1 ORDER BY w.is_default DESC, w.code`, [cid(req)])));
+/** Validates a branch id against the company; "" / null → null (no home branch). */
+export async function ownBranch(companyId: string, id: any): Promise<string | null> {
+  if (!id) return null;
+  const b = await db.maybe(`SELECT id FROM branches WHERE id::text=$1 AND company_id=$2`, [String(id), companyId]);
+  if (!b) throw bad("الفرع غير موجود");
+  return b.id;
+}
+master.post("/warehouses", perm("inventory.write"), h(async (req) => db.insert("warehouses", { companyId: cid(req), code: String(need(req.body, "code", "الكود")), name: String(need(req.body, "name", "الاسم")), branchId: (await ownBranch(cid(req), req.body.branchId)) || (await db.one(`SELECT id FROM branches WHERE company_id=$1 ORDER BY is_main DESC, code LIMIT 1`, [cid(req)])).id }).catch((e) => { if (e.code === "23505") throw conflict("الكود مستخدم"); throw e; })));
+master.put("/warehouses/:id", perm("inventory.write"), h(async (req) => { if (req.body.isDefault) await db.exec(`UPDATE warehouses SET is_default=false WHERE company_id=$1`, [cid(req)]); return db.update("warehouses", { id: p(req).id, companyId: cid(req) }, { name: req.body.name, code: req.body.code, isDefault: req.body.isDefault, isActive: req.body.isActive, branchId: req.body.branchId ? await ownBranch(cid(req), req.body.branchId) : undefined }); }));
 
 // ─── chart of accounts ─────────────────────────────────────────────────────
 master.get(
@@ -291,7 +298,7 @@ master.put(
   }),
 );
 
-master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
+master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, m.branch_id, (SELECT name FROM branches b WHERE b.id=m.branch_id) branch_name, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
 
 master.post(
   "/users",
@@ -310,7 +317,7 @@ master.post(
         if (password.length < 8) throw bad("كلمة المرور قصيرة");
         u = await t.insert("users", { email, passwordHash: await bcrypt.hash(password, 10), fullName: String(need(b, "fullName", "الاسم")), phone: b.phone || null });
       }
-      const m = await t.insert("memberships", { companyId: cid(req), userId: u.id, role }).catch((e) => { if (e.code === "23505") throw conflict("المستخدم عضو بالفعل"); throw e; });
+      const m = await t.insert("memberships", { companyId: cid(req), userId: u.id, role, branchId: await ownBranch(cid(req), b.branchId) }).catch((e) => { if (e.code === "23505") throw conflict("المستخدم عضو بالفعل"); throw e; });
       await audit(req, "CREATE", "user", u.id, { email, role });
       return { ...m, email, fullName: u.fullName };
     });
@@ -330,7 +337,8 @@ master.put(
       await db.exec(`UPDATE users SET password_hash=$2 WHERE id=$1`, [m.userId, await bcrypt.hash(String(req.body.password), 10)]);
     }
     if (req.body.fullName) await db.exec(`UPDATE users SET full_name=$2 WHERE id=$1`, [m.userId, req.body.fullName]);
-    return db.update("memberships", { id: m.id }, { role, isActive: req.body.isActive });
+    const branchId = req.body.branchId === undefined ? undefined : await ownBranch(cid(req), req.body.branchId);
+    return db.update("memberships", { id: m.id }, { role, isActive: req.body.isActive, branchId });
   }),
 );
 

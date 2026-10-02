@@ -5,6 +5,21 @@ import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZAT
 const M_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const mLabel = (m: string) => M_AR[Number(m.slice(5, 7)) - 1].slice(0, 5);
 
+/** Month-to-date performance per branch — only when the company runs more than one branch. */
+function BranchesMonth() {
+  const { can } = useCompanyContext();
+  const mStart = new Date().toISOString().slice(0, 8) + "01";
+  const { data } = useFetch(can("reports.read") ? `/reports/branches?from=${mStart}` : null);
+  if (!data || data.rows.length < 2) return null;
+  const max = Math.max(1, ...data.rows.map((r: any) => Math.abs(r.netSales)));
+  return (
+    <div className="card"><div className="card-h"><h3>أداء الفروع — الشهر الحالي</h3><Link className="small" to="/reports/branches">مقارنة الفروع →</Link></div>
+      <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الفرع</th><th style={{ width: "34%" }}>صافي المبيعات</th><th className="n">مجمل الربح</th><th className="n">صافي الربح</th><th className="n">الفواتير</th><th className="n">متوسط الفاتورة</th></tr></thead>
+        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td><b>{r.name}</b></td><td><div className="row" style={{ gap: 8 }}><div style={{ flex: 1, height: 8, background: "var(--border)", borderRadius: 4 }}><div style={{ width: `${Math.round((Math.abs(r.netSales) / max) * 100)}%`, height: "100%", background: "var(--primary)", borderRadius: 4 }} /></div><Money v={r.netSales} /></div></td><td className="n"><Money v={r.gross} /></td><td className="n"><Money v={r.net} sign /></td><td className="n">{r.invoices}</td><td className="n"><Money v={r.avgTicket} /></td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { data, loading } = useFetch("/dashboard");
   const { me } = useCompanyContext();
@@ -36,6 +51,7 @@ export function Dashboard() {
         <div className="card"><div className="card-h"><h3>المبيعات والمشتريات — آخر 12 شهراً</h3></div><div className="card-b">{d.trend.length ? <BarChart data={d.trend} keys={["sales", "purchases"]} labels={(x) => mLabel(x.m)} /> : <div className="empty">لا توجد حركة بعد</div>}<div className="row small muted mt"><span>■ مبيعات</span><span style={{ color: "var(--accent)" }}>■ مشتريات</span></div></div></div>
         <div className="card"><div className="card-h"><h3>الإيرادات والمصروفات والربح الشهري</h3></div><div className="card-b">{d.pnl.length ? <BarChart data={d.pnl} keys={["revenue", "expense", "profit"]} labels={(x) => mLabel(x.m)} colors={["var(--primary)", "var(--accent)", "var(--info)"]} /> : <div className="empty">لا توجد حركة بعد</div>}<div className="row small muted mt"><span>■ إيرادات</span><span style={{ color: "var(--accent)" }}>■ مصروفات</span><span style={{ color: "var(--info)" }}>■ صافي الربح</span></div></div></div>
       </div>
+      <BranchesMonth />
       <div className="grid c3">
         <div className="card"><div className="card-h"><h3>الأصناف الأكثر مبيعاً (90 يوم)</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.topProducts.map((p: any) => <tr key={p.name}><td>{p.name}</td><td className="n">{Number(p.qty).toLocaleString()}</td><td className="n"><Money v={p.net} /></td></tr>)}{!d.topProducts.length && <tr><td className="muted">—</td></tr>}</tbody></table></div></div>
         <div className="card"><div className="card-h"><h3>أفضل العملاء (90 يوم)</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.topCustomers.map((p: any) => <tr key={p.name}><td>{p.name}</td><td className="n"><Money v={p.total} /></td></tr>)}{!d.topCustomers.length && <tr><td className="muted">—</td></tr>}</tbody></table></div></div>

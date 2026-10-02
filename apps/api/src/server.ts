@@ -16,6 +16,7 @@ import { r6 } from "./routes/round6";
 import { r7 } from "./routes/round7";
 import { r8, v1, portal } from "./routes/round8";
 import { r9 } from "./routes/round9";
+import { r10, hooks } from "./routes/round10";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 
@@ -23,7 +24,7 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(compression());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/health", async (_req, res) => {
   try {
@@ -36,6 +37,7 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/public", pub);
 app.use("/api/public", portal);
 app.use("/api/v1", v1);
+app.use("/api/hooks", hooks);
 app.use("/api/auth", auth);
 app.use("/api/admin", admin);
 app.use("/api", master);
@@ -48,6 +50,7 @@ app.use("/api", r6);
 app.use("/api", r7);
 app.use("/api", r8);
 app.use("/api", r9);
+app.use("/api", r10);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 

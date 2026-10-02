@@ -4,6 +4,7 @@ import { bad, conflict, r2, r6, D, num, isDate, today } from "../lib/core";
 import { post, nextNumber, reverse, Line } from "../accounting/engine";
 import { applySettlement } from "./invoices";
 import { BASE, toBase, toFc } from "./currency";
+import { currentCtx } from "../lib/context";
 
 export interface PaymentInput {
   direction: "IN" | "OUT";
@@ -18,6 +19,14 @@ export interface PaymentInput {
   isDemo?: boolean;
   currency?: string; // payment currency (default SAR). When foreign: fcAmount = foreign amount, amount = SAR actually paid/received
   fcAmount?: number;
+  branchId?: string | null;
+}
+
+/** When every settled document belongs to one branch, the voucher follows it (collections stay on the selling branch's books). */
+async function allocationBranch(t: Db, invoiceIds: string[]): Promise<string | null> {
+  if (!invoiceIds.length) return null;
+  const r = await t.rows(`SELECT DISTINCT branch_id FROM invoices WHERE id = ANY($1) AND branch_id IS NOT NULL`, [invoiceIds]);
+  return r.length === 1 ? r[0].branchId : null;
 }
 
 export async function createPayment(t: Db, companyId: string, user: string, p: PaymentInput) {
@@ -105,7 +114,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
     const gain = p.direction === "IN" ? fxDiff > 0 : fxDiff < 0;
     lines.push(gain ? { key: "FX_GAIN", credit: Math.abs(fxDiff), description: `فرق سعر صرف ${number}` } : { key: "FX_LOSS", debit: Math.abs(fxDiff), description: `فرق سعر صرف ${number}` });
   }
-  const entry = await post(t, companyId, { date, type: p.direction === "IN" ? "RECEIPT" : "PAYMENT", sourceType: "PAYMENT", reference: p.reference || number, memo, isDemo: p.isDemo, createdBy: user, lines });
+  const entry = await post(t, companyId, { date, type: p.direction === "IN" ? "RECEIPT" : "PAYMENT", sourceType: "PAYMENT", branchId: p.branchId || (currentCtx().bodyBranchId ? null : await allocationBranch(t, allocations.map((a) => a.invoiceId))), reference: p.reference || number, memo, isDemo: p.isDemo, createdBy: user, lines });
   const pay = await t.insert("payments", {
     companyId, number, direction: p.direction, partnerRole: role, partnerId: partner.id, date, amount, allocated: r2(D(amount).minus(unalloc)),
     method: p.method || (account.subtype === "CASH" ? "CASH" : "BANK"), accountId: account.id, reference: p.reference || null,

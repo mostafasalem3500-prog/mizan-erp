@@ -10,9 +10,20 @@ const dateRange = (q: any) => {
   return { from, to };
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Optional branch filter on journal_entries alias `e`: appends the param and returns the SQL fragment ("" when not filtered). */
+export const branchCond = (q: any, params: any[], alias = "e") => {
+  const b = q?.branchId;
+  if (!b || !UUID_RE.test(String(b))) return "";
+  params.push(String(b));
+  return ` AND ${alias}.branch_id=$${params.length}`;
+};
+
 /** Balance per account: opening (before from), period movement, closing. */
 export async function trialBalance(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
+  const tbParams: any[] = [companyId, from, to];
+  const tbBranch = branchCond(q, tbParams);
   const rows = await t.rows(
     `SELECT a.id, a.code, a.name_ar, a.name_en, a.type, a.subtype, a.parent_id, a.level, a.is_group,
        COALESCE(SUM(CASE WHEN e.date < $2 THEN l.debit - l.credit END),0) opening,
@@ -20,10 +31,10 @@ export async function trialBalance(t: Db, companyId: string, q: any) {
        COALESCE(SUM(CASE WHEN e.date BETWEEN $2 AND $3 THEN l.credit END),0) credit
      FROM accounts a
      LEFT JOIN journal_lines l ON l.account_id=a.id
-     LEFT JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'
+     LEFT JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'${tbBranch}
      WHERE a.company_id=$1 AND NOT a.is_group
      GROUP BY a.id ORDER BY a.code`,
-    [companyId, from, to],
+    tbParams,
   );
   const list = rows
     .map((r) => {
@@ -43,15 +54,19 @@ export async function generalLedger(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
   if (!q.accountId) throw bad("اختر الحساب");
   const acc = await t.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2`, [q.accountId, companyId]);
+  const obP: any[] = [acc.id, from];
+  const obB = branchCond(q, obP);
   const ob = await t.one(
-    `SELECT COALESCE(SUM(l.debit - l.credit),0) b FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=$1 AND e.status='POSTED' AND e.date < $2`,
-    [acc.id, from],
+    `SELECT COALESCE(SUM(l.debit - l.credit),0) b FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=$1 AND e.status='POSTED' AND e.date < $2${obB}`,
+    obP,
   );
+  const glP: any[] = [acc.id, from, to];
+  const glB = branchCond(q, glP);
   const lines = await t.rows(
     `SELECT e.id AS entry_id, e.number, e.date, e.type, e.memo, e.reference, e.source_type, e.source_id, l.debit, l.credit, l.description, l.partner_id, p.name AS partner_name
      FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN partners p ON p.id=l.partner_id
-     WHERE l.account_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3 ORDER BY e.date, e.created_at, l.sort`,
-    [acc.id, from, to],
+     WHERE l.account_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3${glB} ORDER BY e.date, e.created_at, l.sort`,
+    glP,
   );
   let bal = D(ob.b);
   const out = lines.map((l) => {
@@ -69,6 +84,7 @@ export async function journalBook(t: Db, companyId: string, q: any) {
   const params: any[] = [companyId, from, to];
   if (q.type) { params.push(q.type); where.push(`e.type=$${params.length}`); }
   if (q.status) { params.push(q.status); where.push(`e.status=$${params.length}`); }
+  const jb = branchCond(q, params); if (jb) where.push(jb.replace(" AND ", ""));
   if (q.search) { params.push(`%${q.search}%`); where.push(`(e.number ILIKE $${params.length} OR e.memo ILIKE $${params.length} OR e.reference ILIKE $${params.length})`); }
   const total = await t.one(`SELECT COUNT(*)::int c FROM journal_entries e WHERE ${where.join(" AND ")}`, params);
   params.push(limit, offset);
@@ -85,12 +101,14 @@ export async function journalBook(t: Db, companyId: string, q: any) {
   return { from, to, total: total.c, rows: entries };
 }
 
-async function balancesByType(t: Db, companyId: string, from: string, to: string) {
+async function balancesByType(t: Db, companyId: string, from: string, to: string, branchId?: string) {
+  const params: any[] = [companyId, from, to];
+  const bc = branchCond({ branchId }, params);
   return t.rows(
     `SELECT a.id, a.code, a.name_ar, a.type, a.subtype, a.parent_id, COALESCE(SUM(l.debit - l.credit),0) bal
      FROM accounts a JOIN journal_lines l ON l.account_id=a.id JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'
-     WHERE a.company_id=$1 AND e.date BETWEEN $2 AND $3 GROUP BY a.id HAVING COALESCE(SUM(l.debit - l.credit),0) <> 0 ORDER BY a.code`,
-    [companyId, from, to],
+     WHERE a.company_id=$1 AND e.date BETWEEN $2 AND $3${bc} GROUP BY a.id HAVING COALESCE(SUM(l.debit - l.credit),0) <> 0 ORDER BY a.code`,
+    params,
   );
 }
 
@@ -104,7 +122,7 @@ function group(rows: any[], subtypes: string[], sign: 1 | -1) {
 
 export async function incomeStatement(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
-  const rows = (await balancesByType(t, companyId, from, to)).filter((r) => r.type === "REVENUE" || r.type === "EXPENSE");
+  const rows = (await balancesByType(t, companyId, from, to, q.branchId)).filter((r) => r.type === "REVENUE" || r.type === "EXPENSE");
   const sales = group(rows, ["SALES"], -1);
   const returns = group(rows, ["SALES_RETURNS"], -1);
   const netSales = r2(sales.total + returns.total);
@@ -127,7 +145,7 @@ export async function incomeStatementCompare(t: Db, companyId: string, q: any) {
   if (q.compare === "year") { pFrom = addMonths(from, -12); pTo = addMonths(to, -12); }
   else if (from.endsWith("-01") && to === monthEnd(to)) { const months = (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1; pTo = addDays(from, -1); pFrom = addMonths(from, -months); }
   else { const len = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1; pTo = addDays(from, -1); pFrom = addDays(pTo, -(len - 1)); }
-  const [current, previous] = await Promise.all([incomeStatement(t, companyId, { from, to }), incomeStatement(t, companyId, { from: pFrom, to: pTo })]);
+  const [current, previous] = await Promise.all([incomeStatement(t, companyId, { from, to, branchId: q.branchId }), incomeStatement(t, companyId, { from: pFrom, to: pTo, branchId: q.branchId })]);
   const merge = (a: any, b: any) => {
     const codes = new Map<string, any>();
     for (const sec of a.sections) for (const i of sec.items) codes.set(i.code, { code: i.code, name: i.name, section: sec.name, cur: i.amount, prev: 0 });
@@ -169,9 +187,54 @@ export async function costCenterPnl(t: Db, companyId: string, q: any) {
   return { from, to, rows: list, detail, totals: { revenue: tot("revenue"), cogs: tot("cogs"), expenses: tot("expenses"), gross: tot("gross"), net: tot("net") } };
 }
 
+/** Profit & loss and sales KPIs side by side for every branch (journal entries carry the branch). */
+export async function branchPnl(t: Db, companyId: string, q: any) {
+  const { from, to } = dateRange(q);
+  const rows = await t.rows(
+    `SELECT b.id, b.code, b.name, b.is_main,
+       COALESCE(SUM(CASE WHEN a.subtype='SALES' THEN l.credit-l.debit END),0) sales,
+       COALESCE(SUM(CASE WHEN a.subtype='SALES_RETURNS' THEN l.debit-l.credit END),0) returns,
+       COALESCE(SUM(CASE WHEN a.type='REVENUE' AND a.subtype NOT IN ('SALES','SALES_RETURNS') THEN l.credit-l.debit END),0) other_income,
+       COALESCE(SUM(CASE WHEN a.subtype='COGS' THEN l.debit-l.credit END),0) cogs,
+       COALESCE(SUM(CASE WHEN a.type='EXPENSE' AND a.subtype<>'COGS' THEN l.debit-l.credit END),0) expenses
+     FROM branches b
+     LEFT JOIN journal_entries e ON e.branch_id=b.id AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date BETWEEN $2 AND $3
+     LEFT JOIN journal_lines l ON l.entry_id=e.id
+     LEFT JOIN accounts a ON a.id=l.account_id AND a.type IN ('REVENUE','EXPENSE')
+     WHERE b.company_id=$1 GROUP BY b.id ORDER BY b.is_main DESC, b.code`, [companyId, from, to]);
+  const kpi = await t.rows(
+    `SELECT i.branch_id, COUNT(*) FILTER (WHERE i.kind='INVOICE')::int invoices, COUNT(*) FILTER (WHERE i.kind='INVOICE' AND i.channel='POS')::int pos_orders,
+       COALESCE(SUM(CASE WHEN i.kind='INVOICE' THEN i.total END),0) gross, COUNT(DISTINCT i.partner_id)::int customers
+     FROM invoices i WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.date BETWEEN $2 AND $3 GROUP BY i.branch_id`, [companyId, from, to]);
+  const cash = await t.rows(
+    `SELECT e.branch_id, COALESCE(SUM(l.debit-l.credit),0) bal FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+     WHERE e.company_id=$1 AND e.status='POSTED' AND e.date <= $2 AND a.is_cash_bank GROUP BY e.branch_id`, [companyId, to]);
+  const stock = await t.rows(
+    `SELECT w.branch_id, COALESCE(SUM(sb.value),0) value FROM stock_balances sb JOIN warehouses w ON w.id=sb.warehouse_id WHERE sb.company_id=$1 GROUP BY w.branch_id`, [companyId]).catch(() => [] as any[]);
+  const list = rows.map((r) => {
+    const k = kpi.find((x) => x.branchId === r.id) || {};
+    const netSales = r2(r.sales - r.returns);
+    const gross = r2(netSales - r.cogs);
+    const net = r2(gross + Number(r.otherIncome) - r.expenses);
+    return {
+      id: r.id, code: r.code, name: r.name, isMain: r.isMain,
+      sales: r2(r.sales), returns: r2(r.returns), netSales, cogs: r2(r.cogs), gross, grossMargin: netSales ? r2((gross / netSales) * 100) : 0,
+      otherIncome: r2(r.otherIncome), expenses: r2(r.expenses), net, netMargin: netSales ? r2((net / netSales) * 100) : 0,
+      invoices: k.invoices || 0, posOrders: k.posOrders || 0, customers: k.customers || 0, avgTicket: k.invoices ? r2(Number(k.gross) / k.invoices) : 0,
+      cash: r2(cash.find((x) => x.branchId === r.id)?.bal || 0), stock: r2(stock.find((x) => x.branchId === r.id)?.value || 0),
+    };
+  });
+  const tot = (k: string) => r2(list.reduce((a, r: any) => a + Number(r[k] || 0), 0));
+  const totals: any = {};
+  for (const k of ["sales", "returns", "netSales", "cogs", "gross", "otherIncome", "expenses", "net", "invoices", "posOrders", "cash", "stock"]) totals[k] = tot(k);
+  totals.grossMargin = totals.netSales ? r2((totals.gross / totals.netSales) * 100) : 0;
+  totals.netMargin = totals.netSales ? r2((totals.net / totals.netSales) * 100) : 0;
+  return { from, to, rows: list, totals };
+}
+
 export async function balanceSheet(t: Db, companyId: string, q: any) {
   const to = q.to && isDate(q.to) ? q.to : today();
-  const rows = await balancesByType(t, companyId, "1900-01-01", to);
+  const rows = await balancesByType(t, companyId, "1900-01-01", to, q.branchId);
   const currentAssets = group(rows.filter((r) => r.type === "ASSET"), ["CASH", "BANK", "RECEIVABLE", "INVENTORY", "CURRENT_ASSET"], 1);
   const fixedAssets = group(rows.filter((r) => r.type === "ASSET"), ["FIXED_ASSET", "ACC_DEPRECIATION"], 1);
   const totalAssets = r2(currentAssets.total + fixedAssets.total);
@@ -188,17 +251,21 @@ export async function balanceSheet(t: Db, companyId: string, q: any) {
 /** Direct-method cash flow: movements on cash/bank accounts classified by counterpart. */
 export async function cashFlow(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
+  const cfO: any[] = [companyId, from];
+  const cfOB = branchCond(q, cfO);
   const opening = await t.one(
     `SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
-     WHERE a.company_id=$1 AND a.is_cash_bank AND e.status='POSTED' AND e.date < $2`, [companyId, from]);
+     WHERE a.company_id=$1 AND a.is_cash_bank AND e.status='POSTED' AND e.date < $2${cfOB}`, cfO);
+  const cfP: any[] = [companyId, from, to];
+  const cfB = branchCond(q, cfP);
   const rows = await t.rows(
     `WITH cash_entries AS (
        SELECT e.id, SUM(l.debit - l.credit) cash_delta FROM journal_entries e JOIN journal_lines l ON l.entry_id=e.id JOIN accounts a ON a.id=l.account_id
-       WHERE e.company_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3 AND a.is_cash_bank GROUP BY e.id HAVING SUM(l.debit - l.credit) <> 0)
+       WHERE e.company_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3${cfB} AND a.is_cash_bank GROUP BY e.id HAVING SUM(l.debit - l.credit) <> 0)
      SELECT a.subtype, a.type, SUM(l.credit - l.debit) amt
      FROM cash_entries ce JOIN journal_lines l ON l.entry_id=ce.id JOIN accounts a ON a.id=l.account_id
      WHERE NOT a.is_cash_bank GROUP BY a.subtype, a.type`,
-    [companyId, from, to],
+    cfP,
   );
   const cls = (s: string, ty: string) => (["FIXED_ASSET", "ACC_DEPRECIATION"].includes(s) ? "investing" : ["CAPITAL", "EQUITY", "RETAINED", "LONG_TERM_LIABILITY"].includes(s) || ty === "EQUITY" ? "financing" : "operating");
   const out: any = { operating: [], investing: [], financing: [] };
@@ -365,6 +432,10 @@ export async function integrity(t: Db, companyId: string) {
   checks.push({ name: "سلف الموظفين القائمة = حساب سلف وعهد الموظفين", ok: Math.abs(Number(loans.b) + g("EMP_ADVANCES")) < 0.01, a: r2(loans.b), b: r2(-g("EMP_ADVANCES")), note: "العهد النقدية المسجلة يدوياً على نفس الحساب تظهر كفرق" });
   const lots = await t.one(`SELECT COALESCE(SUM(b.qty),0) s, COALESCE((SELECT SUM(l.qty) FROM stock_lots l JOIN products p2 ON p2.id=l.product_id WHERE l.company_id=$1 AND p2.track_lots),0) l FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 AND p.track_lots`, [companyId]);
   checks.push({ name: "أرصدة الدفعات (Lots) = كميات المخزون للأصناف المتتبعة", ok: Math.abs(Number(lots.s) - Number(lots.l)) < 0.001, a: r2(lots.l), b: r2(lots.s) });
+  const br = await t.one(
+    `SELECT (SELECT COUNT(*)::int FROM journal_entries WHERE company_id=$1 AND branch_id IS NULL) unassigned,
+       COALESCE((SELECT SUM(l.debit-l.credit) FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='INTER_BRANCH' AND e.status='POSTED'),0) inter`, [companyId]);
+  checks.push({ name: "كل القيود موزعة على فروع وجاري الفروع متوازن على مستوى المنشأة", ok: br.unassigned === 0 && Math.abs(Number(br.inter)) < 0.01, a: br.unassigned, b: r2(br.inter), note: "a = قيود بلا فرع، b = رصيد جاري الفروع (يجب أن يكون صفراً)" });
   return { ok: checks.every((c) => c.ok), checks };
 }
 

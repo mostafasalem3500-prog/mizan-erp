@@ -1,6 +1,6 @@
 import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, isDate, today } from "../lib/core";
-import { post, nextNumber, reverse } from "../accounting/engine";
+import { post, nextNumber, reverse, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut } from "../accounting/stock";
 import { vatReturn } from "./reports";
 
@@ -93,9 +93,26 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
     }
   }
   if (kind === "OPENING" && totalValue) jl.push({ key: "OPENING_EQUITY", credit: totalValue, description: `رصيد افتتاحي للمخزون ${number}` });
-  const entry = jl.length ? await post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", reference: number, memo: kind === "OPENING" ? `أرصدة افتتاحية مخزون ${number}` : `تسوية جرد ${number}`, createdBy: user, isDemo: a.isDemo, lines: jl }) : null;
+  const branchId = await warehouseBranch(t, companyId, wh);
+  // transfer between warehouses of different branches → each branch's books move through the inter-branch current account
+  let interEntry: any = null;
+  if (kind === "TRANSFER") {
+    const toBranch = await warehouseBranch(t, companyId, a.toWarehouse);
+    const value = r2(out.reduce((s, o) => s + Number(o.value || 0), 0));
+    totalValue = value;
+    if (toBranch !== branchId && value > 0) {
+      const names = await t.rows(`SELECT id, name FROM branches WHERE id = ANY($1)`, [[branchId, toBranch]]);
+      const nm = (id: string) => names.find((x) => x.id === id)?.name || "";
+      jl.push({ key: "INTER_BRANCH", debit: value, description: `بضاعة محولة إلى ${nm(toBranch)} ${number}` }, { key: "INVENTORY", credit: value, description: `تحويل مخزني صادر ${number}` });
+      interEntry = await post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", branchId: toBranch, reference: number, memo: `تحويل مخزني وارد من ${nm(branchId)} ${number}`, createdBy: user, isDemo: a.isDemo, lines: [
+        { key: "INVENTORY", debit: value, description: `تحويل مخزني وارد ${number}` }, { key: "INTER_BRANCH", credit: value, description: `بضاعة واردة من ${nm(branchId)} ${number}` },
+      ] });
+    }
+  }
+  const entry = jl.length ? await post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", branchId, reference: number, memo: kind === "OPENING" ? `أرصدة افتتاحية مخزون ${number}` : kind === "TRANSFER" ? `تحويل مخزني صادر ${number}` : `تسوية جرد ${number}`, createdBy: user, isDemo: a.isDemo, lines: jl }) : null;
   const row = await t.insert("stock_adjustments", { companyId, number, date, warehouseId: wh, kind, toWarehouse: a.toWarehouse || null, notes: a.notes || null, lines: out, totalValue, journalId: entry?.id || null, isDemo: !!a.isDemo });
   if (entry) await t.exec(`UPDATE journal_entries SET source_id=$2 WHERE id=$1`, [entry.id, row.id]);
+  if (interEntry) await t.exec(`UPDATE journal_entries SET source_id=$2 WHERE id=$1`, [interEntry.id, row.id]);
   return row;
 }
 

@@ -6,6 +6,20 @@ import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
 import { bootstrapCompany } from "../routes/auth";
 import { loadDemo, DEMO_VERSION, resetShowcaseCompany } from "./demo";
+import { newSallaToken, processEvent, sampleOrder } from "./salla";
+
+/** Showcase only: a connected Salla store with a few processed orders, so the integration screen is not empty. */
+async function showcaseSalla(companyId: string) {
+  let conn = await db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1`, [companyId]);
+  if (!conn) {
+    const wh = await db.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
+    conn = await db.insert("salla_connections", { companyId, token: newSallaToken(), storeName: "متجر الأفق على سلة (تجريبي)", warehouseId: wh.id });
+  }
+  for (const cod of [false, true, false]) {
+    const body = await sampleOrder(companyId, { cod, warehouseId: conn.warehouseId });
+    await processEvent(conn, body);
+  }
+}
 
 export async function seedDemoAccount() {
   const email = (process.env.DEMO_EMAIL || "").trim().toLowerCase();
@@ -35,6 +49,7 @@ export async function seedDemoAccount() {
     console.log(stale ? "[demo-account] refreshing showcase dataset to v" + DEMO_VERSION : "[demo-account] loading demo dataset…");
     (stale || c.demoJob?.error ? resetShowcaseCompany(companyId) : Promise.resolve())
       .then(() => loadDemo(companyId, userId, "مستخدم تجريبي"))
+      .then(() => showcaseSalla(companyId).catch((e) => console.error("[demo-account] salla sample", e)))
       .then(() => console.log("[demo-account] demo dataset loaded"))
       .catch(async (e) => {
         console.error("[demo-account] failed", e);

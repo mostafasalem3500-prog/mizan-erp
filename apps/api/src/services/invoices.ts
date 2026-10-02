@@ -4,7 +4,8 @@
  */
 import { Db } from "../db/pool";
 import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, isDate, addDays, TAX_CODES, today } from "../lib/core";
-import { post, nextNumber, assertOpenDate, accountByKey, Line } from "../accounting/engine";
+import { currentCtx } from "../lib/context";
+import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut, avgCost } from "../accounting/stock";
 import { stampInvoice } from "../zatca/stamp";
 import { rateFor, toFc, fcUnitToBase, BASE } from "./currency";
@@ -50,7 +51,10 @@ export interface InvoiceInput {
 }
 
 export async function defaultWarehouse(t: Db, companyId: string) {
-  const w = await t.maybe(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
+  // prefer a warehouse of the branch chosen on the request / the user's home branch, then the company default
+  const ctx = currentCtx();
+  const pref = [ctx.bodyBranchId, ctx.userBranchId].find((b) => b && /^[0-9a-f-]{36}$/i.test(b)) || null;
+  const w = await t.maybe(`SELECT id FROM warehouses WHERE company_id=$1 AND is_active ORDER BY (branch_id IS NOT DISTINCT FROM $2::uuid AND $2::uuid IS NOT NULL) DESC, is_default DESC, code LIMIT 1`, [companyId, pref]);
   if (!w) throw bad("لا يوجد مستودع معرف");
   return w.id as string;
 }
@@ -114,6 +118,10 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   if (!isDate(date)) throw bad("التاريخ غير صحيح");
   if (!input.partnerId) throw bad(input.direction === "SALE" ? "اختر العميل" : "اختر المورد");
   const partner = await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [input.partnerId, companyId], "الطرف غير موجود");
+  // warehouse: explicit → (editing) the draft's current one → (notes) the original document's → branch/company default
+  if (input.warehouseId) await t.one(`SELECT id FROM warehouses WHERE id=$1 AND company_id=$2`, [input.warehouseId, companyId], "المستودع غير موجود");
+  else if (id) input = { ...input, warehouseId: (await t.maybe(`SELECT warehouse_id FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId]))?.warehouseId || null };
+  if (!input.warehouseId && input.originId) input = { ...input, warehouseId: (await t.maybe(`SELECT warehouse_id FROM invoices WHERE id=$1 AND company_id=$2`, [input.originId, companyId]))?.warehouseId || null };
   const incl = input.pricesIncludeVat ?? (input.direction === "SALE" ? !!company.pricesIncludeVat : false);
   // currency: explicit → partner default → SAR. Notes inherit the original document's currency and rate.
   let currency = String(input.currency || partner.currency || BASE).toUpperCase();
@@ -155,7 +163,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     partnerName: partner.name,
     partnerVat: partner.vatNumber,
     warehouseId: input.warehouseId || (await defaultWarehouse(t, companyId)),
-    branchId: input.branchId || null,
+    branchId: null as string | null,
     invoiceType,
     originId: input.originId || null,
     supplierRef: input.supplierRef || null,
@@ -173,6 +181,8 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     priceListId: input.priceListId || null,
     isDemo: !!input.isDemo,
   };
+  // branch: chosen on the document → the warehouse's branch → request/user/main branch
+  doc.branchId = input.branchId ? await resolveBranch(t, companyId, input.branchId) : await warehouseBranch(t, companyId, doc.warehouseId);
   let inv: any;
   if (id) {
     const cur = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId]);
@@ -199,7 +209,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
 }
 
 export async function getInvoice(t: Db, companyId: string, id: string) {
-  const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId], "المستند غير موجود");
+  const inv = await t.one(`SELECT i.*, b.name AS branch_name, b.is_main AS branch_is_main, b.address AS branch_address, b.phone AS branch_phone, w.name AS warehouse_name FROM invoices i LEFT JOIN branches b ON b.id=i.branch_id LEFT JOIN warehouses w ON w.id=i.warehouse_id WHERE i.id=$1 AND i.company_id=$2`, [id, companyId], "المستند غير موجود");
   inv.lines = await t.rows(
     `SELECT l.*, p.sku, p.unit, p.barcode, p.track_lots, u.id AS uom_id FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id LEFT JOIN product_uoms u ON u.product_id=l.product_id AND u.name=l.uom WHERE l.invoice_id=$1 ORDER BY l.sort`,
     [id],
@@ -342,6 +352,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     type: inv.channel === "POS" ? "POS" : isSale ? (isReturn ? "SALES_RETURN" : "SALES") : isReturn ? "PURCHASE_RETURN" : "PURCHASE",
     sourceType: "INVOICE",
     sourceId: inv.id,
+    branchId: inv.branchId,
     reference: ref,
     memo: `${kindAr} ${ref} — ${inv.partnerName || ""}`,
     isDemo: inv.isDemo,
@@ -396,7 +407,7 @@ export async function convert(t: Db, company: any, id: string, user: string, toK
   if (!["QUOTATION", "ORDER"].includes(src.kind)) throw bad("يمكن التحويل من عرض سعر أو أمر فقط");
   if (src.status === "CONVERTED") throw conflict("تم تحويل هذا المستند مسبقاً");
   const draft = await saveDraft(t, company, user, {
-    direction: src.direction, kind: toKind, date: today(), partnerId: src.partnerId, warehouseId: src.warehouseId,
+    direction: src.direction, kind: toKind, date: today(), partnerId: src.partnerId, warehouseId: src.warehouseId, branchId: src.branchId,
     invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo, currency: src.currency, exchangeRate: Number(src.exchangeRate), priceListId: src.priceListId,
     lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.fcUnitPrice ?? l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uomId || null })),
     pricesIncludeVat: false,
@@ -413,7 +424,7 @@ export async function payCustomsVat(t: Db, companyId: string, user: string, id: 
   if (inv.customsPaidJournalId) throw conflict("ضريبة الجمارك مسددة مسبقاً");
   const acc = await t.one(`SELECT id FROM accounts WHERE id=$1 AND company_id=$2 AND is_cash_bank`, [accountId, companyId], "اختر حساب السداد");
   const d = date && isDate(date) ? date : today();
-  const e = await post(t, companyId, { date: d, type: "PAYMENT", sourceType: "INVOICE", sourceId: inv.id, reference: inv.number, memo: `سداد ضريبة الاستيراد للجمارك — ${inv.number}`, createdBy: user, isDemo: inv.isDemo, lines: [
+  const e = await post(t, companyId, { date: d, type: "PAYMENT", sourceType: "INVOICE", sourceId: inv.id, branchId: inv.branchId, reference: inv.number, memo: `سداد ضريبة الاستيراد للجمارك — ${inv.number}`, createdBy: user, isDemo: inv.isDemo, lines: [
     { key: "CUSTOMS_PAYABLE", debit: Number(inv.customsVat), description: `ضريبة جمارك ${inv.number}` },
     { account: acc.id, credit: Number(inv.customsVat), description: `سداد جمارك ${inv.number}` },
   ] });

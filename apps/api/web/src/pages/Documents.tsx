@@ -16,12 +16,16 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [pay, setPay] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [channel, setChannel] = useState("");
+  const branches = useFetch<any[]>("/branches");
+  const multiBranch = (branches.data?.length || 0) > 1;
   const [page, setPage] = useState(0);
   const dq = useDebounce(search);
   const [editor, setEditor] = useState<{ kind: string; id?: string } | null>(null);
-  const { data, loading, reload } = useFetch(`/invoices${q({ direction, kind: kinds.join(","), q: dq, status, paymentStatus: pay, limit: 50, offset: page * 50 })}`);
+  const { data, loading, reload } = useFetch(`/invoices${q({ direction, kind: kinds.join(","), q: dq, status, paymentStatus: pay, branchId: branchId || undefined, channel: channel || undefined, limit: 50, offset: page * 50 })}`);
   const writePerm = direction === "SALE" ? "sales.write" : "purchases.write";
-  useEffect(() => setPage(0), [dq, status, pay]);
+  useEffect(() => setPage(0), [dq, status, pay, branchId, channel]);
   return (
     <div className="card">
       <div className="card-h">
@@ -36,15 +40,17 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
           <div className="search"><span className="ic">🔍</span><Input placeholder="بحث بالرقم أو الاسم" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option><option value="DRAFT">مسودة</option><option value="POSTED">مرحّل</option><option value="CONVERTED">محوّل</option></Select>
           {kinds.includes("INVOICE") && <Select value={pay} onChange={(e) => setPay(e.target.value)}><option value="">كل حالات السداد</option><option value="UNPAID">غير مسدد</option><option value="PARTIAL">جزئي</option><option value="PAID">مسدد</option></Select>}
+          {multiBranch && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{branches.data!.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}
+          {direction === "SALE" && kinds.includes("INVOICE") && <Select value={channel} onChange={(e) => setChannel(e.target.value)}><option value="">كل القنوات</option><option value="BACKOFFICE">المكتب</option><option value="POS">نقاط البيع</option><option value="SALLA">متجر سلة</option><option value="API">الواجهة البرمجية</option></Select>}
           <div className="grow" />
-          {data && <ExportBtn name={title} rows={() => data.rows.map((r: any) => ({ الرقم: r.number, النوع: KIND_AR[r.kind], الطرف: r.partnerName, التاريخ: r.date, الاستحقاق: r.dueDate, الحالة: STATUS_AR[r.status], "قبل الضريبة": r.taxable, الضريبة: r.vatTotal, الإجمالي: r.total, المسدد: r.amountPaid }))} />}
+          {data && <ExportBtn name={title} rows={() => data.rows.map((r: any) => ({ الرقم: r.number, النوع: KIND_AR[r.kind], الطرف: r.partnerName, التاريخ: r.date, الاستحقاق: r.dueDate, الحالة: STATUS_AR[r.status], "قبل الضريبة": r.taxable, الضريبة: r.vatTotal, الإجمالي: r.total, المسدد: r.amountPaid, الفرع: r.branchName || "" }))} />}
         </div>
         {loading && !data ? <Loading /> : !data?.rows.length ? <Empty /> : (
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>الرقم</th><th>التاريخ</th><th>{direction === "SALE" ? "العميل" : "المورد"}</th><th>النوع</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>الحالة</th>{direction === "SALE" && kinds.includes("INVOICE") && <th>الهيئة</th>}</tr></thead>
             <tbody>{data.rows.map((r: any) => (
               <tr key={r.id} className="clickable" onClick={() => r.status === "DRAFT" && (r.kind === "QUOTATION" || r.kind === "ORDER" || r.kind === "INVOICE") ? setEditor({ kind: r.kind, id: r.id }) : nav(`/doc/${r.id}`)}>
-                <td><b>{r.number}</b>{r.channel === "POS" && <span className="badge gray" style={{ marginInlineStart: 4 }}>POS</span>}{r.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td>
+                <td><b>{r.number}</b>{r.channel === "POS" && <span className="badge gray" style={{ marginInlineStart: 4 }}>POS</span>}{r.channel === "SALLA" && <span className="badge teal" style={{ marginInlineStart: 4 }}>سلة</span>}{r.channel === "API" && <span className="badge blue" style={{ marginInlineStart: 4 }}>API</span>}{r.branchName && multiBranch && <div className="small muted">{r.branchName}</div>}{r.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td>
                 <td>{fmtDate(r.date)}</td><td>{r.partnerName}</td><td>{KIND_AR[r.kind]}</td>
                 <td className="n"><Money v={r.taxable} /></td><td className="n"><Money v={r.vatTotal} /></td><td className="n"><b><Money v={r.total} /></b></td>
                 <td className="n">{r.kind === "INVOICE" && r.status === "POSTED" ? <Money v={Number(r.total) - Number(r.amountPaid)} blankZero /> : ""}</td>
@@ -95,6 +101,8 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   const [currency, setCurrency] = useState("SAR");
   const [rate, setRate] = useState<number>(1);
   const [priceList, setPriceList] = useState<any>(null);
+  const whs = useFetch<any[]>("/warehouse-options");
+  const [warehouseId, setWarehouseId] = useState("");
   const fc = currency !== "SAR";
   const sym = (currencies || []).find((c: any) => c.code === currency)?.symbol || currency;
   // partner defaults: currency (foreign suppliers/customers) and price list (customers)
@@ -112,7 +120,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
     api(`/invoices/${id}`).then((d) => {
       setPartner(d.partner || { id: d.partnerId, name: d.partnerName });
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
-      setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1);
+      setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1); setWarehouseId(d.warehouseId || "");
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
       setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
       setLoaded(true);
@@ -139,7 +147,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
     if (!p) return upd(k, { product: null, uom: null });
     upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
-  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null,
+  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
     lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null })) });
   const save = (post: boolean) => run(async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
@@ -171,6 +179,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
         </Field>
         <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         {kind !== "QUOTATION" && <Field label="تاريخ الاستحقاق"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
+        {(whs.data?.length || 0) > 1 && !isNote && <Field label={isSale ? "يُصرف من مستودع / فرع" : "يُستلم في مستودع / فرع"}><Select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">تلقائي{whs.data![0]?.mine ? " (مستودع فرعي)" : " (المستودع الافتراضي)"}</option>{whs.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
         {!isSale && <Field label="رقم فاتورة المورد"><Input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} dir="ltr" /></Field>}
         {isNote && <Field label="سبب الإشعار (إلزامي للهيئة)" span2><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: إرجاع بضاعة / خطأ في السعر" /></Field>}
         <Field label="العملة"><div className="row" style={{ gap: 6 }}><Select value={currency} disabled={isNote} onChange={(e) => changeCurrency(e.target.value)} style={{ width: 110 }}>{(currencies || [{ code: "SAR" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</Select>{fc && <NumInput title="سعر الصرف: ريال لكل وحدة" value={rate} disabled={isNote} onChange={(e) => setRate(Number(e.target.value) || 0)} style={{ width: 100 }} />}</div></Field>
@@ -366,6 +375,8 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
                 {d.dueDate && d.kind === "INVOICE" && <tr><td style={{ border: "none" }} className="muted">الاستحقاق</td><td style={{ border: "none" }} className="num">{fmtDate(d.dueDate)}</td></tr>}
                 {d.origin && <tr><td style={{ border: "none" }} className="muted">مرجع الفاتورة</td><td style={{ border: "none" }} className="num">{d.origin.number}</td></tr>}
                 {d.supplierRef && <tr><td style={{ border: "none" }} className="muted">فاتورة المورد</td><td style={{ border: "none" }} className="num">{d.supplierRef}</td></tr>}
+                {d.branchName && !d.branchIsMain && <tr><td style={{ border: "none" }} className="muted">الفرع</td><td style={{ border: "none" }}>{d.branchName}{d.branchPhone ? <span className="num"> · {d.branchPhone}</span> : ""}</td></tr>}
+                {d.channel === "SALLA" && d.externalRef && <tr><td style={{ border: "none" }} className="muted">طلب سلة</td><td style={{ border: "none" }} className="num">{d.externalRef.replace("salla:", "#")}</td></tr>}
                 {fc && <tr><td style={{ border: "none" }} className="muted">العملة</td><td style={{ border: "none" }} className="num">{d.currency} — سعر الصرف {Number(d.exchangeRate)}</td></tr>}
               </tbody></table>
             </div>

@@ -28,6 +28,8 @@ export function PosPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncErrors, setSyncErrors] = useState<{ ref: string; msg: string }[]>([]);
   const [openCash, setOpenCash] = useState("");
+  const posWh = useFetch<any[]>("/warehouse-options");
+  const [posWhId, setPosWhId] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [newPartner, setNewPartner] = useState(false);
@@ -131,8 +133,9 @@ export function PosPage() {
       <div className="auth"><div className="form"><div className="box card"><div className="card-b">
         <div className="row mb"><button className="btn sm" onClick={() => nav("/")}>← الرئيسية</button><h2>فتح وردية نقطة البيع</h2></div>
         <p className="muted">الكاشير: <b>{me.user.fullName}</b> · المنشأة: {me.company.nameAr}</p>
+        {(posWh.data?.length || 0) > 1 && <Field label="المستودع / الفرع"><Select value={posWhId} onChange={(e) => setPosWhId(e.target.value)}><option value="">تلقائي{posWh.data![0]?.mine ? " — مستودع فرعي" : ""}</option>{posWh.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
         <Field label="النقدية الافتتاحية في الدرج (ر.س)"><NumInput autoFocus value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" /></Field>
-        <button className="btn primary lg block mt" disabled={busy} onClick={() => run(async () => { await api("/pos/session/open", { body: { openingCash: Number(openCash || 0) } }); sess.reload(); }, "تم فتح الوردية")}>فتح الوردية وبدء البيع</button>
+        <button className="btn primary lg block mt" disabled={busy} onClick={() => run(async () => { await api("/pos/session/open", { body: { openingCash: Number(openCash || 0), warehouseId: posWhId || undefined } }); sess.reload(); }, "تم فتح الوردية")}>فتح الوردية وبدء البيع</button>
         <div className="hint mt">لا يمكن البيع بدون وردية مفتوحة. ستُحسب النقدية المتوقعة عند الإغلاق تلقائياً.</div>
       </div></div></div></div>
     );

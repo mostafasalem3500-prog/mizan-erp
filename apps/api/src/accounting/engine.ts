@@ -9,6 +9,7 @@
 import { Db } from "../db/pool";
 import { AppError, bad, conflict, r2, D, AR_MONTHS, monthEnd } from "../lib/core";
 import { SAUDI_COA, TYPE_BY_CLASS } from "./coa";
+import { currentCtx } from "../lib/context";
 
 export interface Line {
   account?: string; // account id
@@ -96,6 +97,40 @@ export async function accountByKey(t: Db, companyId: string, key: string) {
   return a;
 }
 
+// ─── branches ──────────────────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEAD_OFFICE_TYPES = new Set(["CLOSING", "VAT_SETTLEMENT"]);
+
+export async function mainBranchId(t: Db, companyId: string): Promise<string> {
+  const b = await t.maybe(`SELECT id FROM branches WHERE company_id=$1 ORDER BY is_main DESC, code LIMIT 1`, [companyId]);
+  if (b) return b.id;
+  const nb = await t.insert("branches", { companyId, code: "MAIN", name: "الفرع الرئيسي", isMain: true });
+  return nb.id;
+}
+
+/**
+ * Branch of a document / entry: explicit value → the branch chosen on the request → the user's home branch → main branch.
+ * Any id that does not belong to the company (or is inactive) is ignored rather than trusted.
+ */
+export async function resolveBranch(t: Db, companyId: string, explicit?: string | null): Promise<string> {
+  const ctx = currentCtx();
+  for (const id of [explicit, ctx.bodyBranchId, ctx.userBranchId]) {
+    if (!id || !UUID_RE.test(id)) continue;
+    const b = await t.maybe(`SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active`, [id, companyId]);
+    if (b) return b.id;
+  }
+  return mainBranchId(t, companyId);
+}
+
+/** Branch that owns a warehouse (falls back to the request/user/main branch). */
+export async function warehouseBranch(t: Db, companyId: string, warehouseId?: string | null): Promise<string> {
+  if (warehouseId) {
+    const w = await t.maybe(`SELECT branch_id FROM warehouses WHERE id=$1 AND company_id=$2`, [warehouseId, companyId]);
+    if (w?.branchId) return w.branchId;
+  }
+  return resolveBranch(t, companyId);
+}
+
 // ─── posting ───────────────────────────────────────────────────────────────
 export async function post(t: Db, companyId: string, input: PostInput) {
   if (!input.date) throw bad("تاريخ القيد مطلوب");
@@ -151,7 +186,7 @@ export async function post(t: Db, companyId: string, input: PostInput) {
     sourceId: input.sourceId || null,
     reference: input.reference || null,
     memo: input.memo || null,
-    branchId: input.branchId || null,
+    branchId: !input.branchId && HEAD_OFFICE_TYPES.has(input.type) ? await mainBranchId(t, companyId) : await resolveBranch(t, companyId, input.branchId),
     totalDebit: td.toFixed(2),
     isDemo: !!input.isDemo,
     createdBy: input.createdBy || null,
@@ -177,6 +212,7 @@ export async function reverse(t: Db, companyId: string, entryId: string, date: s
     sourceType: e.sourceType,
     sourceId: e.sourceId,
     reference: e.number,
+    branchId: e.branchId,
     memo: memo || `عكس القيد ${e.number}`,
     isDemo: e.isDemo,
     createdBy,

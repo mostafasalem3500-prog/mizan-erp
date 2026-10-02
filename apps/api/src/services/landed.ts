@@ -47,7 +47,7 @@ export async function computeAllocation(t: Db, companyId: string, input: LandedI
     const toInventory = r2(share * ratio);
     allocation.push({ lineId: l.id, productId: l.productId, description: l.pname, qty: Number(l.qty), base: baseOf(l), share, onHand, toInventory, toCogs: r2(share - toInventory), newUnitCost: onHand > 0 ? r4(D(bal?.value || 0).plus(toInventory).div(onHand)) : null });
   }
-  return { invoice: { id: inv.id, number: inv.number, partnerName: inv.partnerName, date: inv.date, total: inv.total, currency: inv.currency, warehouseId: inv.warehouseId }, method, costs, total, allocation, toInventory: r2(allocation.reduce((a, x) => a + x.toInventory, 0)), toCogs: r2(allocation.reduce((a, x) => a + x.toCogs, 0)) };
+  return { invoice: { id: inv.id, number: inv.number, partnerName: inv.partnerName, date: inv.date, total: inv.total, currency: inv.currency, warehouseId: inv.warehouseId, branchId: inv.branchId }, method, costs, total, allocation, toInventory: r2(allocation.reduce((a, x) => a + x.toInventory, 0)), toCogs: r2(allocation.reduce((a, x) => a + x.toCogs, 0)) };
 }
 
 export async function createLandedCost(t: Db, companyId: string, user: string, input: LandedInput) {
@@ -71,7 +71,7 @@ export async function postLandedCost(t: Db, companyId: string, user: string, id:
     { key: "COGS", debit: c.toCogs, description: `تكاليف استيراد لكميات مباعة ${lc.number}` },
     ...c.costs.map((x) => ({ ...(x.accountId ? { account: x.accountId } : { key: "LANDED_COST" }), credit: x.amount, description: x.description })),
   ];
-  const e = await post(t, companyId, { date, type: "STOCK", sourceType: "LANDED_COST", sourceId: lc.id, reference: lc.number, memo: `تحميل تكاليف استيراد على ${c.invoice.number} — ${c.invoice.partnerName}`, createdBy: user, isDemo: lc.isDemo, lines });
+  const e = await post(t, companyId, { date, type: "STOCK", sourceType: "LANDED_COST", sourceId: lc.id, branchId: c.invoice.branchId, reference: lc.number, memo: `تحميل تكاليف استيراد على ${c.invoice.number} — ${c.invoice.partnerName}`, createdBy: user, isDemo: lc.isDemo, lines });
   return t.update("landed_costs", { id }, { status: "POSTED", journalId: e!.id, allocation: c.allocation, total: c.total });
 }
 

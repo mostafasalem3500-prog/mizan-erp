@@ -16,6 +16,7 @@ export interface ExpenseInput {
   payAccountId?: string | null; // cash/bank; null → on credit to supplier (AP)
   costCenterId?: string | null;
   isDemo?: boolean;
+  branchId?: string | null;
 }
 
 export async function createExpense(t: Db, companyId: string, user: string, e: ExpenseInput) {
@@ -39,7 +40,7 @@ export async function createExpense(t: Db, companyId: string, user: string, e: E
   }
   if (pay) lines.push({ account: pay.id, credit: c.total, description: memo });
   else lines.push({ key: "AP", credit: c.total, partnerId: e.partnerId, description: memo });
-  const entry = await post(t, companyId, { date, type: "EXPENSE", sourceType: "EXPENSE", reference: e.supplierRef || number, memo: `مصروف ${number}: ${memo}`, isDemo: e.isDemo, createdBy: user, lines });
+  const entry = await post(t, companyId, { date, type: "EXPENSE", sourceType: "EXPENSE", branchId: e.branchId, reference: e.supplierRef || number, memo: `مصروف ${number}: ${memo}`, isDemo: e.isDemo, createdBy: user, lines });
   const row = await t.insert("expenses", {
     companyId, number, date, accountId: acc.id, payee: e.payee || null, partnerId: e.partnerId || null, supplierVat: e.supplierVat || null,
     supplierRef: e.supplierRef || null, description: e.description, amount: c.net, taxCode, vatAmount: c.vat, total: c.total,

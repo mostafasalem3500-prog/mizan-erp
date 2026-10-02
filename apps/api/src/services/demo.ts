@@ -45,7 +45,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 8;
+export const DEMO_VERSION = 9;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -99,6 +99,11 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     ] });
     // opening stock
     await stockAdjustment(t, companyId, userName, { date: openDate, warehouseId: wh.id, kind: "OPENING", isDemo: true, lines: products.filter((p) => p.type === "STOCK").map((p) => ({ productId: p.id, qty: between(80, 250), unitCost: Number(p.purchasePrice) })) });
+    // second branch (Jeddah) with its own warehouse, stocked by an inter-branch transfer from the main warehouse
+    const jBranch = (await t.maybe(`SELECT * FROM branches WHERE company_id=$1 AND code='JED'`, [companyId])) || (await t.insert("branches", { companyId, code: "JED", name: "فرع جدة", city: "جدة", phone: "0126543210", address: "جدة — حي الروضة، شارع الأمير سلطان", isDemo: true }));
+    const wh2 = (await t.maybe(`SELECT * FROM warehouses WHERE company_id=$1 AND code='W-JED'`, [companyId])) || (await t.insert("warehouses", { companyId, code: "W-JED", name: "مستودع فرع جدة", branchId: jBranch.id, isDemo: true }));
+    const jedProducts = products.filter((p) => p.type === "STOCK").sort((a, b) => Number(b.salePrice) - Number(a.salePrice)).slice(2, 10);
+    await stockAdjustment(t, companyId, userName, { date: openDate, warehouseId: wh.id, kind: "TRANSFER", toWarehouse: wh2.id, isDemo: true, notes: "تجهيز مخزون فرع جدة", lines: jedProducts.map((p) => ({ productId: p.id, qty: 70 })) });
     // fixed assets
     await createAsset(t, companyId, userName, { name: "سيارة توصيل - تويوتا هايس", category: "سيارات", acquisitionDate: start, cost: 95000, vatAmount: 14250, salvageValue: 15000, usefulLifeMonths: 60, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120103'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120202'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أجهزة نقاط البيع والحاسب", category: "حاسب آلي", acquisitionDate: start, cost: 18000, vatAmount: 2700, salvageValue: 0, usefulLifeMonths: 36, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120106'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120205'`, [companyId])).id });
@@ -107,7 +112,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     // wholesale price list (8% off) linked to two company customers
     const pl = await savePriceList(t, companyId, { name: "عملاء الجملة", kind: "DISCOUNT", discountPct: 8, isDemo: true });
     await t.exec(`UPDATE partners SET price_list_id=$2 WHERE id = ANY($1)`, [customers.filter((x) => x.kind === "COMPANY").slice(0, 2).map((x) => x.id), pl.id]);
-    return { wh: wh.id, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier, uoms };
+    return { wh: wh.id, wh2: wh2.id, jBranch: jBranch.id, jedProducts, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier, uoms };
   });
 
   const stock = ids.products.filter((p) => p.type === "STOCK");
@@ -161,15 +166,16 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
       for (let i = 0; i < between(18, 24); i++) {
         const date = addDays(mStart, between(0, Math.max(0, daysBetween(mStart, mEnd))));
         const cust = pick(ids.customers.filter((x) => x.kind === "COMPANY"));
+        const jed = rand() < 0.4; // ~30% of B2B sales are made by the Jeddah branch from its own warehouse
         const lines = Array.from({ length: between(1, 4) }, () => {
-          const p = rand() < 0.15 ? pick(services) : pick(stock);
+          const p = rand() < 0.15 ? pick(services) : pick(jed ? ids.jedProducts : stock);
           const u = p.type === "STOCK" && ids.uoms[p.sku] && rand() < 0.5 ? ids.uoms[p.sku] : null; // sometimes sold by the carton
           return u ? { productId: p.id, qty: between(2, 8), unitPrice: Number(u.salePrice), discountPct: 0, taxCode: p.taxCode, uomId: u.id }
             : { productId: p.id, qty: p.type === "SERVICE" ? between(1, 3) : between(10, 60), unitPrice: Number(p.salePrice), discountPct: rand() < 0.3 ? pick([2, 5, 10]) : 0, taxCode: p.taxCode };
         });
         try {
           await t.savepoint(async () => {
-            const d = await saveDraft(t, c, userName, { direction: "SALE", kind: "INVOICE", date, partnerId: cust.id, warehouseId: ids.wh, invoiceType: "STANDARD", lines, isDemo: true });
+            const d = await saveDraft(t, c, userName, { direction: "SALE", kind: "INVOICE", date, partnerId: cust.id, warehouseId: jed ? ids.wh2 : ids.wh, invoiceType: "STANDARD", lines: jed ? lines.map((l: any) => ({ ...l, qty: Math.min(l.qty, 25), uomId: null, unitPrice: l.uomId ? Number(ids.products.find((x: any) => x.id === l.productId)?.salePrice) : l.unitPrice })) : lines, isDemo: true });
             salesInvoices.push(await postInvoice(t, c, d.id, userName));
           });
         } catch (e: any) {
@@ -204,6 +210,13 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         await t.exec(`UPDATE journal_entries SET date=$2 WHERE source_type='POS_SESSION' AND source_id=$1`, [session.id, date]);
       }
       // ── expenses ──
+      // Jeddah branch: monthly restock transfer + its own rent
+      {
+        const avail = await t.rows(`SELECT product_id, qty FROM stock_balances WHERE company_id=$1 AND warehouse_id=$2 AND product_id = ANY($3)`, [companyId, ids.wh, ids.jedProducts.map((p: any) => p.id)]);
+        const tl = ids.jedProducts.map((p: any) => ({ productId: p.id, qty: Math.min(between(45, 70), Math.floor(Number(avail.find((a) => a.productId === p.id)?.qty || 0) - 40)) })).filter((l: any) => l.qty >= 5);
+        if (tl.length) try { await t.savepoint(() => stockAdjustment(t, companyId, userName, { date: addDays(mStart, 2), warehouseId: ids.wh, kind: "TRANSFER", toWarehouse: ids.wh2, isDemo: true, notes: "تزويد فرع جدة", lines: tl })); } catch (e: any) { if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "EXPIRED_STOCK") throw e; }
+      }
+      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك عقار جدة", description: `إيجار معرض فرع جدة - ${mStart.slice(0, 7)}`, amount: 3200, taxCode: "S", payAccountId: ids.bank, branchId: ids.jBranch, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 5500, taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5205"), payee: "الشركة السعودية للكهرباء", description: "فاتورة كهرباء", amount: r2(1800 + rand() * 900), taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5206"), payee: "STC", description: "اتصالات وإنترنت", amount: 650, taxCode: "S", payAccountId: ids.bank, isDemo: true });
@@ -337,6 +350,11 @@ export async function resetShowcaseCompany(companyId: string) {
   await tx(async (t) => {
     const tables = await t.rows(`SELECT c1.table_name FROM information_schema.columns c1 JOIN information_schema.columns c2 ON c2.table_name=c1.table_name AND c2.table_schema=c1.table_schema AND c2.column_name='is_demo' WHERE c1.table_schema='public' AND c1.column_name='company_id'`);
     for (const r of tables) await t.exec(`UPDATE "${r.tableName}" SET is_demo=true WHERE company_id=$1`, [companyId]);
+    // structure the dataset builds on stays: chart of accounts, main branch, default warehouse
+    await t.exec(`UPDATE accounts SET is_demo=false WHERE company_id=$1`, [companyId]);
+    await t.exec(`UPDATE branches SET is_demo=false WHERE company_id=$1 AND is_main`, [companyId]);
+    await t.exec(`UPDATE warehouses SET is_demo=false WHERE company_id=$1 AND (is_default OR code='MAIN')`, [companyId]);
+    await t.exec(`DELETE FROM salla_events WHERE company_id=$1`, [companyId]);
     await t.exec(`DELETE FROM reminders WHERE company_id=$1`, [companyId]);
     await t.exec(`DELETE FROM bank_statement_lines WHERE company_id=$1`, [companyId]);
     await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1`, [companyId]);
@@ -374,6 +392,23 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM stock_balances WHERE company_id=$1 AND product_id = ANY($2)`, [companyId, demoProducts]);
     await t.exec(`DELETE FROM journal_entries WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM products WHERE company_id=$1 AND is_demo`, [companyId]);
+    // demo branches / warehouses (anything real still pointing at them moves to the main branch / default warehouse)
+    const mainBr = await t.maybe(`SELECT id FROM branches WHERE company_id=$1 AND is_main`, [companyId]);
+    const defWh = await t.maybe(`SELECT id FROM warehouses WHERE company_id=$1 AND NOT is_demo ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
+    if (mainBr) {
+      await t.exec(`UPDATE journal_entries SET branch_id=$2 WHERE company_id=$1 AND branch_id IN (SELECT id FROM branches WHERE company_id=$1 AND is_demo)`, [companyId, mainBr.id]);
+      await t.exec(`UPDATE invoices SET branch_id=$2 WHERE company_id=$1 AND branch_id IN (SELECT id FROM branches WHERE company_id=$1 AND is_demo)`, [companyId, mainBr.id]);
+      await t.exec(`UPDATE memberships SET branch_id=NULL WHERE company_id=$1 AND branch_id IN (SELECT id FROM branches WHERE company_id=$1 AND is_demo)`, [companyId]);
+      await t.exec(`UPDATE warehouses SET branch_id=$2 WHERE company_id=$1 AND NOT is_demo AND branch_id IN (SELECT id FROM branches WHERE company_id=$1 AND is_demo)`, [companyId, mainBr.id]);
+    }
+    if (defWh) {
+      for (const tb of ["invoices", "pos_sessions", "stock_adjustments", "stock_moves", "stock_lots"]) await t.exec(`UPDATE ${tb} SET warehouse_id=$2 WHERE company_id=$1 AND warehouse_id IN (SELECT id FROM warehouses WHERE company_id=$1 AND is_demo)`, [companyId, defWh.id]);
+      await t.exec(`UPDATE salla_connections SET warehouse_id=$2 WHERE company_id=$1 AND warehouse_id IN (SELECT id FROM warehouses WHERE company_id=$1 AND is_demo)`, [companyId, defWh.id]);
+    }
+    await t.exec(`UPDATE salla_connections SET branch_id=NULL WHERE company_id=$1 AND branch_id IN (SELECT id FROM branches WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM stock_balances WHERE company_id=$1 AND warehouse_id IN (SELECT id FROM warehouses WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM warehouses WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM branches WHERE company_id=$1 AND is_demo AND NOT is_main`, [companyId]);
     await t.exec(`DELETE FROM product_categories WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM partners WHERE company_id=$1 AND is_demo AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.partner_id=partners.id) AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.partner_id=partners.id)`, [companyId]);
     await t.exec(`DELETE FROM audit_logs WHERE company_id=$1 AND (details->>'isDemo')='true'`, [companyId]);

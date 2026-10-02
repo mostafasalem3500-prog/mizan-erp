@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg } from "../lib";
 
@@ -39,6 +40,7 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
   const [method, setMethod] = useState("CASH");
   const [ref, setRef] = useState("");
   const [notes, setNotes] = useState("");
+  const [branchId, setBranchId] = useState("");
   const [open, setOpen] = useState<any[]>([]);
   const [alloc, setAlloc] = useState<Record<string, number>>({});
   const [auto, setAuto] = useState(true);
@@ -60,7 +62,7 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
   useEffect(() => { if (auto) autoFill(); }, [amount, fcAmount, open, auto, currency]);
   const sym = (currencies || []).find((x: any) => x.code === currency)?.symbol || currency;
   return (
-    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
+    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, branchId: branchId || undefined, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label={direction === "IN" ? "العميل" : "المورد"} span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(direction === "IN" ? "CUSTOMER" : "SUPPLIER")} label={(p: any) => `${p.name} — الرصيد ${money(p.balance)}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
@@ -72,6 +74,7 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
         <Field label="الصندوق / البنك"><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
         <Field label="المرجع (حوالة/شيك)"><Input value={ref} onChange={(e) => setRef(e.target.value)} dir="ltr" /></Field>
         <Field label="بيان"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+        <BranchField value={branchId} onChange={setBranchId} />
       </div>
       {partner && (
         <div className="mt">
@@ -142,7 +145,7 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
   const net = f.amountIncludesVat && rate ? amt / 1.15 : amt;
   const vat = net * rate;
   return (
-    <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner)} onClick={() => run(async () => { await api("/expenses", { body: { ...f, amount: amt, accountId: account.id, payAccountId: credit ? null : pay.id, partnerId: credit ? partner.id : null } }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
+    <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner)} onClick={() => run(async () => { await api("/expenses", { body: { ...f, branchId: f.branchId || undefined, amount: amt, accountId: account.id, payAccountId: credit ? null : pay.id, partnerId: credit ? partner.id : null } }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={s("date")} /></Field>
@@ -155,6 +158,7 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
         <Field label="الرقم الضريبي للمورد" hint="لخصم ضريبة المدخلات يلزم فاتورة ضريبية صحيحة"><Input value={f.supplierVat} onChange={s("supplierVat")} dir="ltr" /></Field>
         <Field label="طريقة الدفع"><Select value={credit ? "CREDIT" : "NOW"} onChange={(e) => setCredit(e.target.value === "CREDIT")}><option value="NOW">دفع فوري (نقدي / بنك)</option><option value="CREDIT">آجل على حساب مورد</option></Select></Field>
         {credit ? <Field label="المورد" span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("SUPPLIER")} label={(p: any) => p.name} /></Field> : <Field label="من حساب" span2><Picker value={pay} onChange={setPay} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>}
+        <BranchField value={f.branchId || ""} onChange={(v) => setF({ ...f, branchId: v })} hint="تلقائي: فرعك الافتراضي أو الرئيسي" />
       </div>
     </Modal>
   );

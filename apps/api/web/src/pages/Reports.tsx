@@ -6,7 +6,7 @@ import { ZakatReport } from "./Round3";
 import { BudgetVsActual } from "./Budgets";
 
 const TABS = [
-  { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "income-compare", label: "قائمة دخل مقارنة" }, { key: "cost-centers", label: "مراكز التكلفة" }, { key: "budget", label: "الموازنة مقابل الفعلي" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
+  { key: "trial-balance", label: "ميزان المراجعة" }, { key: "income", label: "قائمة الدخل" }, { key: "income-compare", label: "قائمة دخل مقارنة" }, { key: "cost-centers", label: "مراكز التكلفة" }, { key: "branches", label: "مقارنة الفروع" }, { key: "budget", label: "الموازنة مقابل الفعلي" }, { key: "balance-sheet", label: "الميزانية العمومية" }, { key: "cash-flow", label: "التدفقات النقدية" },
   { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "zakat", label: "الزكاة" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
 ];
 
@@ -15,17 +15,25 @@ export function ReportsPage() {
   const nav = useNavigate();
   const [from, setFrom] = useState(yearStart());
   const [to, setTo] = useState(today());
+  const branches = useFetch<any[]>("/branches");
+  const [branchId, setBranchId] = useState("");
+  const multi = (branches.data?.length || 0) > 1;
+  const branchable = ["trial-balance", "income", "income-compare", "balance-sheet", "cash-flow"].includes(tab);
+  const b = multi && branchable ? branchId : "";
+  const bName = b ? branches.data?.find((x: any) => x.id === b)?.name : "";
   return (
     <div className="grid">
       <div className="tabs no-print">{TABS.map((t) => <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => nav(`/reports/${t.key}`)}>{t.label}</button>)}</div>
-      {tab !== "integrity" && tab !== "statements" && <div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>}
-      {tab === "trial-balance" && <TrialBalance from={from} to={to} />}
-      {tab === "income" && <Income from={from} to={to} />}
-      {tab === "income-compare" && <IncomeCompare from={from} to={to} />}
+      {tab !== "integrity" && tab !== "statements" && <div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />{multi && branchable && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ width: 200 }} title="تصفية حسب الفرع"><option value="">كل الفروع (المنشأة)</option>{branches.data!.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>}</div>}
+      {bName && <div className="alert info small no-print" style={{ margin: 0 }}>التقرير مصفّى على <b>{bName}</b> — يشمل القيود المسجلة على هذا الفرع فقط.</div>}
+      {tab === "trial-balance" && <TrialBalance from={from} to={to} branchId={b} bName={bName} />}
+      {tab === "income" && <Income from={from} to={to} branchId={b} bName={bName} />}
+      {tab === "income-compare" && <IncomeCompare from={from} to={to} branchId={b} bName={bName} />}
+      {tab === "branches" && <BranchCompare from={from} to={to} />}
       {tab === "cost-centers" && <CostCenters from={from} to={to} />}
       {tab === "budget" && <BudgetVsActual from={from} to={to} />}
-      {tab === "balance-sheet" && <BalanceSheet to={to} />}
-      {tab === "cash-flow" && <CashFlow from={from} to={to} />}
+      {tab === "balance-sheet" && <BalanceSheet to={to} branchId={b} bName={bName} />}
+      {tab === "cash-flow" && <CashFlow from={from} to={to} branchId={b} bName={bName} />}
       {tab === "aging" && <Aging to={to} />}
       {tab === "sales" && <SalesAnalysis from={from} to={to} />}
       {tab === "expenses" && <ExpensesAnalysis from={from} to={to} />}
@@ -42,13 +50,16 @@ function Head({ title, sub, rows, name }: { title: string; sub: string; rows?: a
   return <div className="card-h"><div><h3>{title}</h3><div className="small muted">{me.company.nameAr} · {sub}</div></div><div className="row no-print"><PrintBtn />{rows && <ExportBtn name={name || title} rows={rows} />}</div></div>;
 }
 
-function TrialBalance({ from, to }: { from: string; to: string }) {
+type BP = { branchId?: string; bName?: string };
+const bSub = (bName?: string) => (bName ? ` · ${bName}` : "");
+
+function TrialBalance({ from, to, branchId, bName }: { from: string; to: string } & BP) {
   const [all, setAll] = useState(false);
-  const { data } = useFetch(`/reports/trial-balance${q({ from, to, all: all ? 1 : 0 })}`);
+  const { data } = useFetch(`/reports/trial-balance${q({ from, to, all: all ? 1 : 0, branchId: branchId || undefined })}`);
   if (!data) return <Loading />;
   return (
     <div className="card">
-      <Head title="ميزان المراجعة" sub={`من ${from} إلى ${to}`} rows={data.rows.map((r: any) => ({ الحساب: r.code, الاسم: r.nameAr, "افتتاحي مدين": r.openingDr, "افتتاحي دائن": r.openingCr, "حركة مدين": r.debit, "حركة دائن": r.credit, "ختامي مدين": r.closingDr, "ختامي دائن": r.closingCr }))} />
+      <Head title="ميزان المراجعة" sub={`من ${from} إلى ${to}${bSub(bName)}`} rows={data.rows.map((r: any) => ({ الحساب: r.code, الاسم: r.nameAr, "افتتاحي مدين": r.openingDr, "افتتاحي دائن": r.openingCr, "حركة مدين": r.debit, "حركة دائن": r.credit, "ختامي مدين": r.closingDr, "ختامي دائن": r.closingCr }))} />
       <div className="card-b"><label className="check no-print"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> إظهار الحسابات الصفرية</label>{!data.balanced && <div className="alert err mt">تحذير: الميزان غير متوازن!</div>}</div>
       <div className="table-wrap"><table className="tbl compact"><thead><tr><th rowSpan={2}>الحساب</th><th colSpan={2} style={{ textAlign: "center" }}>رصيد أول المدة</th><th colSpan={2} style={{ textAlign: "center" }}>حركة الفترة</th><th colSpan={2} style={{ textAlign: "center" }}>رصيد آخر المدة</th></tr><tr><th className="n">مدين</th><th className="n">دائن</th><th className="n">مدين</th><th className="n">دائن</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead>
         <tbody>{data.rows.map((r: any) => <tr key={r.id}><td><span className="num muted">{r.code}</span> {r.nameAr}</td><td className="n"><Money v={r.openingDr} blankZero /></td><td className="n"><Money v={r.openingCr} blankZero /></td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.closingDr} blankZero /></td><td className="n"><Money v={r.closingCr} blankZero /></td></tr>)}</tbody>
@@ -61,12 +72,12 @@ function Section({ s, sign = 1 }: { s: any; sign?: number }) {
   return <>{s.sections.map((sec: any) => <React.Fragment key={sec.subtype}><tr className="group"><td>{sec.name}</td><td className="n"><Money v={sec.total} /></td></tr>{sec.items.map((i: any) => <tr key={i.code} className="sub"><td><span className="num muted">{i.code}</span> {i.name}</td><td className="n"><Money v={i.amount} /></td></tr>)}</React.Fragment>)}</>;
 }
 
-function Income({ from, to }: { from: string; to: string }) {
-  const { data: d } = useFetch(`/reports/income${q({ from, to })}`);
+function Income({ from, to, branchId, bName }: { from: string; to: string } & BP) {
+  const { data: d } = useFetch(`/reports/income${q({ from, to, branchId: branchId || undefined })}`);
   if (!d) return <Loading />;
   const T = ({ label, v, big }: { label: string; v: number; big?: boolean }) => <tr style={big ? { fontWeight: 700, fontSize: 15, background: "var(--primary-soft)" } : { fontWeight: 600 }}><td>{label}</td><td className="n"><Money v={v} sign={big} /></td></tr>;
   return (
-    <div className="card"><Head title="قائمة الدخل" sub={`عن الفترة من ${from} إلى ${to}`} />
+    <div className="card"><Head title="قائمة الدخل" sub={`عن الفترة من ${from} إلى ${to}${bSub(bName)}`} />
       <div className="table-wrap"><table className="tbl compact"><tbody>
         <Section s={d.sales} /><Section s={d.returns} /><T label="صافي المبيعات" v={d.netSales} />
         <Section s={d.cogs} /><T label={`مجمل الربح (${d.grossMargin}%)`} v={d.grossProfit} big />
@@ -78,15 +89,15 @@ function Income({ from, to }: { from: string; to: string }) {
   );
 }
 
-function IncomeCompare({ from, to }: { from: string; to: string }) {
+function IncomeCompare({ from, to, branchId, bName }: { from: string; to: string } & BP) {
   const [mode, setMode] = useState("prev");
-  const { data: d } = useFetch(`/reports/income-compare${q({ from, to, compare: mode })}`);
+  const { data: d } = useFetch(`/reports/income-compare${q({ from, to, compare: mode, branchId: branchId || undefined })}`);
   if (!d) return <Loading />;
   const Pct = ({ v }: { v: number | null }) => <td className={"n " + (v === null ? "" : v < 0 ? "neg-val" : "pos-val")}>{v === null ? "" : `${v > 0 ? "+" : ""}${v}%`}</td>;
   const Rows = ({ arr, title }: { arr: any[]; title: string }) => !arr.length ? null : <><tr className="group"><td>{title}</td><td colSpan={4} /></tr>{arr.map((r) => <tr key={r.code} className="sub"><td><span className="num muted">{r.code}</span> {r.name}</td><td className="n"><Money v={r.cur} /></td><td className="n"><Money v={r.prev} /></td><td className="n"><Money v={r.change} sign /></td><Pct v={r.pct} /></tr>)}</>;
   const T = ({ label, x, big }: { label: string; x: any; big?: boolean }) => <tr style={big ? { fontWeight: 700, background: "var(--primary-soft)" } : { fontWeight: 600 }}><td>{label}</td><td className="n"><Money v={x.cur} sign={big} /></td><td className="n"><Money v={x.prev} sign={big} /></td><td className="n"><Money v={x.change} sign /></td><Pct v={x.pct} /></tr>;
   return (
-    <div className="card"><Head title="قائمة الدخل المقارنة" sub={`${from} — ${to} مقابل ${d.prevFrom} — ${d.prevTo}`} rows={[...d.sales, ...d.returns, ...d.cogs, ...d.opex, ...d.otherIncome, ...d.otherExp, ...d.zakat].map((r: any) => ({ الحساب: r.code, الاسم: r.name, "الفترة الحالية": r.cur, "فترة المقارنة": r.prev, التغير: r.change, "%": r.pct }))} />
+    <div className="card"><Head title="قائمة الدخل المقارنة" sub={`${from} — ${to} مقابل ${d.prevFrom} — ${d.prevTo}${bSub(bName)}`} rows={[...d.sales, ...d.returns, ...d.cogs, ...d.opex, ...d.otherIncome, ...d.otherExp, ...d.zakat].map((r: any) => ({ الحساب: r.code, الاسم: r.name, "الفترة الحالية": r.cur, "فترة المقارنة": r.prev, التغير: r.change, "%": r.pct }))} />
       <div className="card-b no-print"><Select value={mode} onChange={(e) => setMode(e.target.value)} style={{ width: 260 }}><option value="prev">مقارنة بالفترة السابقة المماثلة</option><option value="year">مقارنة بنفس الفترة من العام الماضي</option></Select></div>
       <div className="table-wrap"><table className="tbl compact"><thead><tr><th>البند</th><th className="n">الفترة الحالية</th><th className="n">فترة المقارنة</th><th className="n">التغير</th><th className="n">%</th></tr></thead><tbody>
         <Rows arr={d.sales} title="المبيعات" /><Rows arr={d.returns} title="مردودات المبيعات" /><T label="صافي المبيعات" x={d.netSales} />
@@ -119,11 +130,41 @@ function CostCenters({ from, to }: { from: string; to: string }) {
   );
 }
 
-function BalanceSheet({ to }: { to: string }) {
-  const { data: d } = useFetch(`/reports/balance-sheet${q({ to })}`);
+function BranchCompare({ from, to }: { from: string; to: string }) {
+  const { data: d } = useFetch(`/reports/branches${q({ from, to })}`);
+  const nav = useNavigate();
+  if (!d) return <Loading />;
+  const rows: [string, string, boolean?][] = [["sales", "المبيعات"], ["returns", "مردودات المبيعات"], ["netSales", "صافي المبيعات", true], ["cogs", "تكلفة المبيعات"], ["gross", "مجمل الربح", true], ["otherIncome", "إيرادات أخرى"], ["expenses", "المصروفات التشغيلية والأخرى"], ["net", "صافي الربح", true]];
+  const max = Math.max(1, ...d.rows.map((r: any) => Math.abs(r.netSales)));
+  return (
+    <div className="grid">
+      <div className="grid c4">{d.rows.map((r: any) => <div key={r.id} className="card kpi"><div className="icon">🏬</div><div className="label">{r.name} {r.isMain && <span className="badge teal">رئيسي</span>}</div><div className="value"><Money v={r.net} sign /></div><div className="sub">صافي مبيعات <Money v={r.netSales} /> · هامش صافي <span dir="ltr">{r.netMargin}%</span></div><div style={{ height: 6, background: "var(--border)", borderRadius: 4, marginTop: 4 }}><div style={{ width: `${Math.round((Math.abs(r.netSales) / max) * 100)}%`, height: "100%", background: "var(--primary)", borderRadius: 4 }} /></div></div>)}</div>
+      <div className="card"><Head title="مقارنة أداء الفروع" sub={`من ${from} إلى ${to}`} rows={d.rows.map((r: any) => ({ الفرع: r.name, "صافي المبيعات": r.netSales, "تكلفة المبيعات": r.cogs, "مجمل الربح": r.gross, "المصروفات": r.expenses, "صافي الربح": r.net, "عدد الفواتير": r.invoices, "متوسط الفاتورة": r.avgTicket, "النقدية": r.cash, "المخزون": r.stock }))} />
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>البند</th>{d.rows.map((r: any) => <th key={r.id} className="n">{r.name}</th>)}<th className="n">الإجمالي</th></tr></thead>
+          <tbody>
+            {rows.map(([k, l, big]) => <tr key={k} style={big ? { fontWeight: 700, background: k === "net" ? "var(--primary-soft)" : undefined } : undefined}><td>{l}</td>{d.rows.map((r: any) => <td key={r.id} className="n"><Money v={r[k]} sign={k === "net"} /></td>)}<td className="n"><Money v={d.totals[k]} sign={k === "net"} /></td></tr>)}
+            <tr className="sub"><td>هامش مجمل الربح</td>{d.rows.map((r: any) => <td key={r.id} className="n">{r.grossMargin}%</td>)}<td className="n">{d.totals.grossMargin}%</td></tr>
+            <tr className="sub"><td>هامش صافي الربح</td>{d.rows.map((r: any) => <td key={r.id} className="n">{r.netMargin}%</td>)}<td className="n">{d.totals.netMargin}%</td></tr>
+            <tr className="group"><td colSpan={d.rows.length + 2}>مؤشرات تشغيلية</td></tr>
+            <tr className="sub"><td>عدد فواتير البيع</td>{d.rows.map((r: any) => <td key={r.id} className="n">{r.invoices}</td>)}<td className="n">{d.totals.invoices}</td></tr>
+            <tr className="sub"><td>منها نقاط البيع</td>{d.rows.map((r: any) => <td key={r.id} className="n">{r.posOrders}</td>)}<td className="n">{d.totals.posOrders}</td></tr>
+            <tr className="sub"><td>متوسط قيمة الفاتورة</td>{d.rows.map((r: any) => <td key={r.id} className="n"><Money v={r.avgTicket} /></td>)}<td /></tr>
+            <tr className="sub"><td>عملاء مختلفون</td>{d.rows.map((r: any) => <td key={r.id} className="n">{r.customers}</td>)}<td /></tr>
+            <tr className="sub"><td>رصيد النقدية والبنوك (حسب قيود الفرع)</td>{d.rows.map((r: any) => <td key={r.id} className="n"><Money v={r.cash} sign /></td>)}<td className="n"><Money v={d.totals.cash} sign /></td></tr>
+            <tr className="sub"><td>قيمة المخزون في مستودعات الفرع</td>{d.rows.map((r: any) => <td key={r.id} className="n"><Money v={r.stock} /></td>)}<td className="n"><Money v={d.totals.stock} /></td></tr>
+          </tbody></table></div>
+        <div className="card-b small muted">كل قيد محاسبي يحمل فرعاً واحداً (يُحدد من مستودع المستند أو الفرع المختار أو فرع المستخدم)، لذلك مجموع الفروع = أرقام المنشأة. التحويلات المخزنية بين الفروع تمر عبر حساب «جاري الفروع» الذي يتصفّر على مستوى المنشأة.
+          {d.rows.length < 2 && <div className="mt"><button className="btn sm primary no-print" onClick={() => nav("/settings/branches")}>＋ إضافة فرع</button></div>}</div>
+      </div>
+    </div>
+  );
+}
+
+function BalanceSheet({ to, branchId, bName }: { to: string } & BP) {
+  const { data: d } = useFetch(`/reports/balance-sheet${q({ to, branchId: branchId || undefined })}`);
   if (!d) return <Loading />;
   return (
-    <div className="card"><Head title="قائمة المركز المالي (الميزانية العمومية)" sub={`كما في ${to}`} />
+    <div className="card"><Head title="قائمة المركز المالي (الميزانية العمومية)" sub={`كما في ${to}${bSub(bName)}`} />
       {!d.balanced && <div className="alert err">الميزانية غير متوازنة — راجع فحص التطابق</div>}
       <div className="grid c2" style={{ gap: 0 }}>
         <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الأصول</th><th className="n">المبلغ</th></tr></thead><tbody><Section s={d.currentAssets} /><tr style={{ fontWeight: 600 }}><td>إجمالي الأصول المتداولة</td><td className="n"><Money v={d.currentAssets.total} /></td></tr><Section s={d.fixedAssets} /><tr style={{ fontWeight: 600 }}><td>صافي الأصول غير المتداولة</td><td className="n"><Money v={d.fixedAssets.total} /></td></tr></tbody><tfoot><tr><td>إجمالي الأصول</td><td className="n"><Money v={d.totalAssets} /></td></tr></tfoot></table></div>
@@ -133,12 +174,12 @@ function BalanceSheet({ to }: { to: string }) {
   );
 }
 
-function CashFlow({ from, to }: { from: string; to: string }) {
-  const { data: d } = useFetch(`/reports/cash-flow${q({ from, to })}`);
+function CashFlow({ from, to, branchId, bName }: { from: string; to: string } & BP) {
+  const { data: d } = useFetch(`/reports/cash-flow${q({ from, to, branchId: branchId || undefined })}`);
   if (!d) return <Loading />;
   const Sec = ({ title, items, total }: any) => <><tr className="group"><td>{title}</td><td className="n"><Money v={total} sign /></td></tr>{items.map((i: any, k: number) => <tr key={k} className="sub"><td>{i.name}</td><td className="n"><Money v={i.amount} sign /></td></tr>)}</>;
   return (
-    <div className="card"><Head title="قائمة التدفقات النقدية (الطريقة المباشرة)" sub={`من ${from} إلى ${to}`} />
+    <div className="card"><Head title="قائمة التدفقات النقدية (الطريقة المباشرة)" sub={`من ${from} إلى ${to}${bSub(bName)}`} />
       <div className="table-wrap"><table className="tbl compact"><tbody>
         <tr style={{ fontWeight: 600 }}><td>النقدية أول المدة</td><td className="n"><Money v={d.opening} /></td></tr>
         <Sec title="التدفقات من الأنشطة التشغيلية" items={d.operating} total={d.totals.operating} />

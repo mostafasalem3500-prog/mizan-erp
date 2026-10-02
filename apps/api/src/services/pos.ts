@@ -1,7 +1,7 @@
 /** Point of sale: sessions (shifts), sales, returns, session close with cash count. */
 import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, today } from "../lib/core";
-import { post, nextNumber } from "../accounting/engine";
+import { post, nextNumber, warehouseBranch } from "../accounting/engine";
 import { saveDraft, postInvoice, getInvoice, defaultWarehouse } from "./invoices";
 
 export async function openSession(t: Db, companyId: string, user: { id: string; name: string }, openingCash: number, warehouseId?: string) {
@@ -91,7 +91,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
       const cashAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='POS_CASH'`, [companyId]);
       const cardAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='CARD_CLEARING'`, [companyId]);
       for (const x of postTenders) {
-        await createPayment(t, companyId, user.name, { direction: "IN", partnerId: partner.id, date: posted.date, amount: x.amount, method: x.method, accountId: x.method === "CASH" ? cashAcc.id : cardAcc.id, reference: posted.number, allocations: [{ invoiceId: posted.id, amount: x.amount }], isDemo: !!s.isDemo });
+        await createPayment(t, companyId, user.name, { direction: "IN", partnerId: partner.id, date: posted.date, amount: x.amount, method: x.method, accountId: x.method === "CASH" ? cashAcc.id : cardAcc.id, reference: posted.number, allocations: [{ invoiceId: posted.id, amount: x.amount }], isDemo: !!s.isDemo, branchId: posted.branchId });
       }
       await t.exec(`UPDATE invoices SET tenders=$2, pos_session_id=$3 WHERE id=$1`, [posted.id, JSON.stringify([...postTenders, { method: "CREDIT", amount: creditAmount }]), session.id]);
     }
@@ -157,7 +157,7 @@ export async function closeSession(t: Db, companyId: string, user: string, sessi
   }
   let journalId: string | null = null;
   if (lines.length) {
-    const e = await post(t, companyId, { date: today(), type: "POS_CLOSE", sourceType: "POS_SESSION", sourceId: s.id, reference: s.number, memo: `إغلاق وردية ${s.number} — ${s.userName || ""}`, createdBy: user, isDemo: s.isDemo, lines });
+    const e = await post(t, companyId, { date: today(), type: "POS_CLOSE", sourceType: "POS_SESSION", sourceId: s.id, branchId: await warehouseBranch(t, companyId, s.warehouseId), reference: s.number, memo: `إغلاق وردية ${s.number} — ${s.userName || ""}`, createdBy: user, isDemo: s.isDemo, lines });
     journalId = e?.id || null;
   }
   return t.update("pos_sessions", { id: s.id }, { status: "CLOSED", closedAt: new Date(), expectedCash: expected, countedCash: counted, difference: diff, journalId });

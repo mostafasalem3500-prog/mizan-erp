@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { AppError, forbidden } from "./core";
 import { db } from "../db/pool";
+import { reqCtx } from "./context";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "mizan-dev-secret-change-me";
 
@@ -12,6 +13,7 @@ export interface AuthCtx {
   companyId: string | null;
   role: string | null;
   superAdmin: boolean;
+  branchId?: string | null;
 }
 
 declare global {
@@ -64,7 +66,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     if (payload.companyId) {
       // re-validate membership on every request so removed users lose access immediately
       const row = await db.maybe(
-        `SELECT c.*, m.role AS member_role FROM companies c JOIN memberships m ON m.company_id=c.id
+        `SELECT c.*, m.role AS member_role, m.branch_id AS member_branch_id FROM companies c JOIN memberships m ON m.company_id=c.id
          WHERE c.id=$1 AND m.user_id=$2 AND m.is_active`,
         [payload.companyId, payload.userId],
       );
@@ -72,12 +74,14 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       if (row) {
         req.company = row;
         req.auth.role = row.memberRole;
+        req.auth.branchId = row.memberBranchId || null;
       } else {
         req.company = await db.maybe("SELECT * FROM companies WHERE id=$1", [payload.companyId]);
         req.auth.role = "OWNER";
       }
     }
-    next();
+    const b = req.body && typeof req.body === "object" ? req.body.branchId : null;
+    reqCtx.run({ userBranchId: req.auth.branchId || null, bodyBranchId: typeof b === "string" && b ? b : null }, () => next());
   } catch (e) {
     next(e);
   }

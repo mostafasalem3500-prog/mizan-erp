@@ -39,13 +39,14 @@ ops.get(
     if (req.query.paymentStatus) add("i.payment_status=?", req.query.paymentStatus);
     if (req.query.partnerId) add("i.partner_id=?", req.query.partnerId);
     if (req.query.channel) add("i.channel=?", req.query.channel);
+    if (req.query.branchId && /^[0-9a-f-]{36}$/i.test(String(req.query.branchId))) add("i.branch_id=?", req.query.branchId);
     if (req.query.zatca) add("i.zatca_status=?", req.query.zatca);
     if (req.query.from) add("i.date>=?", req.query.from);
     if (req.query.to) add("i.date<=?", req.query.to);
     if (req.query.q) add("(i.number ILIKE ? OR i.partner_name ILIKE ? OR i.supplier_ref ILIKE ?)", `%${req.query.q}%`);
     const total = await db.one(`SELECT COUNT(*)::int c, COALESCE(SUM(CASE WHEN i.status='POSTED' THEN CASE WHEN i.kind='CREDIT_NOTE' THEN -i.total ELSE i.total END END),0) sum FROM invoices i WHERE ${where.join(" AND ")}`, params);
     params.push(limit, offset);
-    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid, i.branch_id, (SELECT name FROM branches b WHERE b.id=i.branch_id) branch_name, i.external_ref FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return { rows, total: total.c, sum: total.sum };
   }),
 );
