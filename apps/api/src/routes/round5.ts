@@ -55,7 +55,7 @@ r5.get("/reports/budget/:id", perm("reports.read"), h(async (req) => bud.budgetV
 // ── reports ───────────────────────────────────────────────────────────────
 r5.get("/reports/income-compare", perm("reports.read"), h(async (req) => incomeStatementCompare(db, cid(req), req.query)));
 r5.get("/reports/cost-centers", perm("reports.read"), h(async (req) => costCenterPnl(db, cid(req), req.query)));
-r5.get("/alerts", perm("dashboard.read"), h(async (req) => accountantAlerts(db, cid(req), today())));
+r5.get("/alerts", perm("dashboard.read"), h(async (req) => (req.auth.lockedBranchId ? { items: [], vat: { filed: true } } : accountantAlerts(db, cid(req), today()))));
 r5.get("/hr/employees/:id/statement", perm("accounting.read"), h(async (req) => {
   const e = await db.one(`SELECT * FROM employees WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الموظف غير موجود");
   const asOf = isDate(req.query.asOf) ? String(req.query.asOf) : monthEnd(today());

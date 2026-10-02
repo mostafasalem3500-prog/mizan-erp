@@ -215,6 +215,7 @@ export interface CsrProps {
   location: string;
   industry: string;
   production: boolean;
+  env?: string; // SANDBOX (developer portal) | SIMULATION | PRODUCTION — picks the certificate template
   invoiceTypes?: string; // TSCZ e.g. 1100
 }
 
@@ -228,7 +229,7 @@ utf8 = no
 distinguished_name = dn
 req_extensions = v3_req
 [v3_req]
-1.3.6.1.4.1.311.20.2 = ASN1:UTF8String:${p.production ? "ZATCA-Code-Signing" : "TSTZATCA-Code-Signing"}
+1.3.6.1.4.1.311.20.2 = ASN1:UTF8String:${p.production || p.env === "PRODUCTION" ? "ZATCA-Code-Signing" : p.env === "SIMULATION" ? "PREZATCA-Code-Signing" : "TSTZATCA-Code-Signing"}
 subjectAltName = dirName:dir_sect
 [dir_sect]
 SN = ${p.serial}

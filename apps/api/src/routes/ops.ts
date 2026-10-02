@@ -1,3 +1,4 @@
+import { runZatcaSelfTest } from "../zatca/selftest";
 import { Router } from "express";
 import { db, tx } from "../db/pool";
 import { h, bad, conflict, req as need, num, paging, today, isDate } from "../lib/core";
@@ -105,6 +106,7 @@ ops.get("/payments", perm("payments.read"), h(async (req) => {
   if (req.query.from) { params.push(req.query.from); where.push(`p.date>=$${params.length}`); }
   if (req.query.to) { params.push(req.query.to); where.push(`p.date<=$${params.length}`); }
   if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(p.number ILIKE $${params.length} OR pr.name ILIKE $${params.length} OR p.reference ILIKE $${params.length})`); }
+  if (/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || ""))) { params.push(String(req.query.branchId)); where.push(`EXISTS (SELECT 1 FROM journal_entries je WHERE je.id=p.journal_id AND je.branch_id=$${params.length})`); }
   params.push(limit, offset);
   return db.rows(`SELECT p.*, pr.name AS partner_name, a.name_ar AS account_name FROM payments p JOIN partners pr ON pr.id=p.partner_id JOIN accounts a ON a.id=p.account_id WHERE ${where.join(" AND ")} ORDER BY p.date DESC, p.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
@@ -120,6 +122,7 @@ ops.get("/expenses", perm("expenses.read"), h(async (req) => {
   if (req.query.from) { params.push(req.query.from); where.push(`e.date>=$${params.length}`); }
   if (req.query.to) { params.push(req.query.to); where.push(`e.date<=$${params.length}`); }
   if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(e.number ILIKE $${params.length} OR e.description ILIKE $${params.length} OR e.payee ILIKE $${params.length})`); }
+  if (/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || ""))) { params.push(String(req.query.branchId)); where.push(`EXISTS (SELECT 1 FROM journal_entries je WHERE je.id=e.journal_id AND je.branch_id=$${params.length})`); }
   params.push(limit, offset);
   return db.rows(`SELECT e.*, a.name_ar AS account_name, a.code AS account_code, pa.name_ar AS pay_account_name, p.name AS partner_name FROM expenses e JOIN accounts a ON a.id=e.account_id LEFT JOIN accounts pa ON pa.id=e.pay_account_id LEFT JOIN partners p ON p.id=e.partner_id WHERE ${where.join(" AND ")} ORDER BY e.date DESC, e.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
@@ -136,7 +139,7 @@ ops.post("/journals/opening", perm("accounting.write"), h(async (req) => tx((t) 
 // ─── inventory ─────────────────────────────────────────────────────────────
 ops.get("/inventory/valuation", perm("inventory.read"), h(async (req) => rep.inventoryValuation(db, cid(req), req.query)));
 ops.get("/inventory/card/:productId", perm("inventory.read"), h(async (req) => rep.stockCard(db, cid(req), p(req).productId, req.query)));
-ops.get("/inventory/adjustments", perm("inventory.read"), h(async (req) => db.rows(`SELECT a.*, w.name AS warehouse FROM stock_adjustments a JOIN warehouses w ON w.id=a.warehouse_id WHERE a.company_id=$1 ORDER BY a.date DESC, a.created_at DESC LIMIT 200`, [cid(req)])));
+ops.get("/inventory/adjustments", perm("inventory.read"), h(async (req) => db.rows(`SELECT a.*, w.name AS warehouse FROM stock_adjustments a JOIN warehouses w ON w.id=a.warehouse_id WHERE a.company_id=$1 ${/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || "")) ? `AND (w.branch_id='${req.query.branchId}'::uuid OR a.to_warehouse IN (SELECT id FROM warehouses WHERE branch_id='${req.query.branchId}'::uuid))` : ""} ORDER BY a.date DESC, a.created_at DESC LIMIT 200`, [cid(req)])));
 ops.post("/inventory/adjustments", perm("inventory.write"), h(async (req) => { const a = await tx((t) => misc.stockAdjustment(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "stock_adjustment", a.id, { number: a.number }); return a; }));
 
 // ─── assets ────────────────────────────────────────────────────────────────
@@ -153,7 +156,7 @@ ops.get("/pos/session", perm("pos.use"), h(async (req) => {
   const stats = await db.one(`SELECT COUNT(*)::int orders, COALESCE(SUM(CASE WHEN kind='INVOICE' THEN total ELSE -total END),0) net FROM invoices WHERE pos_session_id=$1 AND status='POSTED'`, [s.id]);
   return { session: { ...s, ...stats, expectedCash: Number(s.openingCash) + Number(s.cashSales) } };
 }));
-ops.get("/pos/sessions", perm("pos.use"), h(async (req) => db.rows(`SELECT * FROM pos_sessions WHERE company_id=$1 ORDER BY opened_at DESC LIMIT 100`, [cid(req)])));
+ops.get("/pos/sessions", perm("pos.use"), h(async (req) => db.rows(`SELECT * FROM pos_sessions WHERE company_id=$1 ${/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || "")) ? "AND warehouse_id IN (SELECT id FROM warehouses WHERE branch_id=$2)" : ""} ORDER BY opened_at DESC LIMIT 100`, /^[0-9a-f-]{36}$/i.test(String(req.query.branchId || "")) ? [cid(req), String(req.query.branchId)] : [cid(req)])));
 ops.post("/pos/session/open", perm("pos.use"), h(async (req) => tx((t) => pos.openSession(t, cid(req), { id: req.auth.userId, name: actor(req) }, num(req.body?.openingCash), req.body?.warehouseId))));
 ops.post("/pos/session/close", perm("pos.use"), h(async (req) => { const s = await tx((t) => pos.closeSession(t, cid(req), actor(req), req.body.sessionId, num(req.body.countedCash), req.body.moveToMainCash !== false)); await audit(req, "CLOSE_SESSION", "pos_session", s.id, { difference: s.difference }); return s; }));
 ops.get("/pos/session/:id/report", perm("pos.use"), h(async (req) => {
@@ -176,7 +179,7 @@ ops.post("/pos/return", perm("pos.use"), h(async (req) => {
 }));
 
 // ─── reports ───────────────────────────────────────────────────────────────
-ops.get("/dashboard", perm("dashboard.read"), h(async (req) => rep.dashboard(db, cid(req))));
+ops.get("/dashboard", perm("dashboard.read"), h(async (req) => rep.dashboard(db, cid(req), req.query.branchId ? String(req.query.branchId) : null)));
 ops.get("/reports/trial-balance", perm("reports.read"), h(async (req) => rep.trialBalance(db, cid(req), req.query)));
 ops.get("/reports/ledger", perm("reports.read"), h(async (req) => rep.generalLedger(db, cid(req), req.query)));
 ops.get("/reports/income", perm("reports.read"), h(async (req) => rep.incomeStatement(db, cid(req), req.query)));
@@ -187,10 +190,11 @@ ops.get("/reports/aging", perm("reports.read"), h(async (req) => rep.aging(db, c
 ops.get("/reports/vat", perm("vat.read"), h(async (req) => rep.vatReturn(db, cid(req), req.query)));
 ops.get("/reports/integrity", perm("reports.read"), h(async (req) => rep.integrity(db, cid(req))));
 ops.get("/reports/sales", perm("reports.read"), h(async (req) => {
+  const BF = /^[0-9a-f-]{36}$/i.test(String(req.query.branchId || "")) ? ` AND i.branch_id='${req.query.branchId}'::uuid` : "";
   const from = isDate(req.query.from) ? req.query.from : "1900-01-01", to = isDate(req.query.to) ? req.query.to : today();
-  const byProduct = await db.rows(`SELECT p.sku, p.name, c.name AS category, SUM(l.qty * l.factor * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) qty, SUM(l.net_amount * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) net, SUM(l.qty * l.factor * l.unit_cost * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) cost FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id LEFT JOIN product_categories c ON c.id=p.category_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date BETWEEN $2 AND $3 GROUP BY p.id, c.name ORDER BY net DESC`, [cid(req), from, to]);
-  const byCustomer = await db.rows(`SELECT pr.name, COUNT(*)::int invoices, SUM(i.total * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) total FROM invoices i JOIN partners pr ON pr.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date BETWEEN $2 AND $3 GROUP BY pr.id ORDER BY total DESC`, [cid(req), from, to]);
-  const byDay = await db.rows(`SELECT date, SUM(total * CASE WHEN kind='CREDIT_NOTE' THEN -1 ELSE 1 END) total, COUNT(*)::int count FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date BETWEEN $2 AND $3 GROUP BY date ORDER BY date`, [cid(req), from, to]);
+  const byProduct = await db.rows(`SELECT p.sku, p.name, c.name AS category, SUM(l.qty * l.factor * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) qty, SUM(l.net_amount * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) net, SUM(l.qty * l.factor * l.unit_cost * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) cost FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id LEFT JOIN product_categories c ON c.id=p.category_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date BETWEEN $2 AND $3${BF} GROUP BY p.id, c.name ORDER BY net DESC`, [cid(req), from, to]);
+  const byCustomer = await db.rows(`SELECT pr.name, COUNT(*)::int invoices, SUM(i.total * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) total FROM invoices i JOIN partners pr ON pr.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date BETWEEN $2 AND $3${BF} GROUP BY pr.id ORDER BY total DESC`, [cid(req), from, to]);
+  const byDay = await db.rows(`SELECT date, SUM(total * CASE WHEN kind='CREDIT_NOTE' THEN -1 ELSE 1 END) total, COUNT(*)::int count FROM invoices i WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date BETWEEN $2 AND $3${BF} GROUP BY date ORDER BY date`, [cid(req), from, to]);
   return { from, to, byProduct: byProduct.map((r) => ({ ...r, profit: Number(r.net) - Number(r.cost) })), byCustomer, byDay };
 }));
 
@@ -224,10 +228,20 @@ ops.post("/zatca/csr", perm("settings.write"), h(async (req) => {
   const cfg = await tx((t) => ensureZatcaConfig(t, cid(req)));
   const key = await generateKeyPair();
   const serial = cfg.egsSerial || `1-Mizan|2-2.0|3-${cfg.egsUuid}`;
-  const csr = await generateCsr(key, { commonName: `${(c.nameEn || "Mizan").replace(/[^A-Za-z0-9 ]/g, "").slice(0, 30) || "Mizan"}-${cfg.egsUuid.slice(0, 8)}`, serial, vat: c.vatNumber, orgName: c.nameAr, branchName: cfg.branchName || "Main", location: `${c.buildingNo || ""} ${c.street || ""} ${c.city || "Makkah"}`.trim() || "Makkah", industry: cfg.industry || "Trading", production: cfg.environment === "PRODUCTION" });
+  const csr = await generateCsr(key, { commonName: `${(c.nameEn || "Mizan").replace(/[^A-Za-z0-9 ]/g, "").slice(0, 30) || "Mizan"}-${cfg.egsUuid.slice(0, 8)}`, serial, vat: c.vatNumber, orgName: c.nameAr, branchName: cfg.branchName || "Main", location: `${c.buildingNo || ""} ${c.street || ""} ${c.city || "Makkah"}`.trim() || "Makkah", industry: cfg.industry || "Trading", production: cfg.environment === "PRODUCTION", env: cfg.environment });
   await db.update("zatca_configs", { companyId: cid(req) }, { privateKey: key, csr, egsSerial: serial, complianceCert: null, complianceSecret: null, productionCert: null, productionSecret: null, onboardedAt: null, updatedAt: new Date() });
   await audit(req, "ZATCA_CSR", "zatca", cid(req));
   return { csr };
+}));
+/** Full onboarding rehearsal against ZATCA's developer portal (or the simulation portal with a real OTP). */
+ops.post("/zatca/selftest", perm("settings.write"), h(async (req) => {
+  const env = req.body?.environment === "SIMULATION" ? "SIMULATION" : "SANDBOX";
+  if (env === "SIMULATION" && !req.body?.otp) throw bad("بيئة المحاكاة تتطلب رمز OTP من بوابة فاتورة (fatoora.zatca.gov.sa)");
+  const r = await runZatcaSelfTest(req.company, { env, otp: req.body?.otp });
+  await tx((t) => ensureZatcaConfig(t, cid(req)));
+  await db.exec(`UPDATE zatca_configs SET selftest=$2, selftest_at=now() WHERE company_id=$1`, [cid(req), JSON.stringify(r)]);
+  await audit(req, "ZATCA_SELFTEST", "zatca", cid(req), { env, ok: r.ok, passed: r.docs.filter((d) => d.ok).length });
+  return r;
 }));
 ops.post("/zatca/import-keys", perm("settings.write"), h(async (req) => {
   // for teams that generated keys/CSR with the official ZATCA SDK

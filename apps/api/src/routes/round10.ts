@@ -17,12 +17,12 @@ r10.get("/branches", perm("dashboard.read"), h(async (req) => db.rows(
   `SELECT b.*, (SELECT COUNT(*)::int FROM warehouses w WHERE w.branch_id=b.id) warehouses,
      (SELECT COUNT(*)::int FROM memberships m WHERE m.branch_id=b.id AND m.is_active) users,
      (SELECT COUNT(*)::int FROM journal_entries e WHERE e.branch_id=b.id) entries
-   FROM branches b WHERE b.company_id=$1 ORDER BY b.is_main DESC, b.code`, [cid(req)])));
+   FROM branches b WHERE b.company_id=$1 ${req.auth.lockedBranchId ? "AND b.id=$2" : ""} ORDER BY b.is_main DESC, b.code`, req.auth.lockedBranchId ? [cid(req), req.auth.lockedBranchId] : [cid(req)])));
 
 /** Light list for document / POS selectors (any signed-in member). `mine` marks warehouses of the user's home branch. */
 r10.get("/warehouse-options", perm("dashboard.read"), h(async (req) => db.rows(
   `SELECT w.id, w.code, w.name, w.is_default, w.branch_id, b.name AS branch_name, (w.branch_id IS NOT DISTINCT FROM $2::uuid AND $2::uuid IS NOT NULL) mine
-   FROM warehouses w LEFT JOIN branches b ON b.id=w.branch_id WHERE w.company_id=$1 AND w.is_active ORDER BY mine DESC, w.is_default DESC, w.code`, [cid(req), req.auth.branchId || null])));
+   FROM warehouses w LEFT JOIN branches b ON b.id=w.branch_id WHERE w.company_id=$1 AND w.is_active ${req.auth.lockedBranchId ? `AND w.branch_id='${req.auth.lockedBranchId}'::uuid` : ""} ORDER BY mine DESC, w.is_default DESC, w.code`, [cid(req), req.auth.branchId || null])));
 
 r10.post("/branches", perm("settings.write"), h(async (req) => {
   const b = req.body || {};

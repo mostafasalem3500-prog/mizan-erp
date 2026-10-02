@@ -17,8 +17,23 @@ import { r7 } from "./routes/round7";
 import { r8, v1, portal } from "./routes/round8";
 import { r9 } from "./routes/round9";
 import { r10, hooks } from "./routes/round10";
+import { runZatcaSelfTest } from "./zatca/selftest";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
+
+/** Ops aid: ZATCA_SELFTEST=1 runs the developer-portal self-test once at boot for the showcase (or first) company and logs it. */
+async function zatcaBootSelfTest() {
+  const email = (process.env.DEMO_EMAIL || "").toLowerCase();
+  const c = (email && (await pool.query(`SELECT c.* FROM companies c JOIN memberships m ON m.company_id=c.id JOIN users u ON u.id=m.user_id WHERE u.email=$1 LIMIT 1`, [email])).rows[0]) || (await pool.query(`SELECT * FROM companies ORDER BY created_at LIMIT 1`)).rows[0];
+  if (!c) return;
+  const company = { ...c, nameAr: c.name_ar, vatNumber: c.vat_number, crNumber: c.cr_number, buildingNo: c.building_no, additionalNo: c.additional_no, postalCode: c.postal_code };
+  const r = await runZatcaSelfTest(company, { env: "SANDBOX" });
+  console.log(`[zatca-selftest] ok=${r.ok} company=${c.name_ar}`);
+  for (const s of r.steps) console.log(`[zatca-selftest] step ${s.ok ? "OK " : "ERR"} ${s.name} — ${s.detail || ""}`);
+  for (const d of r.docs) console.log(`[zatca-selftest] doc ${d.ok ? "OK " : "ERR"} ${d.typeCode}${d.simplified ? "S" : "B"} http=${d.httpStatus} status=${d.status} errors=${JSON.stringify(d.errors)} warnings=${JSON.stringify(d.warnings)}`);
+  for (const n of r.notes) console.log(`[zatca-selftest] note ${n}`);
+  await pool.query(`UPDATE zatca_configs SET selftest=$2, selftest_at=now() WHERE company_id=$1`, [c.id, JSON.stringify(r)]);
+}
 
 const app = express();
 app.disable("x-powered-by");
@@ -81,6 +96,7 @@ migrate()
   .then(() => {
     app.listen(port, "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
     seedDemoAccount().catch((e) => console.error("[demo-account]", e));
+    if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
   })
   .catch((e) => {

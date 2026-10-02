@@ -24,7 +24,7 @@ r7.get("/collections", perm("sales.read"), h(async (req) => {
        MIN(CASE WHEN i.due_date < $2 THEN i.due_date END) oldest_due,
        (SELECT json_build_object('channel', r.channel, 'at', r.created_at, 'by', r.sent_by) FROM reminders r WHERE r.partner_id=p.id ORDER BY r.created_at DESC LIMIT 1) last_reminder,
        (SELECT COUNT(*)::int FROM reminders r WHERE r.partner_id=p.id AND r.created_at > now() - interval '30 days') reminders30
-     FROM partners p JOIN invoices i ON i.partner_id=p.id AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.total - i.amount_paid > 0.001
+     FROM partners p JOIN invoices i ON i.partner_id=p.id AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.total - i.amount_paid > 0.001${/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || "")) ? ` AND i.branch_id='${req.query.branchId}'::uuid` : ""}
      WHERE p.company_id=$1 GROUP BY p.id ORDER BY overdue DESC, due DESC`, [cid(req), td]);
   return rows.map((r) => ({ ...r, due: r2(r.due), overdue: r2(r.overdue), daysOverdue: r.oldestDue ? Math.round((Date.parse(td) - Date.parse(String(r.oldestDue).slice(0, 10))) / 86400000) : 0 }));
 }));

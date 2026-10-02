@@ -10,8 +10,12 @@ const TABS = [
   { key: "aging", label: "أعمار الديون" }, { key: "sales", label: "تحليل المبيعات" }, { key: "expenses", label: "تحليل المصروفات" }, { key: "salespersons", label: "المندوبون" }, { key: "zakat", label: "الزكاة" }, { key: "statements", label: "كشوف الحسابات" }, { key: "integrity", label: "فحص التطابق" },
 ];
 
+const COMPANY_TABS = new Set(["zakat", "integrity", "budget", "cost-centers", "salespersons", "expenses"]);
+
 export function ReportsPage() {
   const { tab = "trial-balance" } = useParams();
+  const { me } = useCompanyContext();
+  const locked = !!me.lockedBranch;
   const nav = useNavigate();
   const [from, setFrom] = useState(yearStart());
   const [to, setTo] = useState(today());
@@ -23,7 +27,8 @@ export function ReportsPage() {
   const bName = b ? branches.data?.find((x: any) => x.id === b)?.name : "";
   return (
     <div className="grid">
-      <div className="tabs no-print">{TABS.map((t) => <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => nav(`/reports/${t.key}`)}>{t.label}</button>)}</div>
+      {locked && <div className="alert info small no-print" style={{ margin: 0 }}>🔒 التقارير مقصورة على <b>{me.lockedBranch.name}</b> — صلاحيتك مقيدة بفرعك.</div>}
+      <div className="tabs no-print">{TABS.filter((t) => !locked || !COMPANY_TABS.has(t.key)).map((t) => <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => nav(`/reports/${t.key}`)}>{t.label}</button>)}</div>
       {tab !== "integrity" && tab !== "statements" && <div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />{multi && branchable && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ width: 200 }} title="تصفية حسب الفرع"><option value="">كل الفروع (المنشأة)</option>{branches.data!.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>}</div>}
       {bName && <div className="alert info small no-print" style={{ margin: 0 }}>التقرير مصفّى على <b>{bName}</b> — يشمل القيود المسجلة على هذا الفرع فقط.</div>}
       {tab === "trial-balance" && <TrialBalance from={from} to={to} branchId={b} bName={bName} />}

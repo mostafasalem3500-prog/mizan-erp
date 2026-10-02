@@ -115,7 +115,7 @@ master.get(
       `SELECT p.*, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost,
          COALESCE((SELECT json_agg(json_build_object('id', u.id, 'name', u.name, 'factor', u.factor, 'barcode', u.barcode, 'salePrice', u.sale_price, 'purchasePrice', u.purchase_price) ORDER BY u.sort, u.factor) FROM product_uoms u WHERE u.product_id=p.id), '[]'::json) uoms
        FROM products p LEFT JOIN product_categories c ON c.id=p.category_id
-       LEFT JOIN (SELECT product_id, SUM(qty) qty, SUM(value) value FROM stock_balances WHERE company_id=$1 GROUP BY product_id) s ON s.product_id=p.id
+       LEFT JOIN (SELECT product_id, SUM(qty) qty, SUM(value) value FROM stock_balances WHERE company_id=$1${req.auth.lockedBranchId ? ` AND warehouse_id IN (SELECT id FROM warehouses WHERE branch_id='${req.auth.lockedBranchId}'::uuid)` : ""} GROUP BY product_id) s ON s.product_id=p.id
        WHERE ${where.join(" AND ")} ORDER BY p.sku LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -193,7 +193,7 @@ master.delete(
   }),
 );
 
-master.get("/warehouses", perm("inventory.read"), h(async (req) => db.rows(`SELECT w.*, b.name AS branch_name FROM warehouses w LEFT JOIN branches b ON b.id=w.branch_id WHERE w.company_id=$1 ORDER BY w.is_default DESC, w.code`, [cid(req)])));
+master.get("/warehouses", perm("inventory.read"), h(async (req) => db.rows(`SELECT w.*, b.name AS branch_name FROM warehouses w LEFT JOIN branches b ON b.id=w.branch_id WHERE w.company_id=$1 ${req.auth.lockedBranchId ? "AND w.branch_id=$2" : ""} ORDER BY w.is_default DESC, w.code`, req.auth.lockedBranchId ? [cid(req), req.auth.lockedBranchId] : [cid(req)])));
 /** Validates a branch id against the company; "" / null → null (no home branch). */
 export async function ownBranch(companyId: string, id: any): Promise<string | null> {
   if (!id) return null;
@@ -298,7 +298,7 @@ master.put(
   }),
 );
 
-master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, m.branch_id, (SELECT name FROM branches b WHERE b.id=m.branch_id) branch_name, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
+master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, m.branch_id, m.restrict_branch, (SELECT name FROM branches b WHERE b.id=m.branch_id) branch_name, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
 
 master.post(
   "/users",
@@ -317,7 +317,7 @@ master.post(
         if (password.length < 8) throw bad("كلمة المرور قصيرة");
         u = await t.insert("users", { email, passwordHash: await bcrypt.hash(password, 10), fullName: String(need(b, "fullName", "الاسم")), phone: b.phone || null });
       }
-      const m = await t.insert("memberships", { companyId: cid(req), userId: u.id, role, branchId: await ownBranch(cid(req), b.branchId) }).catch((e) => { if (e.code === "23505") throw conflict("المستخدم عضو بالفعل"); throw e; });
+      const m = await t.insert("memberships", { companyId: cid(req), userId: u.id, role, branchId: await ownBranch(cid(req), b.branchId), restrictBranch: !!b.restrictBranch && !!b.branchId }).catch((e) => { if (e.code === "23505") throw conflict("المستخدم عضو بالفعل"); throw e; });
       await audit(req, "CREATE", "user", u.id, { email, role });
       return { ...m, email, fullName: u.fullName };
     });
@@ -338,7 +338,11 @@ master.put(
     }
     if (req.body.fullName) await db.exec(`UPDATE users SET full_name=$2 WHERE id=$1`, [m.userId, req.body.fullName]);
     const branchId = req.body.branchId === undefined ? undefined : await ownBranch(cid(req), req.body.branchId);
-    return db.update("memberships", { id: m.id }, { role, isActive: req.body.isActive, branchId });
+    const restrictBranch = req.body.restrictBranch === undefined ? undefined : !!req.body.restrictBranch;
+    if (restrictBranch && !(branchId ?? m.branchId)) throw bad("حدد الفرع الافتراضي أولاً قبل تقييد المستخدم به");
+    if (restrictBranch && ["OWNER", "ADMIN"].includes(role || m.role)) throw bad("المالك ومدير النظام لا يُقيَّدان بفرع");
+    await audit(req, "UPDATE", "user", m.userId, { role, branchId, restrictBranch, isActive: req.body.isActive });
+    return db.update("memberships", { id: m.id }, { role, isActive: req.body.isActive, branchId, restrictBranch: branchId === null ? false : restrictBranch });
   }),
 );
 

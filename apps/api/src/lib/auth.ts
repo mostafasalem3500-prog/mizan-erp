@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { AppError, forbidden } from "./core";
 import { db } from "../db/pool";
 import { reqCtx } from "./context";
+import { applyBranchScope } from "./branchScope";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "mizan-dev-secret-change-me";
 
@@ -14,6 +15,7 @@ export interface AuthCtx {
   role: string | null;
   superAdmin: boolean;
   branchId?: string | null;
+  lockedBranchId?: string | null;
 }
 
 declare global {
@@ -62,11 +64,11 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     } catch {
       throw new AppError(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً", "UNAUTHENTICATED");
     }
-    req.auth = payload;
+    req.auth = { ...payload, branchId: null, lockedBranchId: null };
     if (payload.companyId) {
       // re-validate membership on every request so removed users lose access immediately
       const row = await db.maybe(
-        `SELECT c.*, m.role AS member_role, m.branch_id AS member_branch_id FROM companies c JOIN memberships m ON m.company_id=c.id
+        `SELECT c.*, m.role AS member_role, m.branch_id AS member_branch_id, m.restrict_branch AS member_restrict FROM companies c JOIN memberships m ON m.company_id=c.id
          WHERE c.id=$1 AND m.user_id=$2 AND m.is_active`,
         [payload.companyId, payload.userId],
       );
@@ -75,13 +77,16 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
         req.company = row;
         req.auth.role = row.memberRole;
         req.auth.branchId = row.memberBranchId || null;
+        req.auth.lockedBranchId = row.memberRestrict && row.memberBranchId && !["OWNER", "ADMIN"].includes(row.memberRole) ? row.memberBranchId : null;
+        if (req.auth.lockedBranchId) await applyBranchScope(req, row.id, req.auth.lockedBranchId);
       } else {
         req.company = await db.maybe("SELECT * FROM companies WHERE id=$1", [payload.companyId]);
         req.auth.role = "OWNER";
       }
     }
     const b = req.body && typeof req.body === "object" ? req.body.branchId : null;
-    reqCtx.run({ userBranchId: req.auth.branchId || null, bodyBranchId: typeof b === "string" && b ? b : null }, () => next());
+    const locked = req.auth.lockedBranchId || null;
+    reqCtx.run({ userBranchId: req.auth.branchId || null, bodyBranchId: locked || (typeof b === "string" && b ? b : null), lockedBranchId: locked }, () => next());
   } catch (e) {
     next(e);
   }

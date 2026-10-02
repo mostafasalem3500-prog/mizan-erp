@@ -114,6 +114,10 @@ export async function mainBranchId(t: Db, companyId: string): Promise<string> {
  */
 export async function resolveBranch(t: Db, companyId: string, explicit?: string | null): Promise<string> {
   const ctx = currentCtx();
+  if (ctx.lockedBranchId) {
+    if (explicit && explicit !== ctx.lockedBranchId) throw new AppError(403, "لا يمكنك التسجيل على فرع آخر — صلاحيتك مقيدة بفرعك", "BRANCH_SCOPE");
+    return ctx.lockedBranchId;
+  }
   for (const id of [explicit, ctx.bodyBranchId, ctx.userBranchId]) {
     if (!id || !UUID_RE.test(id)) continue;
     const b = await t.maybe(`SELECT id FROM branches WHERE id=$1 AND company_id=$2 AND is_active`, [id, companyId]);
@@ -126,6 +130,8 @@ export async function resolveBranch(t: Db, companyId: string, explicit?: string 
 export async function warehouseBranch(t: Db, companyId: string, warehouseId?: string | null): Promise<string> {
   if (warehouseId) {
     const w = await t.maybe(`SELECT branch_id FROM warehouses WHERE id=$1 AND company_id=$2`, [warehouseId, companyId]);
+    const locked = currentCtx().lockedBranchId;
+    if (locked && w && w.branchId !== locked) throw new AppError(403, "هذا المستودع تابع لفرع آخر — صلاحيتك مقيدة بفرعك", "BRANCH_SCOPE");
     if (w?.branchId) return w.branchId;
   }
   return resolveBranch(t, companyId);

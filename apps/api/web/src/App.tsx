@@ -62,6 +62,9 @@ const NAV = [
   { to: "/settings/integrations", ic: "🔌", label: "التكامل والربط (API)", perm: "settings.read" },
 ];
 
+// company-level screens hidden from members confined to one branch
+const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
+
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
   ACCOUNTANT: ["*.read", "sales.write", "purchases.write", "payments.write", "expenses.write", "accounting.write", "inventory.write", "assets.write", "vat.write", "pos.use", "partners.write", "products.write"],
@@ -100,9 +103,9 @@ export function App() {
         <div className="app">
           <aside className={"sidebar" + (menu ? " open" : "")}>
             <div className="brand"><img src="/favicon.svg" alt="" /> ميزان ERP</div>
-            <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span></div>
+            <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
             <nav>
-              {NAV.map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
+              {NAV.map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
               {me.superAdmin && <><div className="group">النظام</div><NavLink to="/admin"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink></>}
             </nav>
             <div className="foot">

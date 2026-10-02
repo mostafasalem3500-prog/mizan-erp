@@ -1,3 +1,4 @@
+import { reqCtx, currentCtx } from "../lib/context";
 import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, isDate, today } from "../lib/core";
 import { post, nextNumber, reverse, warehouseBranch } from "../accounting/engine";
@@ -97,16 +98,17 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
   // transfer between warehouses of different branches → each branch's books move through the inter-branch current account
   let interEntry: any = null;
   if (kind === "TRANSFER") {
-    const toBranch = await warehouseBranch(t, companyId, a.toWarehouse);
+    // destination may belong to another branch even for a branch-restricted sender (sending stock out is allowed)
+    const toBranch = (await t.maybe(`SELECT branch_id FROM warehouses WHERE id=$1 AND company_id=$2`, [a.toWarehouse, companyId]))?.branchId || branchId;
     const value = r2(out.reduce((s, o) => s + Number(o.value || 0), 0));
     totalValue = value;
     if (toBranch !== branchId && value > 0) {
       const names = await t.rows(`SELECT id, name FROM branches WHERE id = ANY($1)`, [[branchId, toBranch]]);
       const nm = (id: string) => names.find((x) => x.id === id)?.name || "";
       jl.push({ key: "INTER_BRANCH", debit: value, description: `بضاعة محولة إلى ${nm(toBranch)} ${number}` }, { key: "INVENTORY", credit: value, description: `تحويل مخزني صادر ${number}` });
-      interEntry = await post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", branchId: toBranch, reference: number, memo: `تحويل مخزني وارد من ${nm(branchId)} ${number}`, createdBy: user, isDemo: a.isDemo, lines: [
+      interEntry = await reqCtx.run({ ...currentCtx(), lockedBranchId: null }, () => post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", branchId: toBranch, reference: number, memo: `تحويل مخزني وارد من ${nm(branchId)} ${number}`, createdBy: user, isDemo: a.isDemo, lines: [
         { key: "INVENTORY", debit: value, description: `تحويل مخزني وارد ${number}` }, { key: "INTER_BRANCH", credit: value, description: `بضاعة واردة من ${nm(branchId)} ${number}` },
-      ] });
+      ] }));
     }
   }
   const entry = jl.length ? await post(t, companyId, { date, type: "STOCK", sourceType: "STOCK_ADJUSTMENT", branchId, reference: number, memo: kind === "OPENING" ? `أرصدة افتتاحية مخزون ${number}` : kind === "TRANSFER" ? `تحويل مخزني صادر ${number}` : `تسوية جرد ${number}`, createdBy: user, isDemo: a.isDemo, lines: jl }) : null;

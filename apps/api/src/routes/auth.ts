@@ -109,8 +109,9 @@ auth.get(
   h(async (req) => {
     const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]);
     const companies = await companiesOf(u.id);
-    const company = req.company ? { ...req.company, memberRole: undefined } : null;
-    return { user: publicUser(u), companies, company, role: req.auth.role, subscription: subscriptionState(req.company), roles: Object.fromEntries(Object.entries(ROLES).map(([k, v]) => [k, v.ar])), superAdmin: !!u.isSuperAdmin };
+    const company = req.company ? { ...req.company, memberRole: undefined, memberBranchId: undefined, memberRestrict: undefined } : null;
+    const branch = req.auth.branchId ? await db.maybe(`SELECT id, code, name FROM branches WHERE id=$1`, [req.auth.branchId]) : null;
+    return { user: publicUser(u), companies, company, role: req.auth.role, branch, lockedBranch: req.auth.lockedBranchId ? branch : null, subscription: subscriptionState(req.company), roles: Object.fromEntries(Object.entries(ROLES).map(([k, v]) => [k, v.ar])), superAdmin: !!u.isSuperAdmin };
   }),
 );
 

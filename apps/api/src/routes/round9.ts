@@ -16,6 +16,7 @@ r9.get("/lots", perm("inventory.read"), h(async (req) => {
   const params: any[] = [cid(req)]; const w = ["l.company_id=$1", "l.qty <> 0"];
   if (req.query.productId) { params.push(req.query.productId); w.push(`l.product_id=$${params.length}`); }
   if (req.query.warehouseId) { params.push(req.query.warehouseId); w.push(`l.warehouse_id=$${params.length}`); }
+  if (/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || ""))) { params.push(String(req.query.branchId)); w.push(`wh.branch_id=$${params.length}`); }
   if (req.query.status === "expired") { params.push(td); w.push(`l.expiry_date < $${params.length}`); }
   else if (req.query.status === "soon") { params.push(td, addDays(td, days)); w.push(`l.expiry_date BETWEEN $${params.length - 1} AND $${params.length}`); }
   const rows = await db.rows(

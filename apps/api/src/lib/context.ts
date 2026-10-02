@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "async_hooks";
 export interface ReqCtx {
   userBranchId?: string | null; // the member's home branch (memberships.branch_id)
   bodyBranchId?: string | null; // branch chosen explicitly on the document / voucher being saved
+  lockedBranchId?: string | null; // member confined to one branch: every posting must land there
 }
 export const reqCtx = new AsyncLocalStorage<ReqCtx>();
 export const currentCtx = (): ReqCtx => reqCtx.getStore() || {};

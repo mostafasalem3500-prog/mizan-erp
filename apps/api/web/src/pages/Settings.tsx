@@ -93,8 +93,9 @@ function Users() {
   return (
     <div className="card"><div className="card-h"><h3>المستخدمون <span className="muted small">({data?.length || 0} / {me.company.maxUsers})</span></h3>{can("users.write") && <button className="btn primary sm" onClick={() => setAdd(true)}>＋ مستخدم</button>}</div>
       <div className="card-b">
+        <div className="alert info small">🔒 <b>يرى فرعه فقط</b>: بعد اختيار الفرع الافتراضي للمستخدم فعّل الخيار ليرى مستندات وتقارير ولوحة مؤشرات فرعه فقط، ويسجل عليه وحده، وتُخفى عنه شاشات المنشأة العامة (الإقرار الضريبي، الرواتب، الإقفال، الإعدادات…). المالك ومدير النظام يرون كل الفروع دائماً.</div>
         <div className="alert info small">الأدوار: <b>المالك/مدير النظام</b> كل الصلاحيات · <b>محاسب</b> كل العمليات دون إدارة المستخدمين · <b>مندوب مبيعات</b> عروض وفواتير وتحصيل · <b>كاشير</b> نقطة البيع فقط · <b>أمين مستودع</b> أصناف ومخزون واستلام · <b>مشاهد/مدقق</b> قراءة فقط.</div>
-        {!data ? <Loading /> : <table className="tbl"><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th title="يبيع افتراضياً من مستودعات هذا الفرع وتُسجل قيوده عليه">الفرع الافتراضي</th><th>آخر دخول</th><th>الحالة</th><th /></tr></thead><tbody>{data.map((u: any) => <tr key={u.id}><td><b>{u.fullName}</b></td><td dir="ltr">{u.email}</td><td>{can("users.write") && u.role !== "OWNER" ? <Select value={u.role} onChange={(e) => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { role: e.target.value } }); reload(); })} style={{ width: 160 }}>{Object.entries(me.roles).filter(([k]) => k !== "OWNER").map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</Select> : me.roles[u.role]}</td><td>{can("users.write") ? <BranchSelect value={u.branchId} style={{ width: 170 }} onChange={(v) => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { branchId: v || null } }); reload(); }, "تم تحديث فرع المستخدم")} /> : u.branchName || "—"}</td><td className="small">{fmtDT(u.lastLoginAt)}</td><td><Badge s={u.isActive ? "ACTIVE" : "CANCELLED"} map={{ ACTIVE: "نشط", CANCELLED: "موقوف" }} /></td><td className="row" style={{ gap: 4 }}>{can("users.write") && u.role !== "OWNER" && <><button className="btn sm ghost" onClick={() => run(async () => { const p = prompt("كلمة مرور جديدة (8 أحرف على الأقل)"); if (p) await api(`/users/${u.id}`, { method: "PUT", body: { password: p } }); }, "تم التغيير")}>كلمة المرور</button><button className="btn sm ghost" onClick={() => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { isActive: !u.isActive } }); reload(); })}>{u.isActive ? "إيقاف" : "تفعيل"}</button><button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إزالة المستخدم من المنشأة؟")) { await api(`/users/${u.id}`, { method: "DELETE" }); reload(); } })}>إزالة</button></>}</td></tr>)}</tbody></table>}
+        {!data ? <Loading /> : <table className="tbl"><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th title="يبيع افتراضياً من مستودعات هذا الفرع وتُسجل قيوده عليه">الفرع الافتراضي</th><th>آخر دخول</th><th>الحالة</th><th /></tr></thead><tbody>{data.map((u: any) => <tr key={u.id}><td><b>{u.fullName}</b></td><td dir="ltr">{u.email}</td><td>{can("users.write") && u.role !== "OWNER" ? <Select value={u.role} onChange={(e) => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { role: e.target.value } }); reload(); })} style={{ width: 160 }}>{Object.entries(me.roles).filter(([k]) => k !== "OWNER").map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</Select> : me.roles[u.role]}</td><td>{can("users.write") ? <><BranchSelect value={u.branchId} style={{ width: 170 }} onChange={(v) => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { branchId: v || null } }); reload(); }, "تم تحديث فرع المستخدم")} />{u.branchId && !["OWNER", "ADMIN"].includes(u.role) && <label className="check small" title="لا يرى إلا مستندات وتقارير فرعه، ولا يسجل إلا عليه، وتُخفى عنه شاشات المنشأة العامة"><input type="checkbox" checked={!!u.restrictBranch} onChange={(e) => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { restrictBranch: e.target.checked } }); reload(); }, e.target.checked ? "أصبح المستخدم مقيداً بفرعه" : "أُلغي التقييد")} /> يرى فرعه فقط 🔒</label>}</> : <>{u.branchName || "—"}{u.restrictBranch && " 🔒"}</>}</td><td className="small">{fmtDT(u.lastLoginAt)}</td><td><Badge s={u.isActive ? "ACTIVE" : "CANCELLED"} map={{ ACTIVE: "نشط", CANCELLED: "موقوف" }} /></td><td className="row" style={{ gap: 4 }}>{can("users.write") && u.role !== "OWNER" && <><button className="btn sm ghost" onClick={() => run(async () => { const p = prompt("كلمة مرور جديدة (8 أحرف على الأقل)"); if (p) await api(`/users/${u.id}`, { method: "PUT", body: { password: p } }); }, "تم التغيير")}>كلمة المرور</button><button className="btn sm ghost" onClick={() => run(async () => { await api(`/users/${u.id}`, { method: "PUT", body: { isActive: !u.isActive } }); reload(); })}>{u.isActive ? "إيقاف" : "تفعيل"}</button><button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إزالة المستخدم من المنشأة؟")) { await api(`/users/${u.id}`, { method: "DELETE" }); reload(); } })}>إزالة</button></>}</td></tr>)}</tbody></table>}
       </div>
       {add && <Modal narrow title="إضافة مستخدم" onClose={() => setAdd(false)} footer={<><button className="btn" onClick={() => setAdd(false)}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { await api("/users", { body: f }); setAdd(false); reload(); }, "تمت الإضافة")}>إضافة</button></>}>
         <div className="grid"><Field label="الاسم"><Input value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></Field><Field label="البريد الإلكتروني"><Input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} dir="ltr" /></Field><Field label="كلمة المرور" hint="إن كان البريد مسجلاً مسبقاً في ميزان تُتجاهل"><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} dir="ltr" /></Field><Field label="الدور"><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{Object.entries(me.roles).filter(([k]) => k !== "OWNER").map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</Select></Field></div>
@@ -163,6 +164,32 @@ function Audit() {
 }
 
 // ─── ZATCA ─────────────────────────────────────────────────────────────────
+/** Developer-portal rehearsal of the whole phase-2 onboarding (no real OTP needed). */
+function ZatcaSelfTest({ last, at, w, onDone }: { last: any; at: string | null; w: boolean; onDone: () => void }) {
+  const { run, busy } = useAction();
+  const [r, setR] = useState<any>(last);
+  const [env, setEnv] = useState("SANDBOX");
+  const [otp, setOtp] = useState("");
+  const TYPE: Record<string, string> = { "388": "فاتورة", "381": "إشعار دائن", "383": "إشعار مدين" };
+  return (
+    <div className="card"><div className="card-h"><div><h3>اختبار الربط مع الهيئة (المرحلة الثانية)</h3><div className="small muted">يجرّب دورة الاعتماد كاملة دون المساس بإعدادات الربط الفعلية أو تسلسل الفواتير: مفتاح وCSR ← شهادة امتثال ← توقيع وفحص 6 مستندات (قياسية ومبسطة: فاتورة/دائن/مدين) ← شهادة إنتاج.</div></div>
+      {w && <div className="row" style={{ gap: 6 }}>
+        <Select value={env} onChange={(e) => setEnv(e.target.value)} style={{ width: 230 }}><option value="SANDBOX">بوابة المطورين (بلا OTP)</option><option value="SIMULATION">بيئة المحاكاة (OTP حقيقي)</option></Select>
+        {env === "SIMULATION" && <Input placeholder="OTP" value={otp} onChange={(e) => setOtp(e.target.value)} style={{ width: 110 }} dir="ltr" />}
+        <button className="btn primary sm" disabled={busy} onClick={() => run(async () => { const x = await api("/zatca/selftest", { body: { environment: env, otp: otp || undefined } }); setR(x); onDone(); })}>{busy ? "جارٍ الاختبار…" : "تشغيل الاختبار"}</button>
+      </div>}</div>
+      {!r ? <div className="card-b muted small">لم يُشغَّل الاختبار بعد.</div> : <div className="card-b">
+        <div className={"alert " + (r.ok ? "ok" : "err")} style={{ marginTop: 0 }}>{r.ok ? "✓ اجتاز النظام اختبار الربط بالكامل" : "✗ لم يكتمل الاختبار — راجع التفاصيل"} <span className="small muted">({r.environment === "SANDBOX" ? "بوابة المطورين" : "المحاكاة"} · {fmtDT(r.finishedAt || at)})</span></div>
+        <div className="grid c2">
+          <table className="tbl compact"><tbody>{r.steps.map((s: any, i: number) => <tr key={i}><td style={{ width: 24 }}>{s.ok ? "✅" : "❌"}</td><td><b>{s.name}</b><div className="small muted" dir="auto">{s.detail}</div></td></tr>)}</tbody></table>
+          <table className="tbl compact"><thead><tr><th>المستند</th><th>النتيجة</th></tr></thead><tbody>{r.docs.map((d: any, i: number) => <tr key={i}><td>{d.ok ? "✅" : "❌"} {TYPE[d.typeCode]} {d.simplified ? "مبسط" : "قياسي"}</td><td className="small"><span dir="ltr">{d.status}</span>{d.errors.map((m: string, k: number) => <div key={k} style={{ color: "var(--danger, #c0392b)" }} dir="auto">{m}</div>)}{d.warnings.map((m: string, k: number) => <div key={k} className="muted" dir="auto">⚠ {m}</div>)}</td></tr>)}</tbody></table>
+        </div>
+        {r.notes?.length > 0 && <ul className="small muted" style={{ margin: "8px 0 0", paddingInlineStart: 18 }}>{r.notes.map((n: string, i: number) => <li key={i}>{n}</li>)}</ul>}
+      </div>}
+    </div>
+  );
+}
+
 export function ZatcaPage() {
   const { me, can } = useCompanyContext();
   const toast = useToast();
@@ -177,6 +204,7 @@ export function ZatcaPage() {
   const w = can("settings.write");
   return (
     <div className="grid">
+      <ZatcaSelfTest last={z.selftest} at={z.selftestAt} w={w} onDone={reload} />
       <div className="grid c2">
         <div className="card"><div className="card-h"><h3>إعداد الفوترة الإلكترونية (ZATCA)</h3></div><div className="card-b">
           <div className="form-grid">
