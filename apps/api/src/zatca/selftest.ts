@@ -34,7 +34,8 @@ export async function runZatcaSelfTest(company: any, opts: { env?: "SANDBOX" | "
     district: company.district || "العزيزية", city: company.city || "مكة المكرمة", postalCode: digits(company.postalCode, 5) || "24243", country: "SA",
   };
   if (!digits(company.buildingNo, 4) || !digits(company.postalCode, 5)) res.notes.push("رقم المبنى (4 أرقام) أو الرمز البريدي (5 أرقام) غير مكتمل في بيانات المنشأة — استُخدمت قيم اختبار؛ أكملها قبل الربط الفعلي");
-  const buyer: UblParty = { name: "شركة العميل التجريبي", vat: "300000000000003", cr: "1010000000", street: "طريق الملك عبدالعزيز", buildingNo: "2222", additionalNo: "1111", district: "الروضة", city: "جدة", postalCode: "23435", country: "SA" };
+  const buyerVat = supplier.vat === "311111111111113" ? "322222222222223" : "311111111111113"; // must differ from the seller (BR-CUSTOM-VALIDATION-01)
+  const buyer: UblParty = { name: "شركة العميل التجريبي", vat: buyerVat, cr: "1010000000", street: "طريق الملك عبدالعزيز", buildingNo: "2222", additionalNo: "1111", district: "الروضة", city: "جدة", postalCode: "23435", country: "SA" };
 
   try {
     // 1) key + CSR

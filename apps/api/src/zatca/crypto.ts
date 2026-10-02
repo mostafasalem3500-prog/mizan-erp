@@ -180,9 +180,11 @@ export function signInvoice(xml: string, certPem: string, privateKeyPem: string,
   const ext = extension(hash, spHash, signature, cert.body, signedPropsFinal(ts, cert.hash, cert.issuer, cert.serial));
   // Final layout mirrors the reference: UBLExtensions on its own indented line so that
   // stripping it (ZATCA-side XPath transform) leaves the same whitespace the hash was computed on.
-  const signed = xml
-    .replace("<ext:UBLExtensions>SET_UBL_EXTENSIONS_STRING</ext:UBLExtensions>\n    \n    <cbc:ProfileID>", `\n    ${ext}\n    <cbc:ProfileID>`)
-    .replace("SET_QR_CODE_DATA", qr);
+  // Only the placeholder element is swapped, so every text node around it is untouched and the
+  // hash ZATCA recomputes (UBLExtensions stripped, C14N11) equals the one computed on the unsigned XML.
+  const placeholder = "<ext:UBLExtensions>SET_UBL_EXTENSIONS_STRING</ext:UBLExtensions>";
+  if (!xml.includes(placeholder) || !xml.includes("SET_QR_CODE_DATA")) throw new Error("قالب XML غير صالح للتوقيع (العناصر البديلة مفقودة)");
+  const signed = xml.replace(placeholder, ext).replace("SET_QR_CODE_DATA", qr);
   return { xml: signed, hash, qr, signature };
 }
 
