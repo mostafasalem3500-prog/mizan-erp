@@ -1,0 +1,34 @@
+name: Desktop (Windows)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build API + web
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run build
+          cd web
+          npm ci
+          npm run build
+      - name: Build & publish installer
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm ci
+          node scripts/prepare-server.js
+          npx electron-builder --win nsis --x64 --publish always
