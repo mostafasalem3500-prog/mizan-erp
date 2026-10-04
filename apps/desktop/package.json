@@ -1,0 +1,100 @@
+{
+  "name": "mizan-desktop",
+  "productName": "Mizan ERP",
+  "version": "2.0.0",
+  "description": "ميزان ERP — نسخة سطح المكتب (سحابية أو محلية)",
+  "author": "Mizan ERP",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "prepare-server": "node scripts/prepare-server.js",
+    "start": "electron .",
+    "dist:win": "npm run prepare-server && electron-builder --win nsis --x64 --publish never",
+    "dist:dir": "npm run prepare-server && electron-builder --dir --publish never"
+  },
+  "dependencies": {
+    "@fidm/x509": "^1.2.1",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@xmldom/xmldom": "^0.9.12",
+    "bcryptjs": "^3.0.3",
+    "compression": "^1.8.2",
+    "decimal.js": "^10.6.0",
+    "electron-updater": "^6.8.9",
+    "embedded-postgres": "17.10.0-beta.17",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^6.10.1",
+    "pg": "^8.23.0",
+    "xmldsigjs": "^2.8.8"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3",
+    "resedit": "^2.0.3"
+  },
+  "build": {
+    "appId": "sa.mizan.erp",
+    "productName": "Mizan ERP",
+    "copyright": "Mizan ERP",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "assets/**",
+      "server/**",
+      "package.json",
+      "!node_modules/@embedded-postgres/linux-x64/**",
+      "!node_modules/@embedded-postgres/darwin-*/**"
+    ],
+    "asarUnpack": [
+      "node_modules/@embedded-postgres/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "Mizan-ERP-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ميزان ERP",
+      "uninstallDisplayName": "ميزان ERP",
+      "installerLanguages": [
+        "ar_SA",
+        "en_US"
+      ],
+      "language": "1025",
+      "deleteAppDataOnUninstall": false
+    },
+    "afterPack": "scripts/after-pack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mostafasalem3500-prog",
+        "repo": "mizan-erp",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mostafasalem3500-prog/mizan-erp.git"
+  }
+}

@@ -97,7 +97,7 @@ if (fs.existsSync(webDir)) {
 const port = Number(process.env.PORT || 3000);
 migrate()
   .then(() => {
-    app.listen(port, "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
+    app.listen(port, process.env.HOST || "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
     seedDemoAccount().catch((e) => console.error("[demo-account]", e));
     // every boot re-proves the accounting engine on a throw-away company (rolled back, nothing stored)
     runAccountingSelfCheck().then((r) => {

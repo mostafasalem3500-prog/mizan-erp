@@ -1,3 +1,4 @@
+import { verifyDesktopLicense, signDesktopLicense } from "../lib/desktopLicense";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
@@ -152,8 +153,14 @@ auth.post(
   h(async (req) => {
     if (!req.company) throw bad("اختر المنشأة أولاً");
     if (!["OWNER", "ADMIN"].includes(req.auth.role || "") && !req.auth.superAdmin) throw new AppError(403, "المالك فقط يمكنه تفعيل الترخيص");
-    const key = String(need(req.body, "key", "مفتاح الترخيص")).trim().toUpperCase();
+    const rawKey = String(need(req.body, "key", "مفتاح الترخيص")).trim();
+    // desktop licences are self-verifying (signed) — registered locally on first use so they cannot be reused
+    const offline = rawKey.startsWith("MZD-") ? verifyDesktopLicense(rawKey) : null;
+    if (rawKey.startsWith("MZD-") && !offline) throw bad("مفتاح ترخيص سطح المكتب غير صحيح أو معدَّل");
+    const key = offline ? rawKey : rawKey.toUpperCase();
     return tx(async (t) => {
+      if (offline && !(await t.maybe(`SELECT id FROM license_keys WHERE key=$1`, [key])))
+        await t.insert("license_keys", { key, plan: offline.plan, months: offline.months, maxUsers: offline.maxUsers, note: `ترخيص سطح المكتب ${offline.issuedAt}` });
       const lic = await t.maybe(`SELECT * FROM license_keys WHERE key=$1 FOR UPDATE`, [key]);
       if (!lic) throw bad("مفتاح الترخيص غير صحيح");
       if (lic.activatedAt) throw conflict("هذا المفتاح مستخدم مسبقاً");
@@ -191,11 +198,13 @@ admin.post(
     const months = Math.max(1, Math.min(60, Number(req.body.months) || 12));
     const maxUsers = Math.max(1, Math.min(500, Number(req.body.maxUsers) || (plan === "BASIC" ? 3 : plan === "PRO" ? 10 : 100)));
     const count = Math.max(1, Math.min(50, Number(req.body.count) || 1));
-    const out = [];
+    const out: any[] = [];
     for (let i = 0; i < count; i++) {
       const raw = randomBytes(10).toString("hex").toUpperCase();
       const key = `MZN-${plan.slice(0, 3)}-${raw.slice(0, 5)}-${raw.slice(5, 10)}-${raw.slice(10, 15)}-${raw.slice(15, 20)}`;
-      out.push(await db.insert("license_keys", { key, plan, months, maxUsers, note: req.body.note || null }));
+      out.push(req.body.desktop
+        ? { key: signDesktopLicense({ plan, months, maxUsers, note: req.body.note || null }), plan, months, maxUsers, note: req.body.note || null, desktop: true, createdAt: new Date() }
+        : await db.insert("license_keys", { key, plan, months, maxUsers, note: req.body.note || null }));
     }
     return out;
   }),

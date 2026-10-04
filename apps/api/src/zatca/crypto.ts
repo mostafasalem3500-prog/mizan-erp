@@ -4,14 +4,11 @@
  * secp256k1 signature, XAdES signed properties, and the TLV QR code.
  * Follows ZATCA Security Features Implementation Standard v1.2.
  */
-import { createHash, createSign, X509Certificate } from "crypto";
+import { createHash, X509Certificate } from "crypto";
 import { DOMParser } from "@xmldom/xmldom";
 import { XmlCanonicalizer } from "xmldsigjs";
 import { Certificate } from "@fidm/x509";
-import { spawn } from "child_process";
-import fs from "fs";
-import os from "os";
-import path from "path";
+import { generateKeyPairPem, generateCsrPure, signHashPure } from "./pure";
 
 export const TLV = (tags: (string | Buffer)[]): Buffer =>
   Buffer.concat(
@@ -51,25 +48,35 @@ export const cleanKey = (s: string) => s.replace(/-----BEGIN EC PRIVATE KEY-----
 export function certificateInfo(certPem: string) {
   const body = cleanCert(certPem);
   const wrapped = `-----BEGIN CERTIFICATE-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END CERTIFICATE-----`;
-  const x = new X509Certificate(wrapped);
   const c = Certificate.fromPEM(Buffer.from(wrapped));
+  let issuer: string, serial: string, validTo: string;
+  try {
+    const x = new X509Certificate(wrapped);
+    issuer = x.issuer.split("\n").reverse().join(", ");
+    serial = BigInt(`0x${x.serialNumber}`).toString(10);
+    validTo = x.validTo;
+  } catch {
+    // runtimes without secp256k1 in their TLS library (Electron/BoringSSL): same strings from the pure-JS parser
+    const SHORT: Record<string, string> = { "0.9.2342.19200300.100.1.25": "DC", "1.2.840.113549.1.9.1": "emailAddress", "0.9.2342.19200300.100.1.1": "UID" };
+    issuer = c.issuer.attributes.map((a: any) => `${a.shortName || SHORT[a.oid] || a.oid}=${a.value}`).reverse().join(", ");
+    serial = BigInt(`0x${c.serialNumber}`).toString(10);
+    validTo = c.validTo.toUTCString();
+  }
   return {
     body,
     hash: Buffer.from(createHash("sha256").update(body).digest("hex")).toString("base64"),
-    issuer: x.issuer.split("\n").reverse().join(", "),
-    serial: BigInt(`0x${x.serialNumber}`).toString(10),
+    issuer,
+    serial,
     publicKey: c.publicKeyRaw,
     signature: c.signature,
-    validTo: x.validTo,
+    validTo,
   };
 }
 
+/** ECDSA-SHA256 over the invoice hash — pure JS so it also runs where the TLS library lacks secp256k1. */
 export function signHash(hashB64: string, privateKeyPem: string): string {
-  const body = cleanKey(privateKeyPem);
-  const pem = `-----BEGIN EC PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END EC PRIVATE KEY-----`;
-  const s = createSign("sha256");
-  s.update(Buffer.from(hashB64, "base64"));
-  return s.sign(pem).toString("base64");
+  const pem = privateKeyPem.includes("-----BEGIN") ? privateKeyPem : `-----BEGIN EC PRIVATE KEY-----\n${cleanKey(privateKeyPem)}\n-----END EC PRIVATE KEY-----`;
+  return signHashPure(hashB64, pem);
 }
 
 const signedPropsForHash = (t: string, h: string, iss: string, sn: string) =>
@@ -188,24 +195,9 @@ export function signInvoice(xml: string, certPem: string, privateKeyPem: string,
   return { xml: signed, hash, qr, signature };
 }
 
-// ─── key pair + CSR (requires the openssl CLI) ─────────────────────────────
-function openssl(args: string[], input?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const p = spawn("openssl", args);
-    let out = "", err = "";
-    p.stdout.on("data", (d) => (out += d.toString()));
-    p.stderr.on("data", (d) => (err += d.toString()));
-    p.on("error", (e) => reject(new Error("openssl غير متوفر على الخادم: " + e.message)));
-    p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(err || `openssl exited ${code}`))));
-    if (input) p.stdin.write(input);
-    p.stdin.end();
-  });
-}
-
+// ─── key pair + CSR (pure JS — no OpenSSL CLI needed on the server or the desktop app) ──
 export async function generateKeyPair(): Promise<string> {
-  const out = await openssl(["ecparam", "-name", "secp256k1", "-genkey", "-noout"]);
-  if (!out.includes("BEGIN EC PRIVATE KEY")) throw new Error("فشل توليد المفتاح الخاص");
-  return out.trim();
+  return generateKeyPairPem();
 }
 
 export interface CsrProps {
@@ -222,36 +214,6 @@ export interface CsrProps {
 }
 
 export async function generateCsr(privateKeyPem: string, p: CsrProps): Promise<string> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mizan-csr-"));
-  const keyFile = path.join(dir, "k.pem");
-  const cnfFile = path.join(dir, "csr.cnf");
-  const cnf = `[req]
-prompt = no
-utf8 = no
-distinguished_name = dn
-req_extensions = v3_req
-[v3_req]
-1.3.6.1.4.1.311.20.2 = ASN1:UTF8String:${p.production || p.env === "PRODUCTION" ? "ZATCA-Code-Signing" : p.env === "SIMULATION" ? "PREZATCA-Code-Signing" : "TSTZATCA-Code-Signing"}
-subjectAltName = dirName:dir_sect
-[dir_sect]
-SN = ${p.serial}
-UID = ${p.vat}
-title = ${p.invoiceTypes || "1100"}
-registeredAddress = ${p.location}
-businessCategory = ${p.industry}
-[dn]
-commonName = ${p.commonName}
-organizationalUnitName = ${p.branchName}
-organizationName = ${p.orgName}
-countryName = SA
-`;
-  try {
-    fs.writeFileSync(keyFile, privateKeyPem, { mode: 0o600 });
-    fs.writeFileSync(cnfFile, cnf);
-    const out = await openssl(["req", "-new", "-sha256", "-key", keyFile, "-config", cnfFile]);
-    if (!out.includes("BEGIN CERTIFICATE REQUEST")) throw new Error("فشل إنشاء طلب الشهادة (CSR)");
-    return out.trim();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const template = p.production || p.env === "PRODUCTION" ? "ZATCA-Code-Signing" : p.env === "SIMULATION" ? "PREZATCA-Code-Signing" : "TSTZATCA-Code-Signing";
+  return generateCsrPure(privateKeyPem, { ...p, template });
 }

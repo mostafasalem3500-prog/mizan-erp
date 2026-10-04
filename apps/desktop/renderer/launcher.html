@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ميزان ERP</title><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"><link rel="stylesheet" href="style.css"></head>
+<body><div class="wrap">
+  <div class="brand"><img src="../assets/icon.png" alt=""><h1>مرحباً بك في ميزان ERP</h1></div>
+  <p class="lead">اختر طريقة تشغيل البرنامج على هذا الجهاز. يمكنك تغييرها لاحقاً من قائمة «ميزان».</p>
+  <div class="cards">
+    <div class="card">
+      <h2>☁️ الوضع السحابي <span class="tag">موصى به</span></h2>
+      <ul>
+        <li>نفس حساباتك وبياناتك على كل أجهزتك وفروعك</li>
+        <li>ربط مباشر مع هيئة الزكاة (المرحلة الثانية)</li>
+        <li>نسخ احتياطي وتحديثات تلقائية</li>
+        <li>نقطة البيع تعمل حتى عند انقطاع الإنترنت</li>
+      </ul>
+      <details><summary>خادم مخصص؟</summary><input id="cloudUrl" placeholder="https://…" /></details>
+      <button class="btn" id="cloud">تشغيل سحابي</button>
+    </div>
+    <div class="card">
+      <h2>💻 الوضع المحلي <span class="tag">دون إنترنت</span></h2>
+      <ul>
+        <li>قاعدة بيانات على هذا الجهاز فقط</li>
+        <li>يعمل بالكامل دون اتصال بالإنترنت</li>
+        <li>تجربة 30 يوماً ثم تفعيل بمفتاح ترخيص سطح المكتب</li>
+        <li>النسخ الاحتياطي من الإعدادات ← النسخ الاحتياطي (مسؤوليتك)</li>
+      </ul>
+      <button class="btn ghost" id="local">تشغيل محلي</button>
+    </div>
+  </div>
+  <p class="foot" id="ver"></p>
+</div>
+<script src="launcher.js"></script>
+</body></html>

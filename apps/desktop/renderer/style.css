@@ -1,0 +1,25 @@
+:root { --bg: #f4f7f6; --card: #fff; --ink: #0f2524; --muted: #5b6b69; --primary: #0f6b62; --primary-ink: #fff; --border: #dbe4e2; --soft: #e6f2f0; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0b1716; --card: #11201f; --ink: #e8f1ef; --muted: #9db1ae; --border: #20332f; --soft: #14302c; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", sans-serif; background: var(--bg); color: var(--ink); direction: rtl; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.wrap { width: min(860px, 100%); }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.brand img { width: 46px; height: 46px; }
+.brand h1 { font-size: 26px; margin: 0; }
+.lead { color: var(--muted); margin: 0 0 22px; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.card h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.card .tag { font-size: 11px; background: var(--soft); color: var(--primary); padding: 2px 8px; border-radius: 99px; font-weight: 600; }
+.card ul { margin: 0; padding-inline-start: 18px; color: var(--muted); font-size: 13.5px; line-height: 1.9; flex: 1; }
+.btn { appearance: none; border: 1px solid var(--primary); background: var(--primary); color: var(--primary-ink); border-radius: 10px; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--primary); }
+.btn:disabled { opacity: .6; cursor: default; }
+input { width: 100%; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--ink); font: inherit; direction: ltr; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.foot { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+.center { text-align: center; }
+.spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: s 0.9s linear infinite; margin: 18px auto; }
+@keyframes s { to { transform: rotate(360deg); } }
