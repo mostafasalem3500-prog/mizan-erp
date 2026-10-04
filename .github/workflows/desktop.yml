@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -21,14 +25,16 @@ jobs:
         run: |
           npm ci
           npm run build
-          cd web
-          npm ci
-          npm run build
+          cd web && npm ci && npm run build
+      - name: Install desktop deps
+        working-directory: apps/desktop
+        run: |
+          npm ci > ../../ci.log 2>&1 || { tail -40 ../../ci.log | sed 's/^/::error::/'; exit 1; }
       - name: Build & publish installer
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm ci
           node scripts/prepare-server.js
-          npx electron-builder --win nsis --x64 --publish always
+          npx electron-builder --win nsis --x64 --publish always > ../../eb.log 2>&1 || { tail -40 ../../eb.log | sed 's/^/::error::/'; exit 1; }
+          tail -15 ../../eb.log
