@@ -1,8 +1,6 @@
 name: Desktop (Windows)
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +28,11 @@ jobs:
         working-directory: apps/desktop
         run: |
           npm ci > ../../ci.log 2>&1 || { tail -40 ../../ci.log | sed 's/^/::error::/'; exit 1; }
+      - name: Tag the version (release needs an existing tag)
+        run: |
+          V=$(node -p "require('./apps/desktop/package.json').version")
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null; then git tag "v$V" && git push origin "v$V"; fi
       - name: Build & publish installer
         working-directory: apps/desktop
         env:
