@@ -21,6 +21,12 @@ export default defineConfig({
             options: { cacheName: "mizan-pos-api", networkTimeoutSeconds: 5, expiration: { maxEntries: 40, maxAgeSeconds: 7 * 24 * 3600 } },
           },
           {
+            // product images are versioned (?v=) — cache-first keeps the POS catalog visual while offline
+            urlPattern: ({ url }) => url.pathname.startsWith("/api/media/"),
+            handler: "CacheFirst",
+            options: { cacheName: "mizan-media", expiration: { maxEntries: 2000, maxAgeSeconds: 60 * 24 * 3600 }, cacheableResponse: { statuses: [0, 200] } },
+          },
+          {
             urlPattern: ({ url }) => url.origin === "https://fonts.googleapis.com" || url.origin === "https://fonts.gstatic.com",
             handler: "StaleWhileRevalidate",
             options: { cacheName: "fonts", expiration: { maxEntries: 20, maxAgeSeconds: 365 * 24 * 3600 } },

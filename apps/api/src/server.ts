@@ -1,3 +1,4 @@
+import { media } from "./routes/media";
 import express from "express";
 import compression from "compression";
 import path from "path";
@@ -51,6 +52,7 @@ app.get("/api/health", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+app.use("/api/media", media);
 app.use("/api/public", pub);
 app.use("/api/public", portal);
 app.use("/api/v1", v1);

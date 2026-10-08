@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, useLocalState, fmtDate } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, useLocalState, fmtDate , SearchBox, FilterInfo, matches } from "../lib";
 import { barcodeSvg } from "../shared/barcode";
 
 // ─── Barcode labels ────────────────────────────────────────────────────────
@@ -71,7 +71,11 @@ export function ReorderPage() {
   const suppliers = useFetch("/partners?role=SUPPLIER&limit=500");
   useEffect(() => { if (data) { setQty(Object.fromEntries(data.map((r: any) => [r.id, r.suggested]))); setSup(Object.fromEntries(data.map((r: any) => [r.id, r.supplierId || ""]))); } }, [data]);
   const [created, setCreated] = useState<any[] | null>(null);
+  const [text, setText] = useState("");
+  const [fs, setFs] = useState("");
+  const [out, setOut] = useState(false);
   if (!data) return <Loading />;
+  const rows = data.filter((r: any) => matches(r, text, ["name", "sku", "supplierName"]) && (!fs || (fs === "none" ? !sup[r.id] : sup[r.id] === fs)) && (!out || Number(r.qty) <= 0));
   const chosen = data.filter((r: any) => (qty[r.id] || 0) > 0);
   const value = chosen.reduce((a: number, r: any) => a + (qty[r.id] || 0) * Number(r.price || 0), 0);
   return (
@@ -81,8 +85,9 @@ export function ReorderPage() {
         <div className="card-h"><div><h3>اقتراحات إعادة الطلب</h3><div className="small muted">الأصناف التي وصلت حد إعادة الطلب، مع الكمية المقترحة لتغطية ~6 أسابيع من المبيعات (آخر 90 يوماً) أو ضعف الحد، وآخر مورد وسعر شراء</div></div>
           <div className="row"><label className="check"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> عرض كل الأصناف المباعة</label><ExportBtn name="اقتراحات إعادة الطلب" rows={() => data.map((r: any) => ({ الرمز: r.sku, الصنف: r.name, الرصيد: r.qty, "حد الطلب": r.reorderLevel, "مبيعات شهرية": r.monthlySales, "قيد الطلب": r.onOrder, المقترح: qty[r.id] || 0, المورد: r.supplierName, السعر: r.price }))} />
             {can("purchases.write") && <button className="btn primary sm" disabled={busy || !chosen.length} onClick={() => run(async () => { const r = await api("/inventory/reorder/orders", { body: { items: chosen.map((x: any) => ({ productId: x.id, qty: qty[x.id], supplierId: sup[x.id] || null, price: x.price })) } }); setCreated(r); reload(); }, "تم إنشاء أوامر الشراء")}>إنشاء أوامر شراء ({chosen.length} صنف — {money(value)} ر.س)</button>}</div></div>
-        {!data.length ? <Empty text="لا توجد أصناف تحتاج إعادة طلب 🎉" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th className="n">الرصيد</th><th className="n">حد الطلب</th><th className="n">مبيعات شهرية</th><th className="n">قيد الطلب</th><th style={{ width: 110 }}>الكمية المقترحة</th><th>المورد</th><th className="n">آخر سعر</th><th className="n">القيمة</th></tr></thead>
-          <tbody>{data.map((r: any) => <tr key={r.id} className={Number(r.qty) <= 0 ? "bold" : ""}><td><b>{r.name}</b><span className="small muted"> {r.sku} · {r.unit}</span></td><td className={"n " + (Number(r.qty) <= Number(r.reorderLevel) ? "neg-val" : "")}>{Number(r.qty)}</td><td className="n">{Number(r.reorderLevel)}</td><td className="n">{r.monthlySales}</td><td className="n">{Number(r.onOrder) || ""}</td><td><NumInput value={qty[r.id] ?? ""} onChange={(e) => setQty({ ...qty, [r.id]: Number(e.target.value) || 0 })} /></td>
+        {data.length > 0 && <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={text} onChange={setText} placeholder="بحث بالصنف / الرمز / المورد" /><Select value={fs} onChange={(e) => setFs(e.target.value)}><option value="">كل الموردين</option><option value="none">بدون مورد محدد</option>{(suppliers.data || []).filter((x: any) => data.some((r: any) => sup[r.id] === x.id)).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select><label className="check"><input type="checkbox" checked={out} onChange={(e) => setOut(e.target.checked)} /> النافدة فقط</label><FilterInfo shown={rows.length} total={data.length} active={!!(text || fs || out)} onClear={() => { setText(""); setFs(""); setOut(false); }} /></div></div>}
+        {!rows.length ? <Empty text={data.length ? "لا نتائج مطابقة" : "لا توجد أصناف تحتاج إعادة طلب 🎉"} /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th className="n">الرصيد</th><th className="n">حد الطلب</th><th className="n">مبيعات شهرية</th><th className="n">قيد الطلب</th><th style={{ width: 110 }}>الكمية المقترحة</th><th>المورد</th><th className="n">آخر سعر</th><th className="n">القيمة</th></tr></thead>
+          <tbody>{rows.map((r: any) => <tr key={r.id} className={Number(r.qty) <= 0 ? "bold" : ""}><td><b>{r.name}</b><span className="small muted"> {r.sku} · {r.unit}</span></td><td className={"n " + (Number(r.qty) <= Number(r.reorderLevel) ? "neg-val" : "")}>{Number(r.qty)}</td><td className="n">{Number(r.reorderLevel)}</td><td className="n">{r.monthlySales}</td><td className="n">{Number(r.onOrder) || ""}</td><td><NumInput value={qty[r.id] ?? ""} onChange={(e) => setQty({ ...qty, [r.id]: Number(e.target.value) || 0 })} /></td>
             <td><Select value={sup[r.id] || ""} onChange={(e) => setSup({ ...sup, [r.id]: e.target.value })} style={{ minWidth: 160 }}><option value="">— اختر —</option>{(suppliers.data || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>{r.lastDate && <div className="small muted">آخر شراء {fmtDate(r.lastDate)}</div>}</td><td className="n"><Money v={r.price} /></td><td className="n"><Money v={(qty[r.id] || 0) * Number(r.price || 0)} /></td></tr>)}</tbody></table></div>}
       </div>
     </div>

@@ -56,17 +56,24 @@ export async function generalLedger(t: Db, companyId: string, q: any) {
   const { from, to } = dateRange(q);
   if (!q.accountId) throw bad("اختر الحساب");
   const acc = await t.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2`, [q.accountId, companyId]);
+  // optional sub-filters: partner (AR/AP sub-ledger) and cost center
+  const extra = (params: any[]) => {
+    let s = branchCond(q, params);
+    if (q.partnerId && UUID_RE.test(String(q.partnerId))) { params.push(String(q.partnerId)); s += ` AND l.partner_id=$${params.length}`; }
+    if (q.costCenterId && UUID_RE.test(String(q.costCenterId))) { params.push(String(q.costCenterId)); s += ` AND l.cost_center_id=$${params.length}`; }
+    return s;
+  };
   const obP: any[] = [acc.id, from];
-  const obB = branchCond(q, obP);
+  const obB = extra(obP);
   const ob = await t.one(
     `SELECT COALESCE(SUM(l.debit - l.credit),0) b FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=$1 AND e.status='POSTED' AND e.date < $2${obB}`,
     obP,
   );
   const glP: any[] = [acc.id, from, to];
-  const glB = branchCond(q, glP);
+  const glB = extra(glP);
   const lines = await t.rows(
-    `SELECT e.id AS entry_id, e.number, e.date, e.type, e.memo, e.reference, e.source_type, e.source_id, l.debit, l.credit, l.description, l.partner_id, p.name AS partner_name
-     FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN partners p ON p.id=l.partner_id
+    `SELECT e.id AS entry_id, e.number, e.date, e.type, e.memo, e.reference, e.source_type, e.source_id, l.debit, l.credit, l.description, l.partner_id, p.name AS partner_name, b.name AS branch_name, cc.name AS cost_center_name, CASE e.source_type WHEN 'INVOICE' THEN (SELECT number FROM invoices WHERE id=e.source_id) WHEN 'PAYMENT' THEN (SELECT number FROM payments WHERE id=e.source_id) WHEN 'EXPENSE' THEN (SELECT number FROM expenses WHERE id=e.source_id) END AS src_number, CASE WHEN e.source_type='PAYMENT' THEN (SELECT direction FROM payments WHERE id=e.source_id) END AS src_dir
+     FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN partners p ON p.id=l.partner_id LEFT JOIN branches b ON b.id=e.branch_id LEFT JOIN cost_centers cc ON cc.id=l.cost_center_id
      WHERE l.account_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3${glB} ORDER BY e.date, e.created_at, l.sort`,
     glP,
   );
@@ -75,7 +82,7 @@ export async function generalLedger(t: Db, companyId: string, q: any) {
     bal = bal.plus(l.debit).minus(l.credit);
     return { ...l, balance: r2(bal) };
   });
-  return { account: acc, from, to, opening: r2(ob.b), rows: out, closing: r2(bal), totalDebit: r2(lines.reduce((a, l) => a + l.debit, 0)), totalCredit: r2(lines.reduce((a, l) => a + l.credit, 0)) };
+  return { account: acc, from, to, opening: r2(ob.b), rows: out, closing: r2(bal), totalDebit: r2(lines.reduce((a, l) => a + Number(l.debit), 0)), totalCredit: r2(lines.reduce((a, l) => a + Number(l.credit), 0)) };
 }
 
 export async function journalBook(t: Db, companyId: string, q: any) {
@@ -88,6 +95,9 @@ export async function journalBook(t: Db, companyId: string, q: any) {
   if (q.status) { params.push(q.status); where.push(`e.status=$${params.length}`); }
   const jb = branchCond(q, params); if (jb) where.push(jb.replace(" AND ", ""));
   if (q.search) { params.push(`%${q.search}%`); where.push(`(e.number ILIKE $${params.length} OR e.memo ILIKE $${params.length} OR e.reference ILIKE $${params.length})`); }
+  if (q.accountId && UUID_RE.test(String(q.accountId))) { params.push(String(q.accountId)); where.push(`EXISTS (SELECT 1 FROM journal_lines x WHERE x.entry_id=e.id AND x.account_id=$${params.length})`); }
+  if (q.partnerId && UUID_RE.test(String(q.partnerId))) { params.push(String(q.partnerId)); where.push(`EXISTS (SELECT 1 FROM journal_lines x WHERE x.entry_id=e.id AND x.partner_id=$${params.length})`); }
+  if (q.minAmount && Number(q.minAmount) > 0) { params.push(Number(q.minAmount)); where.push(`(SELECT SUM(x.debit) FROM journal_lines x WHERE x.entry_id=e.id) >= $${params.length}`); }
   const total = await t.one(`SELECT COUNT(*)::int c FROM journal_entries e WHERE ${where.join(" AND ")}`, params);
   params.push(limit, offset);
   const entries = await t.rows(`SELECT e.* FROM journal_entries e WHERE ${where.join(" AND ")} ORDER BY e.date DESC, e.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
@@ -288,15 +298,38 @@ export async function partnerStatement(t: Db, companyId: string, partnerId: stri
     `SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
      WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key=$3 AND e.status='POSTED' AND e.date < $4${bLit(q)}`, [companyId, partnerId, key, from]);
   const lines = await t.rows(
-    `SELECT e.number, e.date, e.type, e.memo, e.reference, e.source_type, e.source_id, l.debit, l.credit FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+    `SELECT e.id AS entry_id, e.number, e.date, e.type, e.memo, e.reference, e.source_type, e.source_id, l.debit, l.credit, l.description, b.name AS branch_name,
+       i.number AS doc_number, i.kind AS doc_kind, i.due_date, i.currency AS doc_currency, i.fc_total AS doc_fc_total, CASE e.source_type WHEN 'INVOICE' THEN (SELECT number FROM invoices WHERE id=e.source_id) WHEN 'PAYMENT' THEN (SELECT number FROM payments WHERE id=e.source_id) WHEN 'EXPENSE' THEN (SELECT number FROM expenses WHERE id=e.source_id) END AS src_number, CASE WHEN e.source_type='PAYMENT' THEN (SELECT direction FROM payments WHERE id=e.source_id) END AS src_dir
+     FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN branches b ON b.id=e.branch_id
+     LEFT JOIN invoices i ON e.source_type='INVOICE' AND i.id=e.source_id
      WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key=$3 AND e.status='POSTED' AND e.date BETWEEN $4 AND $5${bLit(q)} ORDER BY e.date, e.created_at`, [companyId, partnerId, key, from, to]);
   let bal = D(ob.b).times(sign);
+  let td = D(0), tc = D(0);
   const rows = lines.map((l) => {
-    const dr = sign === 1 ? l.debit : l.credit, cr = sign === 1 ? l.credit : l.debit;
-    bal = bal.plus(dr).minus(cr);
+    const dr = sign === 1 ? Number(l.debit) : Number(l.credit), cr = sign === 1 ? Number(l.credit) : Number(l.debit);
+    bal = bal.plus(dr).minus(cr); td = td.plus(dr); tc = tc.plus(cr);
     return { ...l, debit: dr, credit: cr, balance: r2(bal) };
   });
-  return { partner, role, from, to, opening: r2(D(ob.b).times(sign)), rows, closing: r2(bal) };
+  // optional item detail for document rows (detailed statement)
+  if (q.detail === "1" || q.detail === "true") {
+    const ids = [...new Set(rows.filter((r) => r.sourceType === "INVOICE" && r.sourceId).map((r) => r.sourceId))];
+    if (ids.length) {
+      const items = await t.rows(`SELECT invoice_id, description, qty, unit_price, discount_pct, total FROM invoice_lines WHERE invoice_id = ANY($1::uuid[]) ORDER BY sort`, [ids]);
+      const by = new Map<string, any[]>();
+      for (const it of items) (by.get(it.invoiceId) || by.set(it.invoiceId, []).get(it.invoiceId)!).push(it);
+      for (const r of rows as any[]) if (r.sourceType === "INVOICE") r.items = by.get(r.sourceId) || [];
+    }
+  }
+  // open documents & ageing as of `to`
+  const dir = role === "CUSTOMER" ? "SALE" : "PURCHASE";
+  const open = await t.rows(
+    `SELECT id, number, kind, date, due_date, total, amount_paid, total-amount_paid due, ($3::date - COALESCE(due_date, date)) days
+     FROM invoices WHERE company_id=$1 AND partner_id=$2 AND direction=$4 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid>0.001 AND date <= $3${q.branchId && UUID_RE.test(String(q.branchId)) ? ` AND branch_id='${q.branchId}'::uuid` : ""} ORDER BY date`,
+    [companyId, partnerId, to, dir]);
+  const ageing = { current: 0, d30: 0, d60: 0, d90: 0, d120: 0 } as Record<string, number>;
+  for (const o of open) { const d = Number(o.days); const k = d <= 0 ? "current" : d <= 30 ? "d30" : d <= 60 ? "d60" : d <= 90 ? "d90" : "d120"; ageing[k] = r2(ageing[k] + Number(o.due)); }
+  const overdue = r2(open.filter((o) => Number(o.days) > 0).reduce((a, o) => a + Number(o.due), 0));
+  return { partner, role, from, to, opening: r2(D(ob.b).times(sign)), rows, closing: r2(bal), totalDebit: r2(td), totalCredit: r2(tc), open, ageing, overdue };
 }
 
 export async function aging(t: Db, companyId: string, q: any) {

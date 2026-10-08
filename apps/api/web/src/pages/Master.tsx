@@ -1,8 +1,9 @@
-import { PortalLinkBtn } from "./Integrations";
-import React, { useEffect, useState } from "react";
+import { PartnerStatement } from "./Statements";
+import { ProductImagesModal } from "./ProductImages";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ImportModal } from "./Import";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
 export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
@@ -12,23 +13,56 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const [edit, setEdit] = useState<any>(null);
   const [stmt, setStmt] = useState<any>(null);
   const [imp, setImp] = useState(false);
-  const { data, loading, reload } = useFetch(`/partners${q({ role, q: dq, limit: 500, active: "all" })}`);
-  const label = role === "CUSTOMER" ? "العملاء" : "الموردون";
+  const [bal, setBal] = useState("");
+  const [status, setStatus] = useState("active");
+  const [city, setCity] = useState("");
+  const [kind, setKind] = useState("");
+  const { data, loading, reload } = useFetch(`/partners${q({ role, q: dq, limit: 2000, active: "all" })}`);
+  const isCust = role === "CUSTOMER";
+  const label = isCust ? "العملاء" : "الموردون";
+  const cities = useMemo(() => [...new Set((data || []).map((p: any) => (p.city || "").trim()).filter(Boolean))].sort(), [data]);
+  const filtered = useMemo(() => (data || []).filter((p: any) => {
+    const b = Number(p.balance);
+    if (status === "active" && !p.isActive) return false;
+    if (status === "inactive" && p.isActive) return false;
+    if (bal === "due" && !(b > 0.004)) return false;
+    if (bal === "credit" && !(b < -0.004)) return false;
+    if (bal === "zero" && Math.abs(b) > 0.004) return false;
+    if (bal === "overdue" && !(Number(p.overdue) > 0)) return false;
+    if (bal === "limit" && !(Number(p.creditLimit) > 0 && b > Number(p.creditLimit))) return false;
+    if (city && (p.city || "").trim() !== city) return false;
+    if (kind && p.kind !== kind) return false;
+    return true;
+  }), [data, bal, status, city, kind]);
+  const s = useSorted(filtered);
+  const active = !!(bal || status !== "active" || city || kind || search);
+  const clear = () => { setBal(""); setStatus("active"); setCity(""); setKind(""); setSearch(""); };
+  const sum = (k: string) => filtered.reduce((a: number, p: any) => a + Number(p[k] || 0), 0);
   return (
     <div className="card">
-      <div className="card-h"><h3>{label} <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("partners.write") && <button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button>}{can("partners.write") && <button className="btn primary sm" onClick={() => setEdit({})}>＋ {role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"}</button>}</div></div>
+      <div className="card-h"><h3>{label} <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("partners.write") && <button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button>}{can("partners.write") && <button className="btn primary sm" onClick={() => setEdit({})}>＋ {isCust ? "عميل جديد" : "مورد جديد"}</button>}</div></div>
       <div className="card-b">
-        <div className="toolbar"><div className="search"><span className="ic">🔍</span><Input placeholder="بحث" value={search} onChange={(e) => setSearch(e.target.value)} /></div><div className="grow" />{data && <ExportBtn name={label} rows={() => data.map((p: any) => ({ الكود: p.code, الاسم: p.name, النوع: p.kind === "COMPANY" ? "منشأة" : "فرد", "الرقم الضريبي": p.vatNumber, الجوال: p.phone, المدينة: p.city, "حد الائتمان": p.creditLimit, "أيام السداد": p.paymentTerms, الرصيد: p.balance }))} />}</div>
-        {loading && !data ? <Loading /> : !data?.length ? <Empty /> : (
-          <div className="table-wrap"><table className="tbl"><thead><tr><th>الكود</th><th>الاسم</th><th>النوع</th><th>الرقم الضريبي</th><th>الجوال</th><th>المدينة</th><th>شروط السداد</th><th className="n">الرصيد</th><th /></tr></thead>
-            <tbody>{data.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
-              <td>{p.code}</td><td><b>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td>
+        <div className="toolbar">
+          <SearchBox value={search} onChange={setSearch} placeholder="بحث بالاسم / الكود / الجوال / الرقم الضريبي" width={280} />
+          <Select value={bal} onChange={(e) => setBal(e.target.value)}><option value="">كل الأرصدة</option><option value="due">{isCust ? "عليهم رصيد" : "لهم رصيد مستحق"}</option><option value="overdue">متأخر السداد</option>{isCust && <option value="limit">تجاوزوا حد الائتمان</option>}<option value="credit">رصيد دائن (مقدّم)</option><option value="zero">رصيد صفري</option></Select>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">النشطون</option><option value="inactive">الموقوفون</option><option value="all">الكل</option></Select>
+          <Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="">منشأة وفرد</option><option value="COMPANY">منشآت</option><option value="INDIVIDUAL">أفراد</option></Select>
+          {cities.length > 1 && <Select value={city} onChange={(e) => setCity(e.target.value)}><option value="">كل المدن</option>{cities.map((c: any) => <option key={c} value={c}>{c}</option>)}</Select>}
+          <FilterInfo shown={filtered.length} total={data?.length || 0} active={active} onClear={clear} />
+          <div className="grow" />{data && <ExportBtn name={label} rows={() => s.sorted.map((p: any) => ({ الكود: p.code, الاسم: p.name, النوع: p.kind === "COMPANY" ? "منشأة" : "فرد", "الرقم الضريبي": p.vatNumber, الجوال: p.phone, المدينة: p.city, "حد الائتمان": p.creditLimit, "أيام السداد": p.paymentTerms, الرصيد: p.balance, المتأخر: p.overdue, "آخر حركة": p.lastDocDate }))} />}
+        </div>
+        {loading && !data ? <Loading /> : !filtered.length ? <Empty text={active ? "لا نتائج مطابقة للفلاتر" : "لا توجد بيانات"} /> : (
+          <div className="table-wrap"><table className="tbl"><thead><tr><Th k="code" s={s}>الكود</Th><Th k="name" s={s}>الاسم</Th><th>النوع</th><th>الرقم الضريبي</th><th>الجوال</th><Th k="city" s={s}>المدينة</Th><th>شروط السداد</th><Th k="lastDocDate" s={s}>آخر حركة</Th><Th k="overdue" s={s} n>المتأخر</Th><Th k="balance" s={s} n>الرصيد</Th><th /></tr></thead>
+            <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
+              <td className="dt">{p.code}</td><td><b>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}{isCust && Number(p.creditLimit) > 0 && Number(p.balance) > Number(p.creditLimit) && <span className="badge red" style={{ marginInlineStart: 4 }}>تجاوز الحد</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td><td className="small dt">{fmtDate(p.lastDocDate)}</td>
+              <td className="n">{Number(p.overdue) > 0 ? <span className="neg-val"><Money v={p.overdue} /></span> : ""}</td>
               <td className="n"><Money v={p.balance} sign /></td>
               <td className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => setStmt(p)}>كشف حساب</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
-            </tr>)}</tbody></table></div>
+            </tr>)}</tbody>
+            <tfoot><tr><td colSpan={8}>الإجمالي ({filtered.length})</td><td className="n"><Money v={sum("overdue")} /></td><td className="n"><Money v={sum("balance")} /></td><td /></tr></tfoot></table></div>
         )}
       </div>
-      {edit && <PartnerEditor role={role} p={edit} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
+      {edit && <PartnerEditor role={role} p={edit} onClose={(sv) => { setEdit(null); if (sv) reload(); }} />}
       {stmt && <StatementModal partner={stmt} role={role} onClose={() => setStmt(null)} />}
       {imp && <ImportModal kind="partners" role={role} onClose={(d) => { setImp(false); if (d) reload(); }} />}
     </div>
@@ -71,67 +105,79 @@ function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s
   );
 }
 
-export function StatementModal({ partner, role, onClose }: { partner: any; role: string; onClose: () => void }) {
-  const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
-  const [to, setTo] = useState(today());
-  const { data } = useFetch(`/reports/statement/${partner.id}${q({ role, from, to })}`);
-  return (
-    <Modal wide title={`كشف حساب: ${partner.name}`} onClose={onClose} footer={<><PortalLinkBtn partner={partner} /><div className="grow" /><PrintBtn />{data && <ExportBtn name={`كشف حساب ${partner.name}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, البيان: r.memo, مدين: r.debit, دائن: r.credit, الرصيد: r.balance }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
-      <div className="no-print mb"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
-      {!data ? <Loading /> : (
-        <div className="print-doc" style={{ padding: 0 }}>
-          <div className="print-only"><h2>كشف حساب {role === "CUSTOMER" ? "عميل" : "مورد"}: {partner.name}</h2><div>من {from} إلى {to}</div></div>
-          <table className="tbl compact"><thead><tr><th>التاريخ</th><th>المرجع</th><th>البيان</th><th className="n">مدين</th><th className="n">دائن</th><th className="n">الرصيد</th></tr></thead>
-            <tbody>
-              <tr className="group"><td colSpan={5}>رصيد أول المدة</td><td className="n"><Money v={data.opening} /></td></tr>
-              {data.rows.map((r: any, i: number) => <tr key={i}><td>{fmtDate(r.date)}</td><td>{r.reference || r.number}</td><td>{r.memo}</td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.balance} /></td></tr>)}
-            </tbody>
-            <tfoot><tr><td colSpan={5}>رصيد آخر المدة {role === "CUSTOMER" ? "(مستحق على العميل)" : "(مستحق للمورد)"}</td><td className="n"><Money v={data.closing} /></td></tr></tfoot>
-          </table>
-        </div>
-      )}
-    </Modal>
-  );
-}
+/** Kept for existing imports — the full statement lives in Statements.tsx. */
+export const StatementModal = PartnerStatement;
 
 // ─── products ──────────────────────────────────────────────────────────────
 export function ProductsPage() {
   const { can } = useCompanyContext();
   const [search, setSearch] = useUrlSearch();
   const [cat, setCat] = useState("");
+  const [type, setType] = useState("");
+  const [stock, setStock] = useState("");
+  const [img, setImg] = useState("");
+  const [status, setStatus] = useState("active");
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
   const [card, setCard] = useState<any>(null);
   const [cats, setCats] = useState(false);
   const [imp, setImp] = useState(false);
+  const [images, setImages] = useState<any[] | null>(null);
+  const [sel, setSel] = useState<Record<string, boolean>>({});
   const categories = useFetch("/categories");
-  const { data, loading, reload } = useFetch(`/products${q({ q: dq, categoryId: cat, limit: 1000, active: "all" })}`);
+  const { data, loading, reload } = useFetch(`/products${q({ q: dq, categoryId: cat, limit: 5000, active: "all" })}`);
+  const filtered = useMemo(() => (data || []).filter((p: any) => {
+    if (status === "active" && !p.isActive) return false;
+    if (status === "inactive" && p.isActive) return false;
+    if (type && p.type !== type) return false;
+    const qn = Number(p.qty);
+    if (stock === "out" && !(p.type === "STOCK" && qn <= 0)) return false;
+    if (stock === "low" && !(p.type === "STOCK" && qn > 0 && qn <= Number(p.reorderLevel))) return false;
+    if (stock === "ok" && !(p.type === "STOCK" && qn > Number(p.reorderLevel))) return false;
+    if (img === "with" && !p.image) return false;
+    if (img === "without" && p.image) return false;
+    return true;
+  }), [data, status, type, stock, img]);
+  const s = useSorted(filtered);
+  const active = !!(search || cat || type || stock || img || status !== "active");
+  const clear = () => { setSearch(""); setCat(""); setType(""); setStock(""); setImg(""); setStatus("active"); };
+  const selected = filtered.filter((p: any) => sel[p.id]);
+  const allSel = filtered.length > 0 && filtered.every((p: any) => sel[p.id]);
   return (
     <div className="card">
-      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button><button className="btn sm" onClick={() => setCats(true)}>التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
+      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setImages(selected.length ? selected : filtered)} title="رفع/تغيير صور الأصناف المحددة (أو الظاهرة)">🖼 صور الأصناف{selected.length ? ` (${selected.length})` : ""}</button><button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button><button className="btn sm" onClick={() => setCats(true)}>التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
       <div className="card-b">
         <div className="toolbar">
-          <div className="search"><span className="ic">🔍</span><Input placeholder="بحث بالاسم / الرمز / الباركود" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+          <SearchBox value={search} onChange={setSearch} placeholder="بحث بالاسم / الرمز / الباركود" width={260} />
           <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">كل التصنيفات</option>{(categories.data || []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
-          <div className="grow" />{data && <ExportBtn name="الأصناف" rows={() => data.map((p: any) => ({ الرمز: p.sku, الباركود: p.barcode, الاسم: p.name, التصنيف: p.category, النوع: p.type === "STOCK" ? "مخزني" : "خدمة", الوحدة: p.unit, "سعر البيع": p.salePrice, "سعر الشراء": p.purchasePrice, "متوسط التكلفة": p.avgCost, الكمية: p.qty, "قيمة المخزون": p.stockValue, الضريبة: TAX_AR[p.taxCode] }))} />}
+          <Select value={type} onChange={(e) => setType(e.target.value)}><option value="">مخزني وخدمة</option><option value="STOCK">أصناف مخزنية</option><option value="SERVICE">خدمات</option></Select>
+          <Select value={stock} onChange={(e) => setStock(e.target.value)}><option value="">كل حالات المخزون</option><option value="ok">متوفر</option><option value="low">منخفض (حد الطلب)</option><option value="out">نافد</option></Select>
+          <Select value={img} onChange={(e) => setImg(e.target.value)}><option value="">بصورة وبدون</option><option value="with">لها صورة</option><option value="without">بدون صورة</option></Select>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">النشطة</option><option value="inactive">الموقوفة</option><option value="all">الكل</option></Select>
+          <FilterInfo shown={filtered.length} total={data?.length || 0} active={active} onClear={clear} />
+          <div className="grow" />{data && <ExportBtn name="الأصناف" rows={() => s.sorted.map((p: any) => ({ الرمز: p.sku, الباركود: p.barcode, الاسم: p.name, التصنيف: p.category, النوع: p.type === "STOCK" ? "مخزني" : "خدمة", الوحدة: p.unit, "سعر البيع": p.salePrice, "سعر الشراء": p.purchasePrice, "متوسط التكلفة": p.avgCost, الكمية: p.qty, "قيمة المخزون": p.stockValue, الضريبة: TAX_AR[p.taxCode], الصورة: p.image ? "نعم" : "" }))} />}
         </div>
-        {loading && !data ? <Loading /> : !data?.length ? <Empty /> : (
-          <div className="table-wrap"><table className="tbl"><thead><tr><th>الرمز</th><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th className="n">سعر البيع</th><th className="n">متوسط التكلفة</th><th className="n">الكمية</th><th className="n">قيمة المخزون</th><th>الضريبة</th><th /></tr></thead>
-            <tbody>{data.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
+        {selected.length > 0 && <div className="alert info row between" style={{ marginTop: 0 }}><span>محدد {selected.length} صنف</span><span className="row" style={{ gap: 6 }}>{can("products.write") && <button className="btn sm primary" onClick={() => setImages(selected)}>🖼 رفع صور المحدد</button>}<button className="btn sm ghost" onClick={() => setSel({})}>إلغاء التحديد</button></span></div>}
+        {loading && !data ? <Loading /> : !filtered.length ? <Empty text={active ? "لا نتائج مطابقة للفلاتر" : "لا توجد بيانات"} /> : (
+          <div className="table-wrap"><table className="tbl"><thead><tr><th style={{ width: 28 }}><input type="checkbox" checked={allSel} onChange={(e) => { const n: Record<string, boolean> = { ...sel }; filtered.forEach((p: any) => { n[p.id] = e.target.checked; }); setSel(n); }} title="تحديد الكل" /></th><Th k="sku" s={s}>الرمز</Th><Th k="name" s={s}>الصنف</Th><Th k="category" s={s}>التصنيف</Th><Th k="salePrice" s={s} n>سعر البيع</Th><Th k="avgCost" s={s} n>متوسط التكلفة</Th><Th k="qty" s={s} n>الكمية</Th><Th k="stockValue" s={s} n>قيمة المخزون</Th><th>الضريبة</th><th /></tr></thead>
+            <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
+              <td><input type="checkbox" checked={!!sel[p.id]} onChange={(e) => setSel({ ...sel, [p.id]: e.target.checked })} /></td>
               <td className="num">{p.sku}<div className="small muted num">{p.barcode}</div></td>
-              <td><div className="row" style={{ gap: 8 }}>{p.image && <img src={p.image} style={{ width: 32, height: 32, borderRadius: 6, objectFit: "cover" }} alt="" />}<div><b>{p.name}</b>{p.type === "SERVICE" && <span className="badge blue" style={{ marginInlineStart: 6 }}>خدمة</span>}{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}</div></div></td>
-              <td>{p.category && <span className="badge" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor } : {}}>{p.category}</span>}</td><td>{p.unit}</td>
+              <td><div className="cell-item">{p.image ? <img src={p.image} loading="lazy" style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover" }} alt="" /> : <span style={{ width: 34, height: 34, borderRadius: 6, background: "var(--bg)", display: "inline-grid", placeItems: "center", color: "var(--muted)", cursor: can("products.write") ? "pointer" : undefined }} title={can("products.write") ? "إضافة صورة" : ""} onClick={() => can("products.write") && setImages([p])}>🖼</span>}<div><b>{p.name}</b>{p.type === "SERVICE" && <span className="badge blue" style={{ marginInlineStart: 6 }}>خدمة</span>}{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}<div className="small muted">{p.unit}{p.uoms?.length ? ` · ${p.uoms.map((u: any) => u.name).join("، ")}` : ""}</div></div></div></td>
+              <td>{p.category && <span className="badge" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor, whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}>{p.category}</span>}</td>
               <td className="n"><Money v={p.salePrice} /></td><td className="n">{p.type === "STOCK" ? <Money v={p.avgCost} /> : ""}</td>
               <td className={"n " + (p.type === "STOCK" && Number(p.qty) <= Number(p.reorderLevel) ? "neg-val" : "")}>{p.type === "STOCK" ? Number(p.qty) : "—"}</td>
-              <td className="n">{p.type === "STOCK" ? <Money v={p.stockValue} /> : ""}</td><td className="small">{TAX_AR[p.taxCode]}</td>
+              <td className="n">{p.type === "STOCK" ? <Money v={p.stockValue} /> : ""}</td><td className="small dt">{TAX_AR[p.taxCode]}</td>
               <td className="row" style={{ gap: 4 }}>{p.type === "STOCK" && <button className="btn sm" onClick={() => setCard(p)}>كرت الصنف</button>}{can("products.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
-            </tr>)}</tbody></table></div>
+            </tr>)}</tbody>
+            <tfoot><tr><td colSpan={7}>الإجمالي ({filtered.length})</td><td className="n"><Money v={filtered.reduce((a: number, p: any) => a + (p.type === "STOCK" ? Number(p.stockValue) : 0), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>
         )}
       </div>
-      {edit && <ProductEditor p={edit} categories={categories.data || []} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
+      {edit && <ProductEditor p={edit} categories={categories.data || []} onClose={(sv) => { setEdit(null); if (sv) reload(); }} />}
       {card && <StockCardModal p={card} onClose={() => setCard(null)} />}
       {cats && <CategoriesModal onClose={() => { setCats(false); categories.reload(); reload(); }} />}
       {imp && <ImportModal kind="products" onClose={(d) => { setImp(false); if (d) { reload(); categories.reload(); } }} />}
+      {images && <ProductImagesModal products={images} onClose={(changed) => { setImages(null); if (changed) { reload(); setSel({}); } }} />}
     </div>
   );
 }
@@ -160,7 +206,7 @@ function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; 
         {f.type === "STOCK" && <Field label="الدفعات والصلاحية" hint="يُطلب رقم الدفعة وتاريخ الانتهاء عند الشراء، ويُصرف الأقرب انتهاءً أولاً (FEFO)"><label className="check"><input type="checkbox" checked={!!f.trackLots} onChange={s("trackLots")} /> تتبع الدفعات وتواريخ الانتهاء</label></Field>}
         {f.type === "STOCK" && f.trackLots && <Field label="مدة الصلاحية الافتراضية (يوم)" hint="تُستخدم لحساب تاريخ الانتهاء إن لم يُدخل عند الشراء"><NumInput value={f.shelfLifeDays || ""} onChange={s("shelfLifeDays")} /></Field>}
         {f.type === "STOCK" && !p.id && <Field label="رصيد افتتاحي (كمية)" hint="يُقيّم بسعر الشراء ويُرحّل كرصيد افتتاحي"><NumInput value={f.openingQty || ""} onChange={s("openingQty")} /></Field>}
-        <Field label="الصورة"><div className="row"><label className="btn sm">اختيار صورة<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, image: await fileToDataUrl(file, 300) }); }} /></label>{f.image && <><img src={f.image} style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover" }} alt="" /><button className="btn ghost sm" onClick={() => setF({ ...f, image: null })}>✕</button></>}</div></Field>
+        <Field label="الصورة"><div className="row"><label className="btn sm">اختيار صورة<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, image: await fileToDataUrl(file, 600) }); }} /></label>{f.image && <><img src={f.image} style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover" }} alt="" /><button className="btn ghost sm" onClick={() => setF({ ...f, image: null })}>✕</button></>}</div></Field>
         {p.id && <Field label="الحالة"><label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط (يظهر في البيع)</label></Field>}
       </div>
       {f.type === "STOCK" && <div className="mt">
@@ -196,7 +242,7 @@ export function StockCardModal({ p, onClose }: { p: any; onClose: () => void }) 
     <Modal wide title={`كرت الصنف: ${p.name} (${p.sku})`} onClose={onClose} footer={<><PrintBtn />{data && <ExportBtn name={`كرت صنف ${p.sku}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, الحركة: SRC[r.sourceType], المرجع: r.reference, المستودع: r.warehouse, الكمية: r.qty, "تكلفة الوحدة": r.unitCost, القيمة: r.value, "رصيد الكمية": r.balanceQty, "رصيد القيمة": r.balanceVal }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
       <div className="no-print mb"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
       {!data ? <Loading /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>التاريخ</th><th>الحركة</th><th>المرجع</th><th>المستودع</th><th className="n">وارد</th><th className="n">صادر</th><th className="n">تكلفة الوحدة</th><th className="n">القيمة</th><th className="n">رصيد الكمية</th><th className="n">رصيد القيمة</th><th className="n">متوسط التكلفة</th></tr></thead>
-        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td>{fmtDate(r.date)}</td><td>{SRC[r.sourceType]}</td><td>{r.reference}</td><td>{r.warehouse}</td><td className="n pos-val">{Number(r.qty) > 0 ? Number(r.qty) : ""}</td><td className="n neg-val">{Number(r.qty) < 0 ? -Number(r.qty) : ""}</td><td className="n"><Money v={r.unitCost} /></td><td className="n"><Money v={r.value} sign /></td><td className="n">{Number(r.balanceQty)}</td><td className="n"><Money v={r.balanceVal} /></td><td className="n">{Number(r.balanceQty) > 0 ? money(Number(r.balanceVal) / Number(r.balanceQty)) : ""}</td></tr>)}</tbody></table></div>}
+        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td className="dt">{fmtDate(r.date)}</td><td>{SRC[r.sourceType]}</td><td>{r.reference}</td><td>{r.warehouse}</td><td className="n pos-val">{Number(r.qty) > 0 ? Number(r.qty) : ""}</td><td className="n neg-val">{Number(r.qty) < 0 ? -Number(r.qty) : ""}</td><td className="n"><Money v={r.unitCost} /></td><td className="n"><Money v={r.value} sign /></td><td className="n">{Number(r.balanceQty)}</td><td className="n"><Money v={r.balanceVal} /></td><td className="n">{Number(r.balanceQty) > 0 ? money(Number(r.balanceVal) / Number(r.balanceQty)) : ""}</td></tr>)}</tbody></table></div>}
     </Modal>
   );
 }
@@ -211,19 +257,34 @@ export function InventoryPage() {
   const [newAdj, setNewAdj] = useState<string | null>(null);
   const { run } = useAction();
   const [whName, setWhName] = useState("");
+  const [vt, setVt] = useState("");
+  const [vc, setVc] = useState("");
+  const [vw, setVw] = useState("");
+  const [vl, setVl] = useState(false);
+  const vrows = (val.data?.rows || []).filter((r: any) => matches(r, vt, ["sku", "name", "category"]) && (!vc || r.category === vc) && (!vw || r.warehouse === vw) && (!vl || Number(r.qty) <= Number(r.reorderLevel)));
+  const vs = useSorted(vrows);
+  const vcats = [...new Set((val.data?.rows || []).map((r: any) => r.category).filter(Boolean))] as string[];
+  const vwhs = [...new Set((val.data?.rows || []).map((r: any) => r.warehouse))] as string[];
+  const [at, setAt] = useState("");
+  const [ak, setAk] = useState("");
+  const [card, setCard] = useState<any>(null);
+  const arows = (adj.data || []).filter((a: any) => matches(a, at, ["number", "warehouse", "notes", (x) => (x.lines || []).map((l: any) => l.name).join(" ")]) && (!ak || a.kind === ak));
   return (
     <div className="grid">
       <div className="tabs"><button className={tab === "valuation" ? "active" : ""} onClick={() => setTab("valuation")}>تقييم المخزون</button><button className={tab === "adj" ? "active" : ""} onClick={() => setTab("adj")}>الجرد والتسويات والتحويلات</button><button className={tab === "wh" ? "active" : ""} onClick={() => setTab("wh")}>المستودعات</button></div>
       {tab === "valuation" && <div className="card"><div className="card-h"><h3>تقييم المخزون (متوسط مرجح)</h3><div className="row">{val.data && <span className={"badge " + (val.data.matches ? "green" : "red")}>{val.data.matches ? "مطابق لحساب المخزون ✓" : `فرق مع الحساب: ${money(val.data.total - val.data.glBalance)}`}</span>}<PrintBtn />{val.data && <ExportBtn name="تقييم المخزون" rows={() => val.data.rows.map((r: any) => ({ الرمز: r.sku, الصنف: r.name, التصنيف: r.category, المستودع: r.warehouse, الكمية: r.qty, "متوسط التكلفة": r.avgCost, "القيمة": r.value, "قيمة البيع": r.retail }))} />}</div></div>
-        {!val.data ? <Loading /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرمز</th><th>الصنف</th><th>التصنيف</th><th>المستودع</th><th className="n">الكمية</th><th className="n">متوسط التكلفة</th><th className="n">قيمة التكلفة</th><th className="n">قيمة البيع</th><th className="n">هامش متوقع</th></tr></thead>
-          <tbody>{val.data.rows.map((r: any) => <tr key={r.id + r.warehouseId}><td className="num">{r.sku}</td><td>{r.name}</td><td>{r.category}</td><td>{r.warehouse}</td><td className={"n " + (Number(r.qty) <= Number(r.reorderLevel) ? "neg-val" : "")}>{Number(r.qty)}</td><td className="n"><Money v={r.avgCost} /></td><td className="n"><Money v={r.value} /></td><td className="n"><Money v={r.retail} /></td><td className="n"><Money v={r.retail - r.value} sign /></td></tr>)}</tbody>
-          <tfoot><tr><td colSpan={6}>الإجمالي</td><td className="n"><Money v={val.data.total} /></td><td className="n"><Money v={val.data.rows.reduce((a: number, r: any) => a + r.retail, 0)} /></td><td /></tr></tfoot></table></div>}</div>}
+        <div className="card-b no-print" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={vt} onChange={setVt} placeholder="بحث بالصنف / الرمز" />{vcats.length > 0 && <Select value={vc} onChange={(e) => setVc(e.target.value)}><option value="">كل التصنيفات</option>{vcats.map((c) => <option key={c} value={c}>{c}</option>)}</Select>}{vwhs.length > 1 && <Select value={vw} onChange={(e) => setVw(e.target.value)}><option value="">كل المستودعات</option>{vwhs.map((w) => <option key={w} value={w}>{w}</option>)}</Select>}<label className="check"><input type="checkbox" checked={vl} onChange={(e) => setVl(e.target.checked)} /> عند حد الطلب أو أقل</label><FilterInfo shown={vrows.length} total={val.data?.rows.length || 0} active={!!(vt || vc || vw || vl)} onClear={() => { setVt(""); setVc(""); setVw(""); setVl(false); }} /></div></div>
+        {!val.data ? <Loading /> : <div className="table-wrap"><table className="tbl"><thead><tr><Th k="sku" s={vs}>الرمز</Th><Th k="name" s={vs}>الصنف</Th><Th k="category" s={vs}>التصنيف</Th><Th k="warehouse" s={vs}>المستودع</Th><Th k="qty" s={vs} n>الكمية</Th><Th k="avgCost" s={vs} n>متوسط التكلفة</Th><Th k="value" s={vs} n>قيمة التكلفة</Th><Th k="retail" s={vs} n>قيمة البيع</Th><th className="n">هامش متوقع</th><th className="no-print" /></tr></thead>
+          <tbody>{vs.sorted.map((r: any) => <tr key={r.id + r.warehouseId}><td className="num">{r.sku}</td><td>{r.name}</td><td>{r.category}</td><td>{r.warehouse}</td><td className={"n " + (Number(r.qty) <= Number(r.reorderLevel) ? "neg-val" : "")}>{Number(r.qty)}</td><td className="n"><Money v={r.avgCost} /></td><td className="n"><Money v={r.value} /></td><td className="n"><Money v={r.retail} /></td><td className="n"><Money v={r.retail - r.value} sign /></td><td className="no-print"><button className="btn sm ghost" onClick={() => setCard({ id: r.id, name: r.name, sku: r.sku })}>كرت الصنف</button></td></tr>)}</tbody>
+          <tfoot><tr><td colSpan={6}>الإجمالي {vrows.length !== val.data.rows.length ? `(${vrows.length} من ${val.data.rows.length})` : ""}</td><td className="n"><Money v={vrows.reduce((a: number, r: any) => a + Number(r.value), 0)} /></td><td className="n"><Money v={vrows.reduce((a: number, r: any) => a + Number(r.retail), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}</div>}
       {tab === "adj" && <div className="card"><div className="card-h"><h3>الجرد والتسويات</h3>{can("inventory.write") && <div className="row"><button className="btn primary sm" onClick={() => setNewAdj("COUNT")}>＋ جرد فعلي</button><button className="btn sm" onClick={() => setNewAdj("OPENING")}>＋ أرصدة افتتاحية</button><button className="btn sm" onClick={() => setNewAdj("TRANSFER")}>＋ تحويل بين مستودعات</button></div>}</div>
-        {!adj.data ? <Loading /> : !adj.data.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>النوع</th><th>المستودع</th><th>الأصناف</th><th className="n">أثر القيمة</th><th>ملاحظات</th></tr></thead><tbody>{adj.data.map((a: any) => <tr key={a.id}><td>{a.number}</td><td>{fmtDate(a.date)}</td><td>{{ COUNT: "جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل" }[a.kind as string]}</td><td>{a.warehouse}</td><td className="small">{a.lines.map((l: any) => `${l.name} (${l.qty > 0 ? "+" : ""}${l.qty})`).join("، ")}</td><td className="n"><Money v={a.totalValue} sign /></td><td>{a.notes}</td></tr>)}</tbody></table></div>}</div>}
+        <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={at} onChange={setAt} placeholder="بحث بالرقم / الصنف / المستودع" /><Select value={ak} onChange={(e) => setAk(e.target.value)}><option value="">كل الأنواع</option><option value="COUNT">جرد</option><option value="OPENING">رصيد افتتاحي</option><option value="TRANSFER">تحويل</option></Select><FilterInfo shown={arows.length} total={adj.data?.length || 0} active={!!(at || ak)} onClear={() => { setAt(""); setAk(""); }} /><div className="grow" />{adj.data && <ExportBtn name="حركات المخزون" rows={() => arows.map((a: any) => ({ الرقم: a.number, التاريخ: a.date, النوع: ({ COUNT: "جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل" } as any)[a.kind], المستودع: a.warehouse, الأصناف: a.lines.map((l: any) => `${l.name} (${l.qty})`).join("، "), القيمة: a.totalValue, ملاحظات: a.notes }))} />}</div></div>
+        {!adj.data ? <Loading /> : !arows.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>النوع</th><th>المستودع</th><th>الأصناف</th><th className="n">أثر القيمة</th><th>ملاحظات</th></tr></thead><tbody>{arows.map((a: any) => <tr key={a.id}><td>{a.number}</td><td className="dt">{fmtDate(a.date)}</td><td>{{ COUNT: "جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل" }[a.kind as string]}</td><td>{a.warehouse}</td><td className="small">{a.lines.map((l: any) => `${l.name} (${l.qty > 0 ? "+" : ""}${l.qty})`).join("، ")}</td><td className="n"><Money v={a.totalValue} sign /></td><td>{a.notes}</td></tr>)}</tbody></table></div>}</div>}
       {tab === "wh" && <div className="card"><div className="card-h"><h3>المستودعات</h3></div><div className="card-b">
         <table className="tbl compact"><tbody>{(wh.data || []).map((w: any) => <tr key={w.id}><td>{w.code}</td><td>{w.name} {w.isDefault && <span className="badge teal">افتراضي</span>}</td><td>{!w.isDefault && can("inventory.write") && <button className="btn ghost sm" onClick={() => run(async () => { await api(`/warehouses/${w.id}`, { method: "PUT", body: { isDefault: true } }); wh.reload(); })}>جعله افتراضياً</button>}</td></tr>)}</tbody></table>
         {can("inventory.write") && <div className="row mt"><Input placeholder="اسم مستودع جديد" value={whName} onChange={(e) => setWhName(e.target.value)} /><button className="btn primary sm" onClick={() => run(async () => { await api("/warehouses", { body: { code: "WH" + ((wh.data?.length || 0) + 1), name: whName } }); setWhName(""); wh.reload(); })}>إضافة</button></div>}
       </div></div>}
+      {card && <StockCardModal p={card} onClose={() => setCard(null)} />}
       {newAdj && <AdjustmentModal kind={newAdj} warehouses={wh.data || []} onClose={(s) => { setNewAdj(null); if (s) { adj.reload(); val.reload(); setTab("adj"); } }} />}
     </div>
   );

@@ -53,7 +53,7 @@ export const Money = ({ v, blankZero, sign }: { v: any; blankZero?: boolean; sig
 };
 export const today = () => { const d = new Date(Date.now() + 3 * 3600 * 1000); return d.toISOString().slice(0, 10); };
 export const fmtDate = (d: any) => (d ? String(d).slice(0, 10) : "");
-export const fmtDT = (d: any) => (d ? new Date(d).toLocaleString("ar-SA-u-nu-latn", { dateStyle: "medium", timeStyle: "short" }) : "");
+export const fmtDT = (d: any) => (d ? new Date(d).toLocaleString("ar-SA-u-nu-latn-ca-gregory", { dateStyle: "medium", timeStyle: "short" }) : "");
 export const monthStart = () => today().slice(0, 7) + "-01";
 /** Calendar month shift that clamps to the target month's last day (31 Jan + 1 → 28/29 Feb, never 3 Mar). */
 export const addMonths = (s: string, n: number) => {
@@ -259,11 +259,14 @@ export function fileToDataUrl(file: File, maxPx = 512): Promise<string> {
     const r = new FileReader();
     r.onload = () => { img.src = r.result as string; };
     r.onerror = rej;
+    img.onerror = () => rej(new Error("تعذّر قراءة الصورة — تأكد أنها JPG أو PNG أو WEBP"));
     img.onload = () => {
       const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
       const c = document.createElement("canvas");
       c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); // transparent PNGs → white, not black, in JPEG
+      g.drawImage(img, 0, 0, c.width, c.height);
       res(c.toDataURL("image/jpeg", 0.82));
     };
     r.readAsDataURL(file);
@@ -278,4 +281,99 @@ export function useUrlSearch(): [string, (v: string) => void] {
   const [v, setV] = useState(() => new URLSearchParams(loc.search).get("q") || "");
   useEffect(() => { const x = new URLSearchParams(loc.search).get("q"); if (x !== null) setV(x); }, [loc.search]);
   return [v, setV];
+}
+
+// ─── list filtering, sorting & search helpers (shared by every list screen) ──
+/** Arabic-insensitive normalisation: hamza forms, taa marbuta, alef maqsura, tatweel, diacritics, Arabic-Indic digits. */
+export const normalizeAr = (v: any) =>
+  String(v ?? "")
+    .toLowerCase()
+    .replace(/[ً-ٰٟـ]/g, "")
+    .replace(/[أإآٱ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/ؤ/g, "و").replace(/ئ/g, "ي")
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .trim();
+
+/** True when every word of `query` appears in at least one of the given fields. */
+export function matches(row: any, query: string, keys: (string | ((r: any) => any))[]) {
+  const words = normalizeAr(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = keys.map((k) => normalizeAr(typeof k === "function" ? k(row) : row?.[k])).join(" | ");
+  return words.every((w) => hay.includes(w));
+}
+
+export type SortState = { key: string; dir: 1 | -1 } | null;
+/** Client-side sorting; numeric-aware, Arabic collation for text. */
+export function useSorted<T>(rows: T[] | null | undefined, initial: SortState = null) {
+  const [sort, setSort] = useState<SortState>(initial);
+  const sorted = useMemo(() => {
+    if (!rows) return [] as T[];
+    if (!sort) return rows;
+    const col = new Intl.Collator("ar", { numeric: true });
+    const get = (r: any) => r?.[sort.key];
+    return [...rows].sort((a, b) => {
+      const x = get(a), y = get(b);
+      if (x === y) return 0;
+      if (x === null || x === undefined || x === "") return 1;
+      if (y === null || y === undefined || y === "") return -1;
+      const nx = Number(x), ny = Number(y);
+      if (!Number.isNaN(nx) && !Number.isNaN(ny) && typeof x !== "boolean") return (nx - ny) * sort.dir;
+      return col.compare(String(x), String(y)) * sort.dir;
+    });
+  }, [rows, sort]);
+  const toggle = (key: string) => setSort((s) => (!s || s.key !== key ? { key, dir: 1 } : s.dir === 1 ? { key, dir: -1 } : null));
+  return { sorted, sort, toggle };
+}
+
+/** Sortable header cell. */
+export function Th({ k, s, children, n }: { k: string; s: { sort: SortState; toggle: (k: string) => void }; children: React.ReactNode; n?: boolean }) {
+  const on = s.sort?.key === k;
+  return <th className={"sortable" + (n ? " n" : "") + (on ? " on" : "")} onClick={() => s.toggle(k)} title="فرز">{children}<span className="sort-ic">{on ? (s.sort!.dir === 1 ? "▲" : "▼") : "↕"}</span></th>;
+}
+
+export function SearchBox({ value, onChange, placeholder = "بحث", autoFocus, width }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; width?: number }) {
+  return (
+    <div className="search" style={width ? { minWidth: width } : undefined}>
+      <span className="ic">🔍</span>
+      <Input placeholder={placeholder} value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape" && value) { e.stopPropagation(); onChange(""); } }} />
+      {value && <button type="button" className="search-x" title="مسح" onClick={() => onChange("")}>✕</button>}
+    </div>
+  );
+}
+
+/** "Showing n of m" + clear-filters link shown when any filter is active. */
+export function FilterInfo({ shown, total, active, onClear }: { shown: number; total: number; active: boolean; onClear: () => void }) {
+  if (!active) return <span className="muted small">{total} سجل</span>;
+  return <span className="filter-info small"><b className="num">{shown}</b>{shown !== total ? <> من <span className="num">{total}</span></> : " نتيجة"} <button type="button" className="link-btn" onClick={onClear}>مسح الفلاتر ✕</button></span>;
+}
+
+/** Simple text-filter state for client-side lists; returns filtered rows + helpers. */
+export function useListSearch<T>(rows: T[] | null | undefined, keys: (string | ((r: any) => any))[], extra?: (r: T) => boolean, deps: any[] = []) {
+  const [text, setText] = useState("");
+  const filtered = useMemo(() => (rows || []).filter((r) => matches(r, text, keys) && (!extra || extra(r))), [rows, text, ...deps]);
+  return { text, setText, filtered, total: rows?.length || 0 };
+}
+
+/** Where a journal line came from → in-app link (documents, vouchers, expenses…). */
+export function sourceLink(r: { sourceType?: string; sourceId?: string; srcNumber?: string; srcDir?: string }): string | null {
+  switch (r.sourceType) {
+    case "INVOICE": return r.sourceId ? `/doc/${r.sourceId}` : null;
+    case "PAYMENT": return r.srcNumber ? `/${r.srcDir === "OUT" ? "vouchers" : "receipts"}?q=${encodeURIComponent(r.srcNumber)}` : null;
+    case "EXPENSE": return r.srcNumber ? `/expenses?q=${encodeURIComponent(r.srcNumber)}` : null;
+    default: return null;
+  }
+}
+
+/** Optional period filter (empty = all dates) with quick presets. */
+export function PeriodFilter({ from, to, onChange }: { from: string; to: string; onChange: (f: string, t: string) => void }) {
+  const td = today();
+  return (
+    <div className="row" style={{ gap: 6 }}>
+      <Input type="date" value={from} onChange={(e) => onChange(e.target.value, to)} style={{ width: 145 }} title="من تاريخ" />
+      <span className="muted">—</span>
+      <Input type="date" value={to} onChange={(e) => onChange(from, e.target.value)} style={{ width: 145 }} title="إلى تاريخ" />
+      <Select value="" onChange={(e) => { const v = e.target.value; if (v === "m") onChange(monthStart(), td); if (v === "pm") { const s = addMonths(monthStart(), -1); onChange(s, new Date(Date.UTC(Number(s.slice(0, 4)), Number(s.slice(5, 7)), 0)).toISOString().slice(0, 10)); } if (v === "q") onChange(addMonths(td, -3), td); if (v === "y") onChange(yearStart(), td); if (v === "all") onChange("", ""); }} style={{ width: 120 }}>
+        <option value="">فترة سريعة…</option><option value="m">هذا الشهر</option><option value="pm">الشهر السابق</option><option value="q">آخر 3 أشهر</option><option value="y">هذه السنة</option><option value="all">كل التواريخ</option>
+      </Select>
+    </div>
+  );
 }

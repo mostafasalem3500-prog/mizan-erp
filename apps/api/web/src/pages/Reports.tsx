@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg } from "../lib";
-import { StatementModal } from "./Master";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg , SearchBox, FilterInfo, matches, TYPE_AR, productFetcher } from "../lib";
+import { StatementModal, StockCardModal } from "./Master";
+import { AccountLedger, PartnerStatement } from "./Statements";
+import { EmployeeStatement } from "./Hr";
 import { ZakatReport } from "./Round3";
 import { BudgetVsActual } from "./Budgets";
 
@@ -60,15 +62,22 @@ const bSub = (bName?: string) => (bName ? ` · ${bName}` : "");
 
 function TrialBalance({ from, to, branchId, bName }: { from: string; to: string } & BP) {
   const [all, setAll] = useState(false);
+  const [text, setText] = useState("");
+  const [type, setType] = useState("");
+  const [acc, setAcc] = useState<any>(null);
   const { data } = useFetch(`/reports/trial-balance${q({ from, to, all: all ? 1 : 0, branchId: branchId || undefined })}`);
   if (!data) return <Loading />;
+  const rows = data.rows.filter((r: any) => (!text || r.code.startsWith(text) || matches(r, text, ["nameAr", "nameEn"])) && (!type || r.type === type));
+  const filtered = rows.length !== data.rows.length;
+  const T = (k: string) => rows.reduce((a: number, r: any) => a + Number(r[k] || 0), 0);
   return (
     <div className="card">
       <Head title="ميزان المراجعة" sub={`من ${from} إلى ${to}${bSub(bName)}`} rows={data.rows.map((r: any) => ({ الحساب: r.code, الاسم: r.nameAr, "افتتاحي مدين": r.openingDr, "افتتاحي دائن": r.openingCr, "حركة مدين": r.debit, "حركة دائن": r.credit, "ختامي مدين": r.closingDr, "ختامي دائن": r.closingCr }))} />
-      <div className="card-b"><label className="check no-print"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> إظهار الحسابات الصفرية</label>{!data.balanced && <div className="alert err mt">تحذير: الميزان غير متوازن!</div>}</div>
+      <div className="card-b"><div className="toolbar no-print" style={{ margin: 0 }}><SearchBox value={text} onChange={setText} placeholder="بحث برقم الحساب أو الاسم" /><Select value={type} onChange={(e) => setType(e.target.value)}><option value="">كل الأنواع</option>{Object.entries(TYPE_AR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select><label className="check"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> إظهار الحسابات الصفرية</label><span className="muted small">اضغط على أي حساب لعرض كشفه</span></div>{!data.balanced && <div className="alert err mt">تحذير: الميزان غير متوازن!</div>}</div>
       <div className="table-wrap"><table className="tbl compact"><thead><tr><th rowSpan={2}>الحساب</th><th colSpan={2} style={{ textAlign: "center" }}>رصيد أول المدة</th><th colSpan={2} style={{ textAlign: "center" }}>حركة الفترة</th><th colSpan={2} style={{ textAlign: "center" }}>رصيد آخر المدة</th></tr><tr><th className="n">مدين</th><th className="n">دائن</th><th className="n">مدين</th><th className="n">دائن</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead>
-        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td><span className="num muted">{r.code}</span> {r.nameAr}</td><td className="n"><Money v={r.openingDr} blankZero /></td><td className="n"><Money v={r.openingCr} blankZero /></td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.closingDr} blankZero /></td><td className="n"><Money v={r.closingCr} blankZero /></td></tr>)}</tbody>
-        <tfoot><tr><td>الإجمالي {data.balanced && <span className="badge green">متوازن ✓</span>}</td><td className="n"><Money v={data.totals.openingDr} /></td><td className="n"><Money v={data.totals.openingCr} /></td><td className="n"><Money v={data.totals.debit} /></td><td className="n"><Money v={data.totals.credit} /></td><td className="n"><Money v={data.totals.closingDr} /></td><td className="n"><Money v={data.totals.closingCr} /></td></tr></tfoot></table></div>
+        <tbody>{rows.map((r: any) => <tr key={r.id} className="clickable" onClick={() => setAcc(r)}><td><span className="num muted">{r.code}</span> {r.nameAr}</td><td className="n"><Money v={r.openingDr} blankZero /></td><td className="n"><Money v={r.openingCr} blankZero /></td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.closingDr} blankZero /></td><td className="n"><Money v={r.closingCr} blankZero /></td></tr>)}</tbody>
+        <tfoot>{filtered && <tr><td>إجمالي المعروض ({rows.length})</td><td className="n"><Money v={T("openingDr")} /></td><td className="n"><Money v={T("openingCr")} /></td><td className="n"><Money v={T("debit")} /></td><td className="n"><Money v={T("credit")} /></td><td className="n"><Money v={T("closingDr")} /></td><td className="n"><Money v={T("closingCr")} /></td></tr>}<tr><td>الإجمالي {data.balanced && <span className="badge green">متوازن ✓</span>}</td><td className="n"><Money v={data.totals.openingDr} /></td><td className="n"><Money v={data.totals.openingCr} /></td><td className="n"><Money v={data.totals.debit} /></td><td className="n"><Money v={data.totals.credit} /></td><td className="n"><Money v={data.totals.closingDr} /></td><td className="n"><Money v={data.totals.closingCr} /></td></tr></tfoot></table></div>
+      {acc && <AccountLedger account={acc} from={from} to={to} branchId={branchId} onClose={() => setAcc(null)} />}
     </div>
   );
 }
@@ -199,29 +208,39 @@ function CashFlow({ from, to, branchId, bName }: { from: string; to: string } & 
 
 function Aging({ to }: { to: string }) {
   const [role, setRole] = useState("CUSTOMER");
+  const [text, setText] = useState("");
+  const [only, setOnly] = useState("");
+  const [stmt, setStmt] = useState<any>(null);
   const { data: d } = useFetch(`/reports/aging${q({ to, role })}`);
   if (!d) return <Loading />;
+  const rows = d.rows.filter((r: any) => matches(r, text, ["name", (x) => x.invoices.map((i: any) => i.number).join(" ")]) && (!only || Number(r[only]) > 0));
   const B = ["current", "d30", "d60", "d90", "d120"], BL = ["غير مستحق", "1-30 يوم", "31-60", "61-90", "أكثر من 90"];
   return (
     <div className="card"><Head title={`أعمار الديون — ${role === "CUSTOMER" ? "العملاء" : "الموردون"}`} sub={`كما في ${to}`} rows={d.rows.map((r: any) => ({ الطرف: r.name, ...Object.fromEntries(B.map((b, i) => [BL[i], r[b]])), الإجمالي: r.total }))} />
-      <div className="card-b no-print"><Select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: 200 }}><option value="CUSTOMER">ذمم العملاء</option><option value="SUPPLIER">ذمم الموردين</option></Select></div>
-      {!d.rows.length ? <Empty text="لا توجد أرصدة مفتوحة" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الطرف</th>{BL.map((b) => <th key={b} className="n">{b}</th>)}<th className="n">الإجمالي</th></tr></thead>
-        <tbody>{d.rows.map((r: any) => <React.Fragment key={r.partnerId}><tr><td><b>{r.name}</b></td>{B.map((b) => <td key={b} className={"n " + (b === "d120" && r[b] ? "neg-val" : "")}><Money v={r[b]} blankZero /></td>)}<td className="n"><b><Money v={r.total} /></b></td></tr>{r.invoices.map((i: any) => <tr key={i.number} className="sub"><td>{i.number} — {fmtDate(i.date)} (استحقاق {fmtDate(i.dueDate)}, {i.days > 0 ? `متأخر ${i.days} يوم` : "غير مستحق"})</td><td colSpan={5} /><td className="n"><Money v={i.due} /></td></tr>)}</React.Fragment>)}</tbody>
+      <div className="card-b no-print"><div className="toolbar" style={{ margin: 0 }}><Select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: 200 }}><option value="CUSTOMER">ذمم العملاء</option><option value="SUPPLIER">ذمم الموردين</option></Select><SearchBox value={text} onChange={setText} placeholder="بحث بالاسم أو رقم الفاتورة" /><Select value={only} onChange={(e) => setOnly(e.target.value)}><option value="">كل الفترات</option>{B.map((b, i) => <option key={b} value={b}>لديهم: {BL[i]}</option>)}</Select><FilterInfo shown={rows.length} total={d.rows.length} active={!!(text || only)} onClear={() => { setText(""); setOnly(""); }} /></div></div>
+      {!rows.length ? <Empty text={d.rows.length ? "لا نتائج مطابقة" : "لا توجد أرصدة مفتوحة"} /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الطرف</th>{BL.map((b) => <th key={b} className="n">{b}</th>)}<th className="n">الإجمالي</th></tr></thead>
+        <tbody>{rows.map((r: any) => <React.Fragment key={r.partnerId}><tr><td><button className="link-btn" style={{ fontWeight: 700 }} title="كشف حساب" onClick={() => setStmt({ id: r.partnerId, name: r.name })}>{r.name}</button></td>{B.map((b) => <td key={b} className={"n " + (b === "d120" && r[b] ? "neg-val" : "")}><Money v={r[b]} blankZero /></td>)}<td className="n"><b><Money v={r.total} /></b></td></tr>{r.invoices.map((i: any) => <tr key={i.number} className="sub"><td>{i.number} — {fmtDate(i.date)} (استحقاق {fmtDate(i.dueDate)}, {i.days > 0 ? `متأخر ${i.days} يوم` : "غير مستحق"})</td><td colSpan={5} /><td className="n"><Money v={i.due} /></td></tr>)}</React.Fragment>)}</tbody>
         <tfoot><tr><td>الإجمالي</td>{B.map((b) => <td key={b} className="n"><Money v={d.totals[b]} /></td>)}<td className="n"><Money v={d.totals.total} /></td></tr></tfoot></table></div>}
+      {stmt && <PartnerStatement partner={stmt} role={role} to={to} onClose={() => setStmt(null)} />}
     </div>
   );
 }
 
 function SalesAnalysis({ from, to }: { from: string; to: string }) {
   const { data: d } = useFetch(`/reports/sales${q({ from, to })}`);
+  const [text, setText] = useState("");
+  const [ct, setCt] = useState("");
   if (!d) return <Loading />;
+  const prods = d.byProduct.filter((r: any) => matches(r, text, ["name", "sku", "category"]));
+  const custs = d.byCustomer.filter((r: any) => matches(r, ct, ["name"]));
   return (
     <div className="grid c2">
       <div className="card"><Head title="المبيعات حسب الصنف" sub={`${from} — ${to}`} rows={d.byProduct.map((r: any) => ({ الرمز: r.sku, الصنف: r.name, التصنيف: r.category, الكمية: r.qty, المبيعات: r.net, التكلفة: r.cost, الربح: r.profit }))} />
-        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th className="n">الكمية</th><th className="n">المبيعات</th><th className="n">التكلفة</th><th className="n">الربح</th><th className="n">الهامش</th></tr></thead><tbody>{d.byProduct.map((r: any) => <tr key={r.sku}><td>{r.name}<div className="small muted">{r.category}</div></td><td className="n">{Number(r.qty)}</td><td className="n"><Money v={r.net} /></td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.profit} sign /></td><td className="n">{Number(r.net) ? Math.round((r.profit / r.net) * 100) + "%" : ""}</td></tr>)}</tbody></table></div></div>
+        <div className="card-b no-print" style={{ paddingBottom: 0 }}><SearchBox value={text} onChange={setText} placeholder="بحث بالصنف / التصنيف" /></div>
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th className="n">الكمية</th><th className="n">المبيعات</th><th className="n">التكلفة</th><th className="n">الربح</th><th className="n">الهامش</th></tr></thead><tbody>{prods.map((r: any) => <tr key={r.sku}><td>{r.name}<div className="small muted">{r.category}</div></td><td className="n">{Number(r.qty)}</td><td className="n"><Money v={r.net} /></td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.profit} sign /></td><td className="n">{Number(r.net) ? Math.round((r.profit / r.net) * 100) + "%" : ""}</td></tr>)}</tbody></table></div></div>
       <div className="grid">
-        <div className="card"><Head title="المبيعات حسب العميل" sub={`${from} — ${to}`} rows={d.byCustomer.map((r: any) => ({ العميل: r.name, الفواتير: r.invoices, الإجمالي: r.total }))} /><div className="table-wrap"><table className="tbl compact"><thead><tr><th>العميل</th><th className="n">عدد الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{d.byCustomer.map((r: any) => <tr key={r.name}><td>{r.name}</td><td className="n">{r.invoices}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
-        <div className="card"><Head title="المبيعات اليومية" sub={`${from} — ${to}`} rows={d.byDay.map((r: any) => ({ التاريخ: r.date, الفواتير: r.count, الإجمالي: r.total }))} /><div className="table-wrap" style={{ maxHeight: 400 }}><table className="tbl compact"><thead><tr><th>اليوم</th><th className="n">الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{d.byDay.map((r: any) => <tr key={r.date}><td>{fmtDate(r.date)}</td><td className="n">{r.count}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
+        <div className="card"><Head title="المبيعات حسب العميل" sub={`${from} — ${to}`} rows={d.byCustomer.map((r: any) => ({ العميل: r.name, الفواتير: r.invoices, الإجمالي: r.total }))} /><div className="card-b no-print" style={{ paddingBottom: 0 }}><SearchBox value={ct} onChange={setCt} placeholder="بحث بالعميل" /></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>العميل</th><th className="n">عدد الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{custs.map((r: any) => <tr key={r.name}><td>{r.name}</td><td className="n">{r.invoices}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
+        <div className="card"><Head title="المبيعات اليومية" sub={`${from} — ${to}`} rows={d.byDay.map((r: any) => ({ التاريخ: r.date, الفواتير: r.count, الإجمالي: r.total }))} /><div className="table-wrap" style={{ maxHeight: 400 }}><table className="tbl compact"><thead><tr><th>اليوم</th><th className="n">الفواتير</th><th className="n">الإجمالي</th></tr></thead><tbody>{d.byDay.map((r: any) => <tr key={r.date}><td className="dt">{fmtDate(r.date)}</td><td className="n">{r.count}</td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>
       </div>
     </div>
   );
@@ -251,12 +270,32 @@ function Salespersons({ from, to }: { from: string; to: string }) {
 }
 
 function Statements() {
-  const [role, setRole] = useState<"CUSTOMER" | "SUPPLIER">("CUSTOMER");
+  const { can } = useCompanyContext();
+  const [kind, setKind] = useState<"CUSTOMER" | "SUPPLIER" | "ACCOUNT" | "CASH" | "PRODUCT" | "EMPLOYEE">("CUSTOMER");
   const [p, setP] = useState<any>(null);
+  const [open, setOpen] = useState(false);
+  const emps = useFetch(kind === "EMPLOYEE" ? "/employees" : null);
+  const KINDS: [string, string][] = [["CUSTOMER", "عميل"], ["SUPPLIER", "مورد"], ["ACCOUNT", "حساب من دليل الحسابات"], ["CASH", "صندوق / بنك"], ["PRODUCT", "صنف (كرت الصنف)"], ...(can("accounting.read") ? [["EMPLOYEE", "موظف (ملف وكشف)"] as [string, string]] : [])];
+  const pick = (v: any) => { setP(v); if (v) setOpen(true); };
   return (
-    <div className="card"><div className="card-b"><div className="form-grid"><Field label="النوع"><Select value={role} onChange={(e) => { setRole(e.target.value as any); setP(null); }}><option value="CUSTOMER">عميل</option><option value="SUPPLIER">مورد</option></Select></Field><Field label="الطرف" span2><Picker value={p} onChange={setP} fetcher={partnerFetcher(role)} label={(x: any) => `${x.name} — الرصيد ${money(x.balance)}`} /></Field></div>
-      {p && <StatementModal partner={p} role={role} onClose={() => setP(null)} />}
-    </div></div>
+    <div className="card"><div className="card-h"><div><h3>كشوف الحسابات</h3><div className="small muted">اختر نوع الكشف ثم الطرف أو الحساب — كل كشف يدعم الفترة والفرع والبحث والطباعة وتصدير Excel</div></div></div>
+      <div className="card-b"><div className="form-grid">
+        <Field label="نوع الكشف"><Select value={kind} onChange={(e) => { setKind(e.target.value as any); setP(null); setOpen(false); }}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></Field>
+        <Field label="الطرف / الحساب" span2>
+          {(kind === "CUSTOMER" || kind === "SUPPLIER") && <Picker key={kind} value={p} onChange={pick} fetcher={partnerFetcher(kind)} label={(x: any) => `${x.name} — الرصيد ${money(x.balance)}`} autoFocus />}
+          {kind === "ACCOUNT" && <Picker value={p} onChange={pick} fetcher={accountFetcher()} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus />}
+          {kind === "CASH" && <Picker value={p} onChange={pick} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus />}
+          {kind === "PRODUCT" && <Picker value={p} onChange={pick} fetcher={async (s) => (await productFetcher(s)).filter((x: any) => x.type === "STOCK")} label={(x: any) => `${x.name} (${x.sku})`} autoFocus />}
+          {kind === "EMPLOYEE" && <Select value={p?.id || ""} onChange={(e) => pick((emps.data || []).find((x: any) => x.id === e.target.value) || null)}><option value="">— اختر الموظف —</option>{(emps.data || []).map((x: any) => <option key={x.id} value={x.id}>{x.code} · {x.name}</option>)}</Select>}
+        </Field>
+      </div>
+        {p && !open && <button className="btn primary mt" onClick={() => setOpen(true)}>عرض الكشف</button>}
+      </div>
+      {p && open && (kind === "CUSTOMER" || kind === "SUPPLIER") && <StatementModal partner={p} role={kind} onClose={() => setOpen(false)} />}
+      {p && open && (kind === "ACCOUNT" || kind === "CASH") && <AccountLedger account={p} onClose={() => setOpen(false)} />}
+      {p && open && kind === "PRODUCT" && <StockCardModal p={p} onClose={() => setOpen(false)} />}
+      {p && open && kind === "EMPLOYEE" && <EmployeeStatement e={p} onClose={() => setOpen(false)} />}
+    </div>
   );
 }
 
@@ -325,7 +364,7 @@ export function VatPage() {
       </div>
       <div className="card"><div className="card-h"><h3>الإقرارات المقدمة</h3></div>
         {!returns.data ? <Loading /> : !returns.data.length ? <Empty text="لم تُسجل إقرارات بعد" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الفترة</th><th className="n">ضريبة المخرجات</th><th className="n">ضريبة المدخلات</th><th className="n">الصافي</th><th>القيد</th><th>الحالة</th><th /></tr></thead>
-          <tbody>{returns.data.map((r: any) => <tr key={r.id}><td>{fmtDate(r.periodFrom)} — {fmtDate(r.periodTo)}</td><td className="n"><Money v={r.data.outputVat} /></td><td className="n"><Money v={r.data.inputVat} /></td><td className="n"><b><Money v={r.netVat} /></b></td><td>{r.journalNumber}</td><td><Badge s={r.status} /></td><td>{r.status === "FILED" && Number(r.netVat) > 0 && can("vat.write") && <button className="btn sm" onClick={() => setPayId(r.id)}>تسجيل السداد</button>}</td></tr>)}</tbody></table></div>}
+          <tbody>{returns.data.map((r: any) => <tr key={r.id}><td className="dt">{fmtDate(r.periodFrom)} — {fmtDate(r.periodTo)}</td><td className="n"><Money v={r.data.outputVat} /></td><td className="n"><Money v={r.data.inputVat} /></td><td className="n"><b><Money v={r.netVat} /></b></td><td>{r.journalNumber}</td><td><Badge s={r.status} /></td><td>{r.status === "FILED" && Number(r.netVat) > 0 && can("vat.write") && <button className="btn sm" onClick={() => setPayId(r.id)}>تسجيل السداد</button>}</td></tr>)}</tbody></table></div>}
       </div>
       {payId && <Modal narrow title="سداد الضريبة للهيئة" onClose={() => setPayId(null)} footer={<><button className="btn" onClick={() => setPayId(null)}>إلغاء</button><button className="btn primary" disabled={!acc || busy} onClick={() => run(async () => { await api(`/vat/returns/${payId}/pay`, { body: { accountId: acc.id } }); setPayId(null); returns.reload(); }, "تم تسجيل السداد")}>تأكيد</button></>}><Field label="من حساب"><Picker value={acc} onChange={setAcc} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field></Modal>}
     </div>

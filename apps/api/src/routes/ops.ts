@@ -45,6 +45,9 @@ ops.get(
     if (req.query.from) add("i.date>=?", req.query.from);
     if (req.query.to) add("i.date<=?", req.query.to);
     if (req.query.q) add("(i.number ILIKE ? OR i.partner_name ILIKE ? OR i.supplier_ref ILIKE ?)", `%${req.query.q}%`);
+    if (req.query.overdue === "1") where.push(`i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') AND i.total - i.amount_paid > 0.001 AND COALESCE(i.due_date, i.date) < CURRENT_DATE`);
+    if (req.query.minTotal && Number(req.query.minTotal) > 0) add("i.total>=?", Number(req.query.minTotal));
+    if (req.query.maxTotal && Number(req.query.maxTotal) > 0) add("i.total<=?", Number(req.query.maxTotal));
     const total = await db.one(`SELECT COUNT(*)::int c, COALESCE(SUM(CASE WHEN i.status='POSTED' THEN CASE WHEN i.kind='CREDIT_NOTE' THEN -i.total ELSE i.total END END),0) sum FROM invoices i WHERE ${where.join(" AND ")}`, params);
     params.push(limit, offset);
     const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid, i.branch_id, (SELECT name FROM branches b WHERE b.id=i.branch_id) branch_name, i.external_ref FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
@@ -107,6 +110,9 @@ ops.get("/payments", perm("payments.read"), h(async (req) => {
   if (req.query.to) { params.push(req.query.to); where.push(`p.date<=$${params.length}`); }
   if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(p.number ILIKE $${params.length} OR pr.name ILIKE $${params.length} OR p.reference ILIKE $${params.length})`); }
   if (/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || ""))) { params.push(String(req.query.branchId)); where.push(`EXISTS (SELECT 1 FROM journal_entries je WHERE je.id=p.journal_id AND je.branch_id=$${params.length})`); }
+  if (req.query.method) { params.push(String(req.query.method)); where.push(`p.method=$${params.length}`); }
+  if (req.query.status) { params.push(String(req.query.status)); where.push(`p.status=$${params.length}`); }
+  if (/^[0-9a-f-]{36}$/i.test(String(req.query.accountId || ""))) { params.push(String(req.query.accountId)); where.push(`p.account_id=$${params.length}`); }
   params.push(limit, offset);
   return db.rows(`SELECT p.*, pr.name AS partner_name, a.name_ar AS account_name FROM payments p JOIN partners pr ON pr.id=p.partner_id JOIN accounts a ON a.id=p.account_id WHERE ${where.join(" AND ")} ORDER BY p.date DESC, p.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
@@ -123,6 +129,10 @@ ops.get("/expenses", perm("expenses.read"), h(async (req) => {
   if (req.query.to) { params.push(req.query.to); where.push(`e.date<=$${params.length}`); }
   if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(e.number ILIKE $${params.length} OR e.description ILIKE $${params.length} OR e.payee ILIKE $${params.length})`); }
   if (/^[0-9a-f-]{36}$/i.test(String(req.query.branchId || ""))) { params.push(String(req.query.branchId)); where.push(`EXISTS (SELECT 1 FROM journal_entries je WHERE je.id=e.journal_id AND je.branch_id=$${params.length})`); }
+  if (/^[0-9a-f-]{36}$/i.test(String(req.query.accountId || ""))) { params.push(String(req.query.accountId)); where.push(`e.account_id=$${params.length}`); }
+  if (req.query.status) { params.push(String(req.query.status)); where.push(`e.status=$${params.length}`); }
+  if (req.query.pay === "CREDIT") where.push(`e.pay_account_id IS NULL`);
+  if (req.query.pay === "NOW") where.push(`e.pay_account_id IS NOT NULL`);
   params.push(limit, offset);
   return db.rows(`SELECT e.*, a.name_ar AS account_name, a.code AS account_code, pa.name_ar AS pay_account_name, p.name AS partner_name FROM expenses e JOIN accounts a ON a.id=e.account_id LEFT JOIN accounts pa ON pa.id=e.pay_account_id LEFT JOIN partners p ON p.id=e.partner_id WHERE ${where.join(" AND ")} ORDER BY e.date DESC, e.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
@@ -143,7 +153,7 @@ ops.get("/inventory/adjustments", perm("inventory.read"), h(async (req) => db.ro
 ops.post("/inventory/adjustments", perm("inventory.write"), h(async (req) => { const a = await tx((t) => misc.stockAdjustment(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "stock_adjustment", a.id, { number: a.number }); return a; }));
 
 // ─── assets ────────────────────────────────────────────────────────────────
-ops.get("/assets", perm("assets.read"), h(async (req) => db.rows(`SELECT f.*, f.cost - f.accumulated nbv, a.name_ar AS asset_account, ROUND((f.cost - f.salvage_value) / f.useful_life_months, 2) monthly FROM fixed_assets f JOIN accounts a ON a.id=f.asset_account_id WHERE f.company_id=$1 ORDER BY f.code`, [cid(req)])));
+ops.get("/assets", perm("assets.read"), h(async (req) => db.rows(`SELECT f.*, f.cost - f.accumulated nbv, a.name_ar AS asset_account, a.code AS asset_account_code, ROUND((f.cost - f.salvage_value) / f.useful_life_months, 2) monthly FROM fixed_assets f JOIN accounts a ON a.id=f.asset_account_id WHERE f.company_id=$1 ORDER BY f.code`, [cid(req)])));
 ops.get("/assets/:id", perm("assets.read"), h(async (req) => ({ ...(await db.one(`SELECT * FROM fixed_assets WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)])), depreciations: await db.rows(`SELECT d.*, e.number FROM asset_depreciations d LEFT JOIN journal_entries e ON e.id=d.journal_id WHERE d.asset_id=$1 ORDER BY d.period_end`, [p(req).id]) })));
 ops.post("/assets", perm("assets.write"), h(async (req) => { const a = await tx((t) => createAsset(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "asset", a.id, { code: a.code }); return a; }));
 ops.post("/assets/depreciate", perm("assets.write"), h(async (req) => { const r = await tx((t) => runDepreciation(t, cid(req), actor(req), req.body?.through || today())); await audit(req, "DEPRECIATE", "asset", null, { count: r.length }); return r; }));

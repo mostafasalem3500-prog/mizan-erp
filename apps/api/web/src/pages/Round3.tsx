@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState, SearchBox, FilterInfo, useSorted, Th, matches, addMonths } from "../lib";
+import { PartnerStatement } from "./Statements";
+
+const addDays7 = () => { const d = new Date(today() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 7); return d.toISOString().slice(0, 10); };
 import { amountToArabicWords } from "../shared/tafqeet";
 
 // ─── cheque printing (positions in mm, saved per browser) ──────────────────
@@ -55,6 +58,11 @@ export function ChequesPage() {
   const [act, setAct] = useState<{ c: any; mode: "deposit" | "clear" } | null>(null);
   const [prn, setPrn] = useState<any>(null);
   const { data, loading, reload } = useFetch(`/cheques${q({ direction: dir, status })}`);
+  const [text, setText] = useState("");
+  const [due, setDue] = useState("");
+  const [stmt, setStmt] = useState<any>(null);
+  const rows = (data?.rows || []).filter((c: any) => matches(c, text, ["chequeNo", "bankName", "partnerName", "voucherNumber", "notes"]) && (!due || (due === "overdue" ? ["PENDING", "DEPOSITED"].includes(c.status) && c.dueDate < today() : due === "week" ? ["PENDING", "DEPOSITED"].includes(c.status) && c.dueDate >= today() && c.dueDate <= addDays7() : true)));
+  const srt = useSorted(rows);
   const { run, busy } = useAction();
   const sum = (d: string, s: string[]) => (data?.summary || []).filter((x: any) => x.direction === d && s.includes(x.status)).reduce((a: number, x: any) => a + Number(x.amount), 0);
   return (
@@ -67,25 +75,32 @@ export function ChequesPage() {
       </div>
       <div className="card">
         <div className="card-h"><h3>سجل الشيكات</h3><div className="row">
-          <Select value={dir} onChange={(e) => setDir(e.target.value)}><option value="">مستلمة وصادرة</option><option value="IN">شيكات مستلمة (عملاء)</option><option value="OUT">شيكات صادرة (موردون)</option></Select>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option>{Object.entries(CH_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
           {can("payments.write") && <><button className="btn primary sm" onClick={() => setAdd("IN")}>＋ شيك مستلم</button><button className="btn sm" onClick={() => setAdd("OUT")}>＋ شيك صادر</button></>}
           {data && <ExportBtn name="الشيكات" rows={() => data.rows.map((c: any) => ({ الاتجاه: c.direction === "IN" ? "مستلم" : "صادر", "رقم الشيك": c.chequeNo, البنك: c.bankName, الطرف: c.partnerName, المبلغ: c.amount, "تاريخ الاستلام": c.receivedDate, الاستحقاق: c.dueDate, الحالة: CH_STATUS[c.status], السند: c.voucherNumber }))} />}
         </div></div>
-        {loading && !data ? <Loading /> : !data.rows.length ? <Empty text="لا توجد شيكات مسجلة" /> : (
-          <div className="table-wrap"><table className="tbl"><thead><tr><th>النوع</th><th>رقم الشيك</th><th>البنك</th><th>الطرف</th><th className="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>السند</th><th>الحالة</th><th /></tr></thead>
-            <tbody>{data.rows.map((c: any) => { const overdue = ["PENDING", "DEPOSITED"].includes(c.status) && c.dueDate < today(); return (
-              <tr key={c.id}><td>{c.direction === "IN" ? <span className="badge green">مستلم</span> : <span className="badge red">صادر</span>}</td><td className="num"><b>{c.chequeNo}</b></td><td>{c.bankName}</td><td>{c.partnerName}</td><td className="n"><Money v={c.amount} /></td><td>{fmtDate(c.receivedDate)}</td><td className={overdue ? "neg-val bold" : ""}>{fmtDate(c.dueDate)}</td><td className="small">{c.voucherNumber}</td><td><span className={"badge " + chColor(c.status)}>{CH_STATUS[c.status]}</span></td>
+        <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar">
+          <SearchBox value={text} onChange={setText} placeholder="بحث برقم الشيك / البنك / الطرف" />
+          <Select value={dir} onChange={(e) => setDir(e.target.value)}><option value="">مستلمة وصادرة</option><option value="IN">شيكات مستلمة (عملاء)</option><option value="OUT">شيكات صادرة (موردون)</option></Select>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option>{Object.entries(CH_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+          <Select value={due} onChange={(e) => setDue(e.target.value)}><option value="">كل تواريخ الاستحقاق</option><option value="overdue">مستحقة ولم تُحصّل/تُصرف</option><option value="week">مستحقة خلال 7 أيام</option></Select>
+          {data && <FilterInfo shown={rows.length} total={data.rows.length} active={!!(text || due || dir || status)} onClear={() => { setText(""); setDue(""); setDir(""); setStatus(""); }} />}
+        </div></div>
+        {loading && !data ? <Loading /> : !rows.length ? <Empty text={data?.rows.length ? "لا نتائج مطابقة" : "لا توجد شيكات مسجلة"} /> : (
+          <div className="table-wrap"><table className="tbl"><thead><tr><th>النوع</th><Th k="chequeNo" s={srt}>رقم الشيك</Th><Th k="bankName" s={srt}>البنك</Th><Th k="partnerName" s={srt}>الطرف</Th><Th k="amount" s={srt} n>المبلغ</Th><Th k="receivedDate" s={srt}>الاستلام</Th><Th k="dueDate" s={srt}>الاستحقاق</Th><th>السند</th><th>الحالة</th><th /></tr></thead>
+            <tbody>{srt.sorted.map((c: any) => { const overdue = ["PENDING", "DEPOSITED"].includes(c.status) && c.dueDate < today(); return (
+              <tr key={c.id}><td>{c.direction === "IN" ? <span className="badge green">مستلم</span> : <span className="badge red">صادر</span>}</td><td className="num"><b>{c.chequeNo}</b></td><td>{c.bankName}</td><td>{c.partnerId ? <button className="link-btn" title="كشف حساب الطرف" onClick={() => setStmt({ id: c.partnerId, name: c.partnerName, role: c.direction === "IN" ? "CUSTOMER" : "SUPPLIER" })}>{c.partnerName}</button> : c.partnerName}</td><td className="n"><Money v={c.amount} /></td><td className="dt">{fmtDate(c.receivedDate)}</td><td className={overdue ? "neg-val bold" : ""}>{fmtDate(c.dueDate)}</td><td className="small">{c.voucherNumber}</td><td><span className={"badge " + chColor(c.status)}>{CH_STATUS[c.status]}</span></td>
                 <td className="row" style={{ gap: 4 }}>{c.direction === "OUT" && c.status !== "CANCELLED" && <button className="btn sm" title="طباعة الشيك" onClick={() => setPrn(c)}>🖨</button>}{can("payments.write") && ["PENDING", "DEPOSITED"].includes(c.status) && <>
                   {c.direction === "IN" && c.status === "PENDING" && <button className="btn sm ghost" onClick={() => setAct({ c, mode: "deposit" })}>إيداع</button>}
                   <button className="btn sm primary" onClick={() => setAct({ c, mode: "clear" })}>{c.direction === "IN" ? "تحصيل" : "صرف"}</button>
                   <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { if (confirmDlg(c.direction === "IN" ? "تسجيل الشيك كمرتجع (بدون رصيد)؟ سيُعاد فتح فواتير العميل." : "إلغاء الشيك الصادر؟")) { await api(`/cheques/${c.id}/bounce`, { body: { cancelled: c.direction === "OUT" } }); reload(); } })}>{c.direction === "IN" ? "مرتجع" : "إلغاء"}</button>
-                </>}</td></tr>); })}</tbody></table></div>
+                </>}</td></tr>); })}</tbody>
+            <tfoot><tr><td colSpan={4}>الإجمالي ({rows.length})</td><td className="n"><Money v={rows.filter((c: any) => !["CANCELLED", "BOUNCED"].includes(c.status)).reduce((a: number, c: any) => a + Number(c.amount) * (c.direction === "IN" ? 1 : -1), 0)} /></td><td colSpan={5} className="small muted">(المستلم − الصادر، دون الملغى والمرتجع)</td></tr></tfoot></table></div>
         )}
       </div>
       {add && <ChequeForm direction={add} onClose={(s) => { setAdd(null); if (s) reload(); }} />}
       {act && <ChequeAction c={act.c} mode={act.mode} onClose={(s) => { setAct(null); if (s) reload(); }} />}
       {prn && <ChequePrint c={prn} onClose={() => setPrn(null)} />}
+      {stmt && <PartnerStatement partner={stmt} role={stmt.role} onClose={() => setStmt(null)} />}
     </div>
   );
 }
@@ -111,7 +126,7 @@ function ChequeForm({ direction, onClose }: { direction: "IN" | "OUT"; onClose: 
         <Field label="ملاحظات" span2><Input value={f.notes} onChange={s("notes")} /></Field>
       </div>
       <div className="alert info small mt">{direction === "IN" ? "القيد: من حـ/ أوراق القبض إلى حـ/ العميل، وعند التحصيل: من حـ/ البنك إلى حـ/ أوراق القبض." : "القيد: من حـ/ المورد إلى حـ/ أوراق الدفع، وعند الصرف: من حـ/ أوراق الدفع إلى حـ/ البنك."}</div>
-      {open.length > 0 && <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>الاستحقاق</th><th className="n">المتبقي</th><th>المخصص</th></tr></thead><tbody>{open.map((i) => <tr key={i.id}><td>{i.number}</td><td>{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.due} /></td><td><NumInput value={alloc[i.id] || ""} onChange={(e) => setAlloc({ ...alloc, [i.id]: Math.min(Number(i.due), Number(e.target.value) || 0) })} style={{ width: 120 }} /></td></tr>)}</tbody></table>}
+      {open.length > 0 && <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>الاستحقاق</th><th className="n">المتبقي</th><th>المخصص</th></tr></thead><tbody>{open.map((i) => <tr key={i.id}><td>{i.number}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.due} /></td><td><NumInput value={alloc[i.id] || ""} onChange={(e) => setAlloc({ ...alloc, [i.id]: Math.min(Number(i.due), Number(e.target.value) || 0) })} style={{ width: 120 }} /></td></tr>)}</tbody></table>}
     </Modal>
   );
 }
@@ -137,11 +152,21 @@ export function RecurringPage() {
   const { run, busy } = useAction();
   const toast = useToast();
   const [add, setAdd] = useState(false);
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState("");
+  const [st, setSt] = useState("");
+  const rows = (data || []).filter((t: any) => matches(t, text, ["name", (x) => x.payload?.description, (x) => x.payload?.memo]) && (!kind || t.kind === kind) && (!st || (st === "due" ? t.isActive && t.nextDate <= today() : st === "on" ? t.isActive : !t.isActive)));
   return (
     <div className="card">
       <div className="card-h"><div><h3>القيود والمستندات الدورية</h3><div className="small muted">إيجار شهري، رواتب، اشتراكات، فواتير عقود… تُنشأ تلقائياً في موعدها (كل ساعة يفحص النظام المستحق) أو بضغطة زر.</div></div><div className="row">{can("accounting.write") && <><button className="btn sm" disabled={busy} onClick={() => run(async () => { const r = await api("/recurring/run", { body: {} }); toast(r.length ? `تم تنفيذ ${r.length} عملية` : "لا يوجد مستحق اليوم", "ok"); reload(); })}>تنفيذ المستحق الآن</button><button className="btn primary sm" onClick={() => setAdd(true)}>＋ قالب جديد</button></>}</div></div>
-      {loading && !data ? <Loading /> : !data.length ? <Empty text="لا توجد قوالب دورية" /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الاسم</th><th>النوع</th><th>التكرار</th><th>التنفيذ القادم</th><th>آخر تنفيذ</th><th className="n">عدد المرات</th><th className="n">المبلغ</th><th>الحالة</th><th /></tr></thead>
-        <tbody>{data.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td>{RKIND[t.kind]}</td><td>{FREQ[t.frequency]}</td><td className={t.isActive && t.nextDate <= today() ? "neg-val bold" : ""}>{fmtDate(t.nextDate)}</td><td>{fmtDate(t.lastRun) || "—"}</td><td className="n">{t.runs}</td><td className="n">{t.kind === "EXPENSE" ? <Money v={t.payload.amount} /> : t.kind === "JOURNAL" ? <Money v={(t.payload.lines || []).reduce((a: number, l: any) => a + Number(l.debit || 0), 0)} /> : ""}</td><td><Badge s={t.isActive ? "ACTIVE" : "CANCELLED"} map={{ ACTIVE: "نشط", CANCELLED: "موقوف" }} /></td>
+      <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar">
+        <SearchBox value={text} onChange={setText} placeholder="بحث باسم القالب" />
+        <Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="">كل الأنواع</option>{Object.entries(RKIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+        <Select value={st} onChange={(e) => setSt(e.target.value)}><option value="">كل الحالات</option><option value="due">مستحق التنفيذ</option><option value="on">نشط</option><option value="off">موقوف</option></Select>
+        {data && <FilterInfo shown={rows.length} total={data.length} active={!!(text || kind || st)} onClear={() => { setText(""); setKind(""); setSt(""); }} />}
+      </div></div>
+      {loading && !data ? <Loading /> : !rows.length ? <Empty text={data?.length ? "لا نتائج مطابقة" : "لا توجد قوالب دورية"} /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الاسم</th><th>النوع</th><th>التكرار</th><th>التنفيذ القادم</th><th>آخر تنفيذ</th><th className="n">عدد المرات</th><th className="n">المبلغ</th><th>الحالة</th><th /></tr></thead>
+        <tbody>{rows.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td>{RKIND[t.kind]}</td><td>{FREQ[t.frequency]}</td><td className={t.isActive && t.nextDate <= today() ? "neg-val bold" : ""}>{fmtDate(t.nextDate)}</td><td className="dt">{fmtDate(t.lastRun) || "—"}</td><td className="n">{t.runs}</td><td className="n">{t.kind === "EXPENSE" ? <Money v={t.payload.amount} /> : t.kind === "JOURNAL" ? <Money v={(t.payload.lines || []).reduce((a: number, l: any) => a + Number(l.debit || 0), 0)} /> : ""}</td><td><Badge s={t.isActive ? "ACTIVE" : "CANCELLED"} map={{ ACTIVE: "نشط", CANCELLED: "موقوف" }} /></td>
           <td className="row" style={{ gap: 4 }}>{can("accounting.write") && <><button className="btn sm ghost" onClick={() => run(async () => { const r = await api(`/recurring/${t.id}/run-now`, { body: {} }); toast(`تم إنشاء ${r.number || "المستند"}`, "ok"); reload(); })}>تنفيذ الآن</button><button className="btn sm ghost" onClick={() => run(async () => { await api(`/recurring/${t.id}`, { method: "PUT", body: { isActive: !t.isActive } }); reload(); })}>{t.isActive ? "إيقاف" : "تفعيل"}</button><button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("حذف القالب؟")) { await api(`/recurring/${t.id}`, { method: "DELETE" }); reload(); } })}>حذف</button></>}</td></tr>)}</tbody></table></div>}
       {add && <RecurringForm onClose={(s) => { setAdd(false); if (s) reload(); }} />}
     </div>

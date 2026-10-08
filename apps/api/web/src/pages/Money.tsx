@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch, SearchBox, FilterInfo, useSorted, Th, matches } from "../lib";
+import { PartnerStatement, AccountLedger, AccountStatementButton } from "./Statements";
 
 // ─── payments (receipt / payment vouchers) ─────────────────────────────────
 export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
@@ -12,21 +13,40 @@ export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
   const [to, setTo] = useState(today());
   const [edit, setEdit] = useState(false);
   const [view, setView] = useState<any>(null);
-  const { data, loading, reload } = useFetch(`/payments${q({ direction, q: dq, from, to, limit: 500 })}`);
+  const [method, setMethod] = useState("");
+  const [status, setStatus] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [partner, setPartner] = useState<any>(null);
+  const [stmt, setStmt] = useState(false);
+  const accounts = useFetch(can("accounting.read") ? "/accounts" : null);
+  const cashBank = (accounts.data?.rows || []).filter((a: any) => a.isCashBank && !a.isGroup);
+  const { data, loading, reload } = useFetch(`/payments${q({ direction, q: dq, from, to, method, status, accountId, partnerId: partner?.id, limit: 2000 })}`);
   const { run } = useAction();
   const title = direction === "IN" ? "سندات القبض" : "سندات الصرف";
+  const role = direction === "IN" ? "CUSTOMER" : "SUPPLIER";
+  const active = !!(search || method || status || accountId || partner);
+  const clear = () => { setSearch(""); setMethod(""); setStatus(""); setAccountId(""); setPartner(null); };
   return (
     <div className="card">
-      <div className="card-h"><h3>{title}</h3>{can("payments.write") && <button className="btn primary sm" onClick={() => setEdit(true)}>＋ {direction === "IN" ? "سند قبض" : "سند صرف"}</button>}</div>
+      <div className="card-h"><h3>{title}</h3><div className="row">{can("accounting.read") && <AccountStatementButton label="📄 كشف صندوق / بنك" title="كشف حساب الصندوق أو البنك" filter={(a) => a.isCashBank} />}{can("payments.write") && <button className="btn primary sm" onClick={() => setEdit(true)}>＋ {direction === "IN" ? "سند قبض" : "سند صرف"}</button>}</div></div>
       <div className="card-b">
-        <div className="toolbar"><div className="search"><span className="ic">🔍</span><Input placeholder="بحث" value={search} onChange={(e) => setSearch(e.target.value)} /></div><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /><div className="grow" />{data && <ExportBtn name={title} rows={() => data.map((p: any) => ({ الرقم: p.number, التاريخ: p.date, الطرف: p.partnerName, الطريقة: METHOD_AR[p.method], الحساب: p.accountName, المبلغ: p.amount, المخصص: p.allocated, المرجع: p.reference, الحالة: p.status }))} />}</div>
+        <div className="toolbar"><SearchBox value={search} onChange={setSearch} placeholder="بحث بالرقم / الطرف / المرجع" /><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
+        <div className="toolbar">
+          <div style={{ minWidth: 220 }}><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(role)} label={(p: any) => p.name} placeholder={direction === "IN" ? "كل العملاء" : "كل الموردين"} /></div>
+          {partner && <button className="btn sm" onClick={() => setStmt(true)}>📄 كشف حساب {partner.name}</button>}
+          <Select value={method} onChange={(e) => setMethod(e.target.value)}><option value="">كل طرق الدفع</option>{["CASH", "BANK", "CARD", "CHEQUE"].map((m) => <option key={m} value={m}>{METHOD_AR[m]}</option>)}</Select>
+          {cashBank.length > 0 && <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">كل الصناديق والبنوك</option>{cashBank.map((a: any) => <option key={a.id} value={a.id}>{a.code} {a.nameAr}</option>)}</Select>}
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option><option value="POSTED">مرحّل</option><option value="CANCELLED">ملغى</option></Select>
+          {data && <FilterInfo shown={data.length} total={data.length} active={active} onClear={clear} />}
+          <div className="grow" />{data && <ExportBtn name={title} rows={() => data.map((p: any) => ({ الرقم: p.number, التاريخ: p.date, الطرف: p.partnerName, الطريقة: METHOD_AR[p.method], الحساب: p.accountName, المبلغ: p.amount, المخصص: p.allocated, المرجع: p.reference, الحالة: p.status }))} />}</div>
         {loading && !data ? <Loading /> : !data?.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>الطرف</th><th>الطريقة</th><th>الصندوق/البنك</th><th className="n">المبلغ</th><th className="n">المخصص للفواتير</th><th>المرجع</th><th>الحالة</th><th /></tr></thead>
-          <tbody>{data.map((p: any) => <tr key={p.id} className={p.status === "CANCELLED" ? "muted" : ""}><td><b>{p.number}</b></td><td>{fmtDate(p.date)}</td><td>{p.partnerName}</td><td>{METHOD_AR[p.method]}</td><td>{p.accountName}</td><td className="n"><Money v={p.amount} /></td><td className="n"><Money v={p.allocated} /></td><td className="num">{p.reference}</td><td><Badge s={p.status} /></td>
+          <tbody>{data.map((p: any) => <tr key={p.id} className={p.status === "CANCELLED" ? "muted" : ""}><td><b>{p.number}</b></td><td className="dt">{fmtDate(p.date)}</td><td>{p.partnerName}</td><td>{METHOD_AR[p.method]}</td><td>{p.accountName}</td><td className="n"><Money v={p.amount} /></td><td className="n"><Money v={p.allocated} /></td><td className="num">{p.reference}</td><td><Badge s={p.status} /></td>
             <td className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => setView(p)}>🖨</button>{p.status === "POSTED" && can("payments.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg(`إلغاء السند ${p.number}؟ سيُنشأ قيد عكسي وتُلغى التخصيصات.`)) { await api(`/payments/${p.id}/cancel`, { body: {} }); reload(); } }, "تم الإلغاء")}>إلغاء</button>}</td></tr>)}</tbody>
           <tfoot><tr><td colSpan={5}>الإجمالي</td><td className="n"><Money v={data.filter((p: any) => p.status === "POSTED").reduce((a: number, p: any) => a + Number(p.amount), 0)} /></td><td colSpan={4} /></tr></tfoot></table></div>}
       </div>
       {edit && <PaymentEditor direction={direction} onClose={(s) => { setEdit(false); if (s) reload(); }} />}
       {view && <VoucherPrint p={view} direction={direction} onClose={() => setView(null)} />}
+      {stmt && partner && <PartnerStatement partner={partner} role={role} onClose={() => setStmt(false)} />}
     </div>
   );
 }
@@ -81,7 +101,7 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
           <div className="row between"><h3>تخصيص المبلغ على الفواتير المفتوحة{fc && <span className="muted small"> — بالـ{sym}</span>}</h3><label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> تخصيص تلقائي (الأقدم أولاً)</label></div>
           {!docs.length ? <div className="muted mt">لا توجد فواتير مفتوحة{fc ? ` بعملة ${currency}` : ""} — سيُسجل المبلغ كدفعة مقدمة على الحساب.</div> : (
             <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>المخصص</th></tr></thead>
-              <tbody>{docs.map((i) => <tr key={i.id}><td>{i.number}{i.currency !== "SAR" && <span className="badge blue" style={{ marginInlineStart: 6 }}>{i.currency} @ {Number(i.exchangeRate)}</span>}</td><td>{fmtDate(i.date)}</td><td>{fmtDate(i.dueDate)}</td><td className="n">{i.currency !== "SAR" ? <><Money v={i.fcTotal} /> <span className="muted small">({money(i.total)} ر.س)</span></> : <Money v={i.total} />}</td><td className="n"><Money v={fc ? i.fcDue : i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={dueOf(i)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(dueOf(i), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
+              <tbody>{docs.map((i) => <tr key={i.id}><td>{i.number}{i.currency !== "SAR" && <span className="badge blue" style={{ marginInlineStart: 6 }}>{i.currency} @ {Number(i.exchangeRate)}</span>}</td><td className="dt">{fmtDate(i.date)}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n">{i.currency !== "SAR" ? <><Money v={i.fcTotal} /> <span className="muted small">({money(i.total)} ر.س)</span></> : <Money v={i.total} />}</td><td className="n"><Money v={fc ? i.fcDue : i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={dueOf(i)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(dueOf(i), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
               <tfoot><tr><td colSpan={5}>المخصص / المبلغ</td><td className={allocated > payAmt + 0.001 ? "neg-val" : ""}><Money v={allocated} /> / <Money v={payAmt} /> {fc ? sym : ""}</td></tr></tfoot></table>
           )}
         </div>
@@ -116,18 +136,35 @@ export function ExpensesPage() {
   const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const [edit, setEdit] = useState(false);
-  const { data, loading, reload } = useFetch(`/expenses${q({ q: dq, from, to, limit: 500 })}`);
+  const [accountId, setAccountId] = useState("");
+  const [pay, setPay] = useState("");
+  const [status, setStatus] = useState("");
+  const [ledger, setLedger] = useState<any>(null);
+  const accounts = useFetch(can("accounting.read") ? "/accounts" : null);
+  const expAccounts = (accounts.data?.rows || []).filter((a: any) => a.type === "EXPENSE" && !a.isGroup);
+  const { data, loading, reload } = useFetch(`/expenses${q({ q: dq, from, to, accountId, pay, status, limit: 2000 })}`);
   const { run } = useAction();
+  const active = !!(search || accountId || pay || status);
+  const clear = () => { setSearch(""); setAccountId(""); setPay(""); setStatus(""); };
+  const chosenAcc = expAccounts.find((a: any) => a.id === accountId);
   return (
     <div className="card">
       <div className="card-h"><h3>المصروفات</h3>{can("expenses.write") && <button className="btn primary sm" onClick={() => setEdit(true)}>＋ مصروف جديد</button>}</div>
       <div className="card-b">
-        <div className="toolbar"><div className="search"><span className="ic">🔍</span><Input placeholder="بحث" value={search} onChange={(e) => setSearch(e.target.value)} /></div><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /><div className="grow" />{data && <ExportBtn name="المصروفات" rows={() => data.map((e: any) => ({ الرقم: e.number, التاريخ: e.date, الحساب: `${e.accountCode} ${e.accountName}`, البيان: e.description, المستفيد: e.payee, "المبلغ": e.amount, الضريبة: e.vatAmount, الإجمالي: e.total, "طريقة الدفع": e.payAccountName || "آجل", الحالة: e.status }))} />}</div>
+        <div className="toolbar"><SearchBox value={search} onChange={setSearch} placeholder="بحث بالرقم / البيان / المستفيد" /><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
+        <div className="toolbar">
+          {expAccounts.length > 0 && <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">كل حسابات المصروفات</option>{expAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} {a.nameAr}</option>)}</Select>}
+          {chosenAcc && <button className="btn sm" onClick={() => setLedger(chosenAcc)}>📄 كشف حساب {chosenAcc.nameAr}</button>}
+          <Select value={pay} onChange={(e) => setPay(e.target.value)}><option value="">نقدي وآجل</option><option value="NOW">دفع فوري</option><option value="CREDIT">آجل على مورد</option></Select>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option><option value="POSTED">مرحّل</option><option value="CANCELLED">ملغى</option></Select>
+          {data && <FilterInfo shown={data.length} total={data.length} active={active} onClear={clear} />}
+          <div className="grow" />{data && <ExportBtn name="المصروفات" rows={() => data.map((e: any) => ({ الرقم: e.number, التاريخ: e.date, الحساب: `${e.accountCode} ${e.accountName}`, البيان: e.description, المستفيد: e.payee, "المبلغ": e.amount, الضريبة: e.vatAmount, الإجمالي: e.total, "طريقة الدفع": e.payAccountName || "آجل", الحالة: e.status }))} />}</div>
         {loading && !data ? <Loading /> : !data?.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>حساب المصروف</th><th>البيان</th><th>المستفيد</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th>الدفع</th><th /></tr></thead>
-          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td>{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
+          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td className="dt">{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
           <tfoot><tr><td colSpan={5}>الإجمالي</td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.amount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.vatAmount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.total), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}
       </div>
       {edit && <ExpenseEditor onClose={(s) => { setEdit(false); if (s) reload(); }} />}
+      {ledger && <AccountLedger account={ledger} onClose={() => setLedger(null)} />}
     </div>
   );
 }
@@ -170,19 +207,35 @@ export function AssetsPage() {
   const { data, loading, reload } = useFetch("/assets");
   const [edit, setEdit] = useState(false);
   const [view, setView] = useState<any>(null);
+  const [ledger, setLedger] = useState<any>(null);
   const { run, busy } = useAction();
   const toast = useToast();
   const CAT: Record<string, string> = { ACTIVE: "نشط", FULLY_DEPRECIATED: "مهلك بالكامل", DISPOSED: "مستبعد" };
+  const [text, setText] = useState("");
+  const [cat, setCat] = useState("");
+  const [st, setSt] = useState("");
+  const cats = [...new Set((data || []).map((a: any) => a.category).filter(Boolean))] as string[];
+  const rows = (data || []).filter((a: any) => matches(a, text, ["code", "name", "category", "assetAccount"]) && (!cat || a.category === cat) && (!st || a.status === st));
+  const srt = useSorted(rows);
+  const active = !!(text || cat || st);
   return (
     <div className="card">
       <div className="card-h"><h3>الأصول الثابتة</h3><div className="row">{can("assets.write") && <><button className="btn sm" disabled={busy} onClick={() => run(async () => { const r = await api("/assets/depreciate", { body: { through: today() } }); toast(r.length ? `تم ترحيل ${r.length} قيد إهلاك` : "لا يوجد إهلاك مستحق", "ok"); reload(); })}>تشغيل الإهلاك الشهري حتى اليوم</button><button className="btn primary sm" onClick={() => setEdit(true)}>＋ أصل جديد</button></>}</div></div>
       <div className="card-b">
-        {loading && !data ? <Loading /> : !data?.length ? <Empty text="لا توجد أصول مسجلة" /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الكود</th><th>الأصل</th><th>الفئة</th><th>تاريخ الشراء</th><th className="n">التكلفة</th><th className="n">القيمة التخريدية</th><th>العمر (شهر)</th><th className="n">إهلاك شهري</th><th className="n">مجمع الإهلاك</th><th className="n">القيمة الدفترية</th><th>الحالة</th><th /></tr></thead>
-          <tbody>{data.map((a: any) => <tr key={a.id}><td>{a.code}</td><td><b>{a.name}</b></td><td>{a.category}</td><td>{fmtDate(a.acquisitionDate)}</td><td className="n"><Money v={a.cost} /></td><td className="n"><Money v={a.salvageValue} /></td><td className="num">{a.usefulLifeMonths}</td><td className="n"><Money v={a.monthly} /></td><td className="n"><Money v={a.accumulated} /></td><td className="n"><b><Money v={a.nbv} /></b></td><td><Badge s={a.status} map={CAT} /></td><td><button className="btn sm" onClick={() => setView(a)}>تفاصيل</button></td></tr>)}</tbody>
-          <tfoot><tr><td colSpan={4}>الإجمالي</td><td className="n"><Money v={data.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.cost), 0)} /></td><td colSpan={3} /><td className="n"><Money v={data.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.accumulated), 0)} /></td><td className="n"><Money v={data.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.nbv), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}
+        <div className="toolbar">
+          <SearchBox value={text} onChange={setText} placeholder="بحث بالكود / الاسم / الفئة" />
+          {cats.length > 0 && <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">كل الفئات</option>{cats.map((c) => <option key={c} value={c}>{c}</option>)}</Select>}
+          <Select value={st} onChange={(e) => setSt(e.target.value)}><option value="">كل الحالات</option>{Object.entries(CAT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+          <FilterInfo shown={rows.length} total={data?.length || 0} active={active} onClear={() => { setText(""); setCat(""); setSt(""); }} />
+          <div className="grow" />{data && <ExportBtn name="الأصول الثابتة" rows={() => srt.sorted.map((a: any) => ({ الكود: a.code, الأصل: a.name, الفئة: a.category, "تاريخ الشراء": a.acquisitionDate, التكلفة: a.cost, "القيمة التخريدية": a.salvageValue, "العمر بالأشهر": a.usefulLifeMonths, "إهلاك شهري": a.monthly, "مجمع الإهلاك": a.accumulated, "القيمة الدفترية": a.nbv, الحالة: CAT[a.status] }))} />}
+        </div>
+        {loading && !data ? <Loading /> : !rows.length ? <Empty text={active ? "لا نتائج مطابقة" : "لا توجد أصول مسجلة"} /> : <div className="table-wrap"><table className="tbl"><thead><tr><Th k="code" s={srt}>الكود</Th><Th k="name" s={srt}>الأصل</Th><Th k="category" s={srt}>الفئة</Th><Th k="acquisitionDate" s={srt}>تاريخ الشراء</Th><Th k="cost" s={srt} n>التكلفة</Th><th className="n">القيمة التخريدية</th><th>العمر (شهر)</th><th className="n">إهلاك شهري</th><Th k="accumulated" s={srt} n>مجمع الإهلاك</Th><Th k="nbv" s={srt} n>القيمة الدفترية</Th><th>الحالة</th><th /></tr></thead>
+          <tbody>{srt.sorted.map((a: any) => <tr key={a.id}><td>{a.code}</td><td><b>{a.name}</b></td><td>{a.category}</td><td className="dt">{fmtDate(a.acquisitionDate)}</td><td className="n"><Money v={a.cost} /></td><td className="n"><Money v={a.salvageValue} /></td><td className="num">{a.usefulLifeMonths}</td><td className="n"><Money v={a.monthly} /></td><td className="n"><Money v={a.accumulated} /></td><td className="n"><b><Money v={a.nbv} /></b></td><td><Badge s={a.status} map={CAT} /></td><td className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => setView(a)}>تفاصيل</button>{can("reports.read") && <button className="btn sm ghost" title="كشف حساب الأصل في الدفاتر" onClick={() => setLedger({ id: a.assetAccountId, code: a.assetAccountCode, nameAr: a.assetAccount })}>كشف حساب</button>}</td></tr>)}</tbody>
+          <tfoot><tr><td colSpan={4}>الإجمالي ({rows.length})</td><td className="n"><Money v={rows.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.cost), 0)} /></td><td colSpan={3} /><td className="n"><Money v={rows.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.accumulated), 0)} /></td><td className="n"><Money v={rows.filter((a: any) => a.status !== "DISPOSED").reduce((x: number, a: any) => x + Number(a.nbv), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}
       </div>
       {edit && <AssetEditor onClose={(s) => { setEdit(false); if (s) reload(); }} />}
       {view && <AssetView a={view} onClose={(s) => { setView(null); if (s) reload(); }} />}
+      {ledger && <AccountLedger account={ledger} onClose={() => setLedger(null)} />}
     </div>
   );
 }

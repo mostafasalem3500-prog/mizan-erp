@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import { amountToArabicWords } from "../shared/tafqeet";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter } from "../lib";
+import { PartnerStatement } from "./Statements";
 
 const KIND_TITLE: Record<string, Record<string, string>> = {
   SALE: { QUOTATION: "عرض سعر", ORDER: "أمر بيع", INVOICE: "فاتورة ضريبية", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" },
@@ -13,19 +14,28 @@ const KIND_TITLE: Record<string, Record<string, string>> = {
 export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" | "PURCHASE"; kinds: string[]; title: string }) {
   const nav = useNavigate();
   const { can, me } = useCompanyContext();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlSearch();
   const [status, setStatus] = useState("");
   const [pay, setPay] = useState("");
   const [branchId, setBranchId] = useState("");
   const [channel, setChannel] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [partner, setPartner] = useState<any>(null);
+  const [overdue, setOverdue] = useState(false);
+  const [zatca, setZatca] = useState("");
+  const [stmt, setStmt] = useState(false);
   const branches = useFetch<any[]>("/branches");
   const multiBranch = (branches.data?.length || 0) > 1;
   const [page, setPage] = useState(0);
   const dq = useDebounce(search);
   const [editor, setEditor] = useState<{ kind: string; id?: string } | null>(null);
-  const { data, loading, reload } = useFetch(`/invoices${q({ direction, kind: kinds.join(","), q: dq, status, paymentStatus: pay, branchId: branchId || undefined, channel: channel || undefined, limit: 50, offset: page * 50 })}`);
+  const { data, loading, reload } = useFetch(`/invoices${q({ direction, kind: kinds.join(","), q: dq, status, paymentStatus: pay, branchId: branchId || undefined, channel: channel || undefined, from, to, partnerId: partner?.id, overdue: overdue ? 1 : undefined, zatca, limit: 50, offset: page * 50 })}`);
   const writePerm = direction === "SALE" ? "sales.write" : "purchases.write";
-  useEffect(() => setPage(0), [dq, status, pay, branchId, channel]);
+  useEffect(() => setPage(0), [dq, status, pay, branchId, channel, from, to, partner?.id, overdue, zatca]);
+  const active = !!(search || status || pay || branchId || channel || from || to || partner || overdue || zatca);
+  const clear = () => { setSearch(""); setStatus(""); setPay(""); setBranchId(""); setChannel(""); setFrom(""); setTo(""); setPartner(null); setOverdue(false); setZatca(""); };
+  const role = direction === "SALE" ? "CUSTOMER" : "SUPPLIER";
   return (
     <div className="card">
       <div className="card-h">
@@ -37,11 +47,17 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
       </div>
       <div className="card-b">
         <div className="toolbar">
-          <div className="search"><span className="ic">🔍</span><Input placeholder="بحث بالرقم أو الاسم" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+          <SearchBox value={search} onChange={setSearch} placeholder="بحث بالرقم أو الاسم أو مرجع المورد" width={240} />
+          <div style={{ minWidth: 220 }}><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(role)} label={(p: any) => p.name} placeholder={direction === "SALE" ? "كل العملاء" : "كل الموردين"} /></div>
+          {partner && <button className="btn sm" onClick={() => setStmt(true)}>📄 كشف حساب {partner.name}</button>}
+          <PeriodFilter from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />
           <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">كل الحالات</option><option value="DRAFT">مسودة</option><option value="POSTED">مرحّل</option><option value="CONVERTED">محوّل</option></Select>
           {kinds.includes("INVOICE") && <Select value={pay} onChange={(e) => setPay(e.target.value)}><option value="">كل حالات السداد</option><option value="UNPAID">غير مسدد</option><option value="PARTIAL">جزئي</option><option value="PAID">مسدد</option></Select>}
           {multiBranch && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}><option value="">كل الفروع</option>{branches.data!.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}
           {direction === "SALE" && kinds.includes("INVOICE") && <Select value={channel} onChange={(e) => setChannel(e.target.value)}><option value="">كل القنوات</option><option value="BACKOFFICE">المكتب</option><option value="POS">نقاط البيع</option><option value="SALLA">متجر سلة</option><option value="ZID">متجر زد</option><option value="API">الواجهة البرمجية</option></Select>}
+          {kinds.includes("INVOICE") && <label className="check"><input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} /> المتأخرة فقط</label>}
+          {direction === "SALE" && kinds.includes("INVOICE") && <Select value={zatca} onChange={(e) => setZatca(e.target.value)}><option value="">كل حالات الهيئة</option>{Object.entries(ZATCA_AR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}
+          {data && <FilterInfo shown={data.total} total={data.total} active={active} onClear={clear} />}
           <div className="grow" />
           {data && <ExportBtn name={title} rows={() => data.rows.map((r: any) => ({ الرقم: r.number, النوع: KIND_AR[r.kind], الطرف: r.partnerName, التاريخ: r.date, الاستحقاق: r.dueDate, الحالة: STATUS_AR[r.status], "قبل الضريبة": r.taxable, الضريبة: r.vatTotal, الإجمالي: r.total, المسدد: r.amountPaid, الفرع: r.branchName || "" }))} />}
         </div>
@@ -51,7 +67,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
             <tbody>{data.rows.map((r: any) => (
               <tr key={r.id} className="clickable" onClick={() => r.status === "DRAFT" && (r.kind === "QUOTATION" || r.kind === "ORDER" || r.kind === "INVOICE") ? setEditor({ kind: r.kind, id: r.id }) : nav(`/doc/${r.id}`)}>
                 <td><b>{r.number}</b>{r.channel === "POS" && <span className="badge gray" style={{ marginInlineStart: 4 }}>POS</span>}{r.channel === "SALLA" && <span className="badge teal" style={{ marginInlineStart: 4 }}>سلة</span>}{r.channel === "ZID" && <span className="badge teal" style={{ marginInlineStart: 4 }}>زد</span>}{r.channel === "API" && <span className="badge blue" style={{ marginInlineStart: 4 }}>API</span>}{r.branchName && multiBranch && <div className="small muted">{r.branchName}</div>}{r.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td>
-                <td>{fmtDate(r.date)}</td><td>{r.partnerName}</td><td>{KIND_AR[r.kind]}</td>
+                <td className="dt">{fmtDate(r.date)}</td><td>{r.partnerName}</td><td>{KIND_AR[r.kind]}</td>
                 <td className="n"><Money v={r.taxable} /></td><td className="n"><Money v={r.vatTotal} /></td><td className="n"><b><Money v={r.total} /></b></td>
                 <td className="n">{r.kind === "INVOICE" && r.status === "POSTED" ? <Money v={Number(r.total) - Number(r.amountPaid)} blankZero /> : ""}</td>
                 <td><Badge s={r.status} /> {r.kind === "INVOICE" && r.status === "POSTED" && <Badge s={r.paymentStatus} />}</td>
@@ -64,6 +80,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
         {data && data.total > 50 && <div className="row mt"><button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>السابق</button><span className="muted">{page + 1} / {Math.ceil(data.total / 50)}</span><button className="btn sm" disabled={(page + 1) * 50 >= data.total} onClick={() => setPage(page + 1)}>التالي</button></div>}
       </div>
       {editor && <DocEditor direction={direction} kind={editor.kind} id={editor.id} onClose={(saved) => { setEditor(null); if (saved) reload(); }} />}
+      {stmt && partner && <PartnerStatement partner={partner} role={role} onClose={() => setStmt(false)} />}
     </div>
   );
 }
@@ -243,6 +260,7 @@ export function DocumentView() {
   const [pay, setPay] = useState(false);
   const [landed, setLanded] = useState(false);
   const [customs, setCustoms] = useState(false);
+  const [pstmt, setPstmt] = useState(false);
   const mail = useFetch("/mail/status");
   const { run, busy } = useAction();
   useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
@@ -271,6 +289,7 @@ export function DocumentView() {
         {!isSale && d.status === "POSTED" && d.kind === "INVOICE" && can("purchases.write") && d.lines.some((l: any) => l.productId) && <button className="btn sm" onClick={() => setLanded(true)}>🚢 تكاليف استيراد</button>}
         {!isSale && d.status === "POSTED" && Number(d.customsVat) > 0 && !d.customsPaidJournalId && can("payments.write") && <button className="btn accent sm" onClick={() => setCustoms(true)}>سداد ضريبة الجمارك ({money(d.customsVat)})</button>}
         {isSale && d.status === "POSTED" && ["PENDING", "FAILED", "NOT_ONBOARDED", "REJECTED"].includes(d.zatcaStatus) && <button className="btn sm" onClick={resend}>إرسال للهيئة</button>}
+        {d.partnerId && can("reports.read") && <button className="btn sm" onClick={() => setPstmt(true)}>📄 كشف حساب {isSale ? "العميل" : "المورد"}</button>}
         {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
         <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
         <PrintBtn />
@@ -281,8 +300,8 @@ export function DocumentView() {
       <div className="grid c2 no-print">
         {d.journal?.length > 0 && <div className="card"><div className="card-h"><h3>القيد المحاسبي</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{d.journal.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table></div></div>}
         <div className="grid">
-          {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td>{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
-          {d.landedCosts?.length > 0 && <div className="card"><div className="card-h"><h3>تكاليف الاستيراد المحمّلة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.landedCosts.map((l: any) => <tr key={l.id}><td>{l.number}</td><td>{fmtDate(l.date)}</td><td><Badge s={l.status} /></td><td className="n"><Money v={l.total} /></td></tr>)}</tbody></table></div></div>}
+          {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td className="dt">{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
+          {d.landedCosts?.length > 0 && <div className="card"><div className="card-h"><h3>تكاليف الاستيراد المحمّلة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.landedCosts.map((l: any) => <tr key={l.id}><td>{l.number}</td><td className="dt">{fmtDate(l.date)}</td><td><Badge s={l.status} /></td><td className="n"><Money v={l.total} /></td></tr>)}</tbody></table></div></div>}
           {d.related?.length > 0 && <div className="card"><div className="card-h"><h3>مستندات مرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.related.map((r: any) => <tr key={r.id}><td><Link to={`/doc/${r.id}`}>{r.number}</Link></td><td>{KIND_AR[r.kind]}</td><td><Badge s={r.status} /></td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>}
           {isSale && d.zatcaResponse && <div className="card"><div className="card-h"><h3>استجابة هيئة الزكاة والضريبة</h3></div><div className="card-b small" dir="ltr" style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{JSON.stringify(d.zatcaResponse, null, 1)}</div></div>}
         </div>
@@ -291,6 +310,7 @@ export function DocumentView() {
       {pay && <QuickPayment doc={d} onClose={(s) => { setPay(false); if (s) reload(); }} />}
       {landed && <LandedCostModal doc={d} onClose={(s) => { setLanded(false); if (s) reload(); }} />}
       {customs && <PayCustomsModal doc={d} onClose={(s) => { setCustoms(false); if (s) reload(); }} />}
+      {pstmt && <PartnerStatement partner={{ id: d.partnerId, name: d.partnerName, ...(d.partner || {}) }} role={isSale ? "CUSTOMER" : "SUPPLIER"} onClose={() => setPstmt(false)} />}
     </div>
   );
 }

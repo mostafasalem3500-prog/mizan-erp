@@ -162,7 +162,7 @@ export function App() {
                 <Route path="/zatca" element={<ZatcaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />
-                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             </div>

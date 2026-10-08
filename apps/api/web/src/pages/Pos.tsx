@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
-import { api, q, useFetch, money, Money, Loading, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, useAction, useToast, useCompanyContext, useLocalState, fmtDT, METHOD_AR, Badge, confirmDlg } from "../lib";
+import { api, q, useFetch, money, Money, Loading, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, useAction, useToast, useCompanyContext, useLocalState, fmtDT, METHOD_AR, Badge, confirmDlg, matches } from "../lib";
 import { Thermal, QuickPartner } from "./Documents";
+import { ProductImagesModal } from "./ProductImages";
 
 type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
 const lineKey = (l: { product: any; uom?: any }) => l.product.id + ":" + (l.uom?.id || "");
@@ -36,7 +37,14 @@ export function PosPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useFetch(`/products${q({ limit: 1000 })}`);
   const incl = !!me.company.pricesIncludeVat;
-  const list = useMemo(() => (products.data || []).filter((p: any) => (cat === "all" || p.categoryId === cat) && (!search || p.name.includes(search) || p.sku?.toLowerCase().includes(search.toLowerCase()) || p.barcode === search)), [products.data, cat, search]);
+  // image mode: pick products in the catalog and upload/replace their pictures
+  const [imgMode, setImgMode] = useState(false);
+  const [imgSel, setImgSel] = useState<Record<string, boolean>>({});
+  const [imgMissing, setImgMissing] = useState(false);
+  const [imgEdit, setImgEdit] = useState<any[] | null>(null);
+  const canImg = can("products.write");
+  const list = useMemo(() => (products.data || []).filter((p: any) => (cat === "all" || p.categoryId === cat) && (!search || matches(p, search, ["name", "sku", "barcode"]) || p.barcode === search) && (!imgMode || !imgMissing || !p.image)), [products.data, cat, search, imgMode, imgMissing]);
+  const imgChosen = (products.data || []).filter((p: any) => imgSel[p.id]);
 
   // customer price list (fixed prices / % discount) — applied when the customer is chosen and on every add
   const [priceList, setPriceList] = useState<any>(null);
@@ -127,7 +135,7 @@ export function PosPage() {
   const resume = (h: any) => { if (cart.length && !confirmDlg("استبدال السلة الحالية؟")) return; setCart(h.cart); setPartner(h.partner); setHeld((x) => x.filter((y) => y.id !== h.id)); };
   const session = sess.data?.session;
 
-  if (sess.loading || products.loading) return <Loading />;
+  if ((sess.loading && !sess.data) || (products.loading && !products.data)) return <Loading />;
   if (!session) {
     return (
       <div className="auth"><div className="form"><div className="box card"><div className="card-b">
@@ -149,6 +157,7 @@ export function PosPage() {
           <span className="badge teal">وردية {session.number} · {session.orders} طلب</span>
           {!online && <span className="badge red">غير متصل</span>}
           <button className="btn sm" onClick={() => setReturnOpen(true)}>↩ مرتجع</button>
+          {canImg && <button className={"btn sm" + (imgMode ? " primary" : "")} title="رفع وتغيير صور الأصناف" onClick={() => { setImgMode((m) => !m); setImgSel({}); }}>🖼 {imgMode ? "إنهاء الصور" : "صور الأصناف"}</button>}
           {held.length > 0 && <div className="row" style={{ gap: 4 }}>{held.map((h) => <button key={h.id} className="btn sm accent" onClick={() => resume(h)}>▶ معلق ({h.cart.length})</button>)}</div>}
           <button className="btn sm" onClick={() => setCloseOpen(true)}>إغلاق الوردية</button>
         </div>
@@ -160,14 +169,28 @@ export function PosPage() {
           {list.map((p: any) => {
             const out = p.type === "STOCK" && Number(p.qty) <= 0 && !me.company.allowNegativeStock;
             return (
-              <div key={p.id} className={"item" + (out ? " out" : "")} onClick={() => !out && add(p)}>
-                <div className="img" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor } : {}}>{p.image ? <img src={p.image} alt="" /> : EMOJI[p.category] || "📦"}</div>
+              <div key={p.id} className={"item" + (out && !imgMode ? " out" : "") + (imgMode ? " sel-mode" + (imgSel[p.id] ? " sel" : "") : "")} onClick={() => (imgMode ? setImgSel((x) => ({ ...x, [p.id]: !x[p.id] })) : !out && add(p))}>
+                {imgMode && <input type="checkbox" className="sel-ck" checked={!!imgSel[p.id]} readOnly />}
+                <div className="img" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor } : {}}>{p.image ? <img src={p.image} alt="" loading="lazy" /> : EMOJI[p.category] || "📦"}</div>
+                {imgMode && <button className="btn sm img-edit" title="صورة هذا الصنف" onClick={(e) => { e.stopPropagation(); setImgEdit([p]); }}>{p.image ? "✎ تغيير" : "＋ صورة"}</button>}
                 <div className="name">{p.name}</div>
                 <div className="row between"><span className="price num">{money(p.salePrice)}</span>{p.type === "STOCK" && <span className="stock num">{Number(p.qty)}</span>}</div>
               </div>);
           })}
-          {!list.length && <div className="empty" style={{ gridColumn: "1/-1" }}>لا توجد أصناف — أضف أصنافاً من شاشة الأصناف</div>}
+          {!list.length && <div className="empty" style={{ gridColumn: "1/-1" }}>{imgMode && imgMissing ? "كل الأصناف الظاهرة لها صور ✓" : "لا توجد أصناف — أضف أصنافاً من شاشة الأصناف"}</div>}
         </div>
+        {imgMode && (
+          <div className="img-bar">
+            <b>وضع الصور</b><span className="muted small">اضغط على الأصناف لتحديدها ثم ارفع صورها</span>
+            <span className="badge teal">محدد {imgChosen.length}</span>
+            <button className="btn sm" onClick={() => setImgSel((x) => { const n = { ...x }; list.forEach((p: any) => { n[p.id] = true; }); return n; })}>تحديد الظاهر ({list.length})</button>
+            {imgChosen.length > 0 && <button className="btn sm ghost" onClick={() => setImgSel({})}>إلغاء التحديد</button>}
+            <label className="check small"><input type="checkbox" checked={imgMissing} onChange={(e) => setImgMissing(e.target.checked)} /> بدون صورة فقط</label>
+            <div className="grow" />
+            <button className="btn primary sm" disabled={!imgChosen.length} onClick={() => setImgEdit(imgChosen)}>⬆ رفع صور المحدد ({imgChosen.length})</button>
+            <button className="btn sm" onClick={() => { setImgMode(false); setImgSel({}); }}>إنهاء</button>
+          </div>
+        )}
       </div>
       <div className="cart">
         <div className="cart-h">
@@ -219,6 +242,7 @@ export function PosPage() {
       {done && <ReceiptModal inv={done} onClose={() => { setDone(null); searchRef.current?.focus(); }} />}
       {closeOpen && <CloseModal session={session} onClose={(closed) => { setCloseOpen(false); if (closed) { sess.reload(); } }} />}
       {returnOpen && <ReturnModal session={session} onClose={(r) => { setReturnOpen(false); if (r) { sess.reload(); products.reload(); setDone(r); } }} />}
+      {imgEdit && <ProductImagesModal products={imgEdit} onClose={(changed) => { setImgEdit(null); if (changed) { products.reload(); setImgSel({}); } }} />}
       {newPartner && <QuickPartner role="CUSTOMER" onClose={(p) => { setNewPartner(false); if (p) setPartner(p); }} />}
     </div>
   );

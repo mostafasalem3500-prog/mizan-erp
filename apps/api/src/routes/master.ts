@@ -27,6 +27,10 @@ master.get(
     params.push(limit, offset);
     const rows = await db.rows(
       `SELECT p.*, COALESCE((SELECT SUM(CASE WHEN a.system_key='AR' THEN l.debit-l.credit ELSE l.credit-l.debit END) FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.partner_id=p.id AND a.system_key IN ('AR','AP') AND e.status='POSTED' AND ((a.system_key='AR' AND p.is_customer) OR (a.system_key='AP' AND p.is_supplier))),0) balance
+,
+         COALESCE((SELECT SUM(i.total - i.amount_paid) FROM invoices i WHERE i.partner_id=p.id AND i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') AND i.total - i.amount_paid > 0.001 AND COALESCE(i.due_date, i.date) < CURRENT_DATE
+           AND ((i.direction='SALE' AND p.is_customer) OR (i.direction='PURCHASE' AND p.is_supplier AND NOT p.is_customer))),0) overdue,
+         (SELECT MAX(i.date) FROM invoices i WHERE i.partner_id=p.id AND i.status='POSTED') last_doc_date
        FROM partners p WHERE ${where.join(" AND ")} ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -99,6 +103,22 @@ master.post("/categories", perm("products.write"), h(async (req) => db.insert("p
 master.put("/categories/:id", perm("products.write"), h(async (req) => db.update("product_categories", { id: p(req).id, companyId: cid(req) }, { name: req.body.name, color: req.body.color })));
 master.delete("/categories/:id", perm("products.write"), h(async (req) => { await db.exec(`UPDATE products SET category_id=NULL WHERE category_id=$1`, [p(req).id]); await db.exec(`DELETE FROM product_categories WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true }; }));
 
+/** Product columns for lists — the image travels as a cacheable media URL (versioned), never as inline base64. */
+export const PRODUCT_COLS = `p.id, p.company_id, p.sku, p.barcode, p.name, p.name_en, p.type, p.category_id, p.unit, p.sale_price, p.purchase_price, p.tax_code, p.reorder_level, p.is_active, p.is_demo, p.created_at, p.track_lots, p.shelf_life_days, p.image_updated_at,
+  CASE WHEN p.image IS NOT NULL THEN '/api/media/products/' || p.id || '?v=' || COALESCE(floor(extract(epoch FROM p.image_updated_at))::bigint, 0) END AS image`;
+
+const IMG_RE = /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+/** Validates an uploaded image: data URL → stored; null/"" → removed; existing media URL → unchanged (undefined). */
+export function cleanImage(v: any): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  const s = String(v);
+  if (s.startsWith("/api/media/")) return undefined;
+  if (!IMG_RE.test(s)) throw bad("صيغة الصورة غير مدعومة — استخدم JPG أو PNG أو WEBP");
+  if (s.length > 700000) throw bad("الصورة كبيرة — الحد 500 كيلوبايت تقريباً");
+  return s;
+}
+
 master.get(
   "/products",
   perm("products.read"),
@@ -112,7 +132,7 @@ master.get(
     if (req.query.active !== "all") where.push("p.is_active");
     params.push(limit, offset);
     const rows = await db.rows(
-      `SELECT p.*, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost,
+      `SELECT ${PRODUCT_COLS}, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost,
          COALESCE((SELECT json_agg(json_build_object('id', u.id, 'name', u.name, 'factor', u.factor, 'barcode', u.barcode, 'salePrice', u.sale_price, 'purchasePrice', u.purchase_price) ORDER BY u.sort, u.factor) FROM product_uoms u WHERE u.product_id=p.id), '[]'::json) uoms
        FROM products p LEFT JOIN product_categories c ON c.id=p.category_id
        LEFT JOIN (SELECT product_id, SUM(qty) qty, SUM(value) value FROM stock_balances WHERE company_id=$1${req.auth.lockedBranchId ? ` AND warehouse_id IN (SELECT id FROM warehouses WHERE branch_id='${req.auth.lockedBranchId}'::uuid)` : ""} GROUP BY product_id) s ON s.product_id=p.id
@@ -135,11 +155,11 @@ master.post(
     const b = req.body || {};
     const name = String(need(b, "name", "اسم الصنف")).trim();
     if (b.taxCode && !TAX_CODES[b.taxCode]) throw bad("رمز ضريبي غير صحيح");
-    if (b.image && String(b.image).length > 400000) throw bad("الصورة كبيرة — الحد 300 كيلوبايت");
+    const image = cleanImage(b.image) ?? null;
     const sku = b.sku?.trim() || (await nextCode(cid(req), "P"));
     const row = await db.insert("products", {
       companyId: cid(req), sku, barcode: b.barcode || null, name, nameEn: b.nameEn || null, type: b.type === "SERVICE" ? "SERVICE" : "STOCK", categoryId: b.categoryId || null, unit: b.unit || "حبة",
-      salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image: b.image || null,
+      salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image, imageUpdatedAt: image ? new Date() : null,
       trackLots: b.type !== "SERVICE" && !!b.trackLots, shelfLifeDays: b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف (SKU) مستخدم مسبقاً"); throw e; });
     if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
@@ -148,7 +168,7 @@ master.post(
       await tx((t) => stockAdjustment(t, cid(req), actor(req), { kind: "OPENING", lines: [{ productId: row.id, qty: num(b.openingQty), unitCost: num(b.purchasePrice) }] }));
     }
     await audit(req, "CREATE", "product", row.id, { name });
-    return row;
+    return productRow(cid(req), row.id);
   }),
 );
 
@@ -158,17 +178,47 @@ master.put(
   h(async (req) => {
     const b = req.body || {};
     if (b.taxCode && !TAX_CODES[b.taxCode]) throw bad("رمز ضريبي غير صحيح");
+    const image = cleanImage(b.image);
     const row = await db.update("products", { id: p(req).id, companyId: cid(req) }, {
       sku: b.sku, barcode: b.barcode ?? null, name: b.name, nameEn: b.nameEn ?? null, categoryId: b.categoryId ?? null, unit: b.unit, salePrice: b.salePrice === undefined ? undefined : num(b.salePrice),
-      purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image: b.image, isActive: b.isActive, type: b.type,
+      purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image, imageUpdatedAt: image === undefined ? undefined : new Date(), isActive: b.isActive, type: b.type,
       trackLots: b.trackLots === undefined ? undefined : !!b.trackLots, shelfLifeDays: b.shelfLifeDays === undefined ? undefined : b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف مستخدم مسبقاً"); throw e; });
     if (!row) throw notFound();
     if (row.trackLots) { const { openLotsForExisting } = require("../accounting/stock") as typeof import("../accounting/stock"); await tx((t) => openLotsForExisting(t, cid(req), row.id, today())); }
     if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
-    return row;
+    return productRow(cid(req), row.id);
   }),
 );
+
+const productRow = (companyId: string, id: string) => db.one(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id=$1 AND p.company_id=$2`, [id, companyId]);
+
+// ─── product images (single + bulk) ─────────────────────────────────────────
+master.put("/products/:id/image", perm("products.write"), h(async (req) => {
+  const image = cleanImage(req.body?.image ?? null);
+  if (image === undefined) return productRow(cid(req), p(req).id);
+  const r = await db.maybe(`UPDATE products SET image=$3, image_updated_at=now() WHERE id=$1 AND company_id=$2 RETURNING id`, [p(req).id, cid(req), image]);
+  if (!r) throw notFound("الصنف غير موجود");
+  await audit(req, image ? "SET_IMAGE" : "REMOVE_IMAGE", "product", p(req).id);
+  return productRow(cid(req), p(req).id);
+}));
+master.post("/products/images", perm("products.write"), h(async (req) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) throw bad("لم تُحدد صور");
+  if (items.length > 60) throw bad("الحد الأقصى 60 صورة في المرة الواحدة");
+  const done: string[] = [], errors: { productId: string; message: string }[] = [];
+  for (const it of items) {
+    try {
+      const image = cleanImage(it.image ?? null);
+      if (image === undefined) continue;
+      const r = await db.maybe(`UPDATE products SET image=$3, image_updated_at=now() WHERE id::text=$1 AND company_id=$2 RETURNING id`, [String(it.productId), cid(req), image]);
+      if (!r) throw notFound("الصنف غير موجود");
+      done.push(r.id);
+    } catch (e: any) { errors.push({ productId: String(it.productId), message: e.message }); }
+  }
+  await audit(req, "SET_IMAGES", "product", null, { count: done.length });
+  return { updated: done.length, errors, rows: done.length ? await db.rows(`SELECT ${PRODUCT_COLS} FROM products p WHERE p.id = ANY($1::uuid[])`, [done]) : [] };
+}));
 
 /** Replaces a product's pack units (keeps ids of unchanged names so open documents keep referring to them). */
 async function saveUoms(companyId: string, productId: string, uoms: any[]) {
@@ -348,7 +398,15 @@ master.put(
 
 master.delete("/users/:id", perm("users.write"), h(async (req) => { const m = await db.one(`SELECT * FROM memberships WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); if (m.role === "OWNER") throw bad("لا يمكن حذف المالك"); await db.exec(`DELETE FROM memberships WHERE id=$1`, [m.id]); return { ok: true }; }));
 
-master.get("/audit", perm("settings.read"), h(async (req) => { const { limit, offset } = paging(req.query); return db.rows(`SELECT * FROM audit_logs WHERE company_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, [cid(req), limit, offset]); }));
+master.get("/audit", perm("settings.read"), h(async (req) => {
+  const { limit, offset } = paging(req.query);
+  const params: any[] = [cid(req)];
+  const where = ["company_id=$1"];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) { params.push(req.query.from); where.push(`created_at >= $${params.length}::date`); }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) { params.push(req.query.to); where.push(`created_at < $${params.length}::date + 1`); }
+  params.push(limit, offset);
+  return db.rows(`SELECT * FROM audit_logs WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+}));
 
 master.get("/fiscal-years", perm("accounting.read"), h(async (req) => ({ years: await db.rows(`SELECT * FROM fiscal_years WHERE company_id=$1 ORDER BY start_date DESC`, [cid(req)]), periods: await db.rows(`SELECT * FROM periods WHERE company_id=$1 ORDER BY start_date`, [cid(req)]) })));
 master.put("/periods/:id", perm("accounting.write"), h(async (req) => { const status = req.body.status === "LOCKED" ? "LOCKED" : "OPEN"; await db.exec(`UPDATE periods SET status=$3 WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req), status]); await audit(req, status === "LOCKED" ? "LOCK_PERIOD" : "UNLOCK_PERIOD", "period", p(req).id); return { ok: true }; }));

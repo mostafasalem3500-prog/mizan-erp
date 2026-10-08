@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, NumInput, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, JTYPE_AR, confirmDlg } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, NumInput, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, JTYPE_AR, confirmDlg, SearchBox, FilterInfo, matches } from "../lib";
+import { AccountLedger } from "./Statements";
 import { BankStatementPanel } from "./Pricing";
 
 export function BankPage() {
@@ -15,6 +16,11 @@ export function BankPage() {
   useEffect(() => { if (!accId && banks.length) setAccId(banks[0].id); }, [banks]);
   const { data, loading, reload } = useFetch(accId ? `/bank/${accId}/lines${q({ to })}` : null);
   useEffect(() => setSel({}), [data]);
+  const [text, setText] = useState("");
+  const [cl, setCl] = useState("");
+  const [dir, setDir] = useState("");
+  const [ledger, setLedger] = useState(false);
+  const rows = (data?.rows || []).filter((r: any) => matches(r, text, ["number", "memo", "description", "reference", (x) => JTYPE_AR[x.type], (x) => String(Number(x.debit) || Number(x.credit))]) && (!cl || (cl === "open" ? !r.clearedDate : !!r.clearedDate)) && (!dir || (dir === "in" ? Number(r.debit) > 0 : Number(r.credit) > 0)));
   const selectedIds = Object.keys(sel).filter((k) => sel[k]);
   const stmtN = Number(stmt || 0);
   const projected = data ? data.clearedBalance + (data.rows.filter((r: any) => sel[r.id] && !r.clearedDate).reduce((a: number, r: any) => a + Number(r.debit) - Number(r.credit), 0)) : 0;
@@ -41,18 +47,20 @@ export function BankPage() {
         <div className="card-h"><h3>حركات الحساب</h3><div className="row">
           {can("accounting.write") && <><button className="btn sm" disabled={!selectedIds.length || busy} onClick={() => mark(true)}>✓ تأشير المحدد كمطابق</button><button className="btn sm ghost" disabled={!selectedIds.length || busy} onClick={() => mark(false)}>إلغاء التأشير</button>
             <button className="btn primary sm" disabled={busy || stmt === "" || !data} onClick={() => run(async () => { if (!confirmDlg(`اعتماد التسوية بتاريخ ${to} برصيد كشف ${money(stmtN)}؟`)) return; await api(`/bank/${accId}/reconcile`, { body: { date: to, statementBalance: stmtN } }); reload(); }, "تم اعتماد التسوية البنكية")}>اعتماد التسوية</button></>}
-          <PrintBtn />{data && <ExportBtn name="التسوية البنكية" rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, النوع: JTYPE_AR[r.type], البيان: r.description || r.memo, المرجع: r.reference, مدين: r.debit, دائن: r.credit, مطابق: r.clearedDate ? "نعم" : "" }))} />}
+          {accId && <button className="btn sm" onClick={() => setLedger(true)}>📄 كشف الحساب</button>}<PrintBtn />{data && <ExportBtn name="التسوية البنكية" rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, النوع: JTYPE_AR[r.type], البيان: r.description || r.memo, المرجع: r.reference, مدين: r.debit, دائن: r.credit, مطابق: r.clearedDate ? "نعم" : "" }))} />}
         </div></div>
-        {loading || !data ? <Loading /> : !data.rows.length ? <Empty /> : (
-          <div className="table-wrap"><table className="tbl compact"><thead><tr><th><input type="checkbox" onChange={(e) => { const all: Record<string, boolean> = {}; if (e.target.checked) data.rows.forEach((r: any) => { if (!r.clearedDate) all[r.id] = true; }); setSel(all); }} /></th><th>التاريخ</th><th>القيد</th><th>النوع</th><th>البيان</th><th>المرجع</th><th className="n">إيداع</th><th className="n">سحب</th><th>مطابق</th></tr></thead>
-            <tbody>{data.rows.map((r: any) => <tr key={r.id} className={r.clearedDate ? "" : "bold"} style={r.clearedDate ? { opacity: 0.65 } : {}}>
+        {data && data.rows.length > 0 && <div className="card-b no-print" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={text} onChange={setText} placeholder="بحث بالقيد / البيان / المرجع / المبلغ" /><Select value={cl} onChange={(e) => setCl(e.target.value)}><option value="">المطابق والمعلّق</option><option value="open">المعلّق فقط</option><option value="done">المطابق فقط</option></Select><Select value={dir} onChange={(e) => setDir(e.target.value)}><option value="">إيداع وسحب</option><option value="in">الإيداعات</option><option value="out">السحوبات</option></Select><FilterInfo shown={rows.length} total={data.rows.length} active={!!(text || cl || dir)} onClear={() => { setText(""); setCl(""); setDir(""); }} /></div></div>}
+        {loading || !data ? <Loading /> : !rows.length ? <Empty text={data.rows.length ? "لا نتائج مطابقة" : undefined} /> : (
+          <div className="table-wrap"><table className="tbl compact"><thead><tr><th><input type="checkbox" onChange={(e) => { const all: Record<string, boolean> = {}; if (e.target.checked) rows.forEach((r: any) => { if (!r.clearedDate) all[r.id] = true; }); setSel(all); }} /></th><th>التاريخ</th><th>القيد</th><th>النوع</th><th>البيان</th><th>المرجع</th><th className="n">إيداع</th><th className="n">سحب</th><th>مطابق</th></tr></thead>
+            <tbody>{rows.map((r: any) => <tr key={r.id} className={r.clearedDate ? "" : "bold"} style={r.clearedDate ? { opacity: 0.65 } : {}}>
               <td><input type="checkbox" checked={!!sel[r.id]} onChange={(e) => setSel({ ...sel, [r.id]: e.target.checked })} /></td>
-              <td>{fmtDate(r.date)}</td><td>{r.number}</td><td className="small">{JTYPE_AR[r.type]}</td><td>{r.description || r.memo}</td><td className="num">{r.reference}</td>
+              <td className="dt">{fmtDate(r.date)}</td><td>{r.number}</td><td className="small">{JTYPE_AR[r.type]}</td><td>{r.description || r.memo}</td><td className="num">{r.reference}</td>
               <td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td>{r.clearedDate ? <span className="badge green">{fmtDate(r.clearedDate)}</span> : <span className="badge amber">معلّق</span>}</td>
             </tr>)}</tbody></table></div>
         )}
       </div>
-      {data?.history?.length > 0 && <div className="card"><div className="card-h"><h3>تسويات معتمدة سابقاً</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>تاريخ الكشف</th><th className="n">رصيد الكشف</th><th className="n">الرصيد المطابق</th><th className="n">الفرق</th><th>بواسطة</th></tr></thead><tbody>{data.history.map((h: any) => <tr key={h.id}><td>{fmtDate(h.statementDate)}</td><td className="n"><Money v={h.statementBalance} /></td><td className="n"><Money v={h.clearedBalance} /></td><td className={"n " + (Number(h.difference) ? "neg-val" : "pos-val")}><Money v={h.difference} /></td><td>{h.createdBy}</td></tr>)}</tbody></table></div></div>}
+      {ledger && banks.find((b: any) => b.id === accId) && <AccountLedger account={banks.find((b: any) => b.id === accId)} onClose={() => setLedger(false)} />}
+      {data?.history?.length > 0 && <div className="card"><div className="card-h"><h3>تسويات معتمدة سابقاً</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>تاريخ الكشف</th><th className="n">رصيد الكشف</th><th className="n">الرصيد المطابق</th><th className="n">الفرق</th><th>بواسطة</th></tr></thead><tbody>{data.history.map((h: any) => <tr key={h.id}><td className="dt">{fmtDate(h.statementDate)}</td><td className="n"><Money v={h.statementBalance} /></td><td className="n"><Money v={h.clearedBalance} /></td><td className={"n " + (Number(h.difference) ? "neg-val" : "pos-val")}><Money v={h.difference} /></td><td>{h.createdBy}</td></tr>)}</tbody></table></div></div>}
     </div>
   );
 }

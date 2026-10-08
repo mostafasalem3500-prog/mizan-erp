@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, fmtDT, addMonths } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, fmtDT, addMonths, SearchBox, FilterInfo, matches, useSorted, Th } from "../lib";
 import { StatementModal } from "./Master";
 
 const CH: Record<string, string> = { WHATSAPP: "واتساب", EMAIL: "بريد", CALL: "اتصال", NOTE: "ملاحظة" };
@@ -15,8 +15,13 @@ export function CollectionsPage() {
   const [stmt, setStmt] = useState<any>(null);
   const [bulk, setBulk] = useState(false);
   const [filter, setFilter] = useState<"overdue" | "all">("overdue");
+  const [text, setText] = useState("");
+  const [age, setAge] = useState("");
+  const [rem, setRem] = useState("");
+  const rows0 = (data || []).filter((r: any) => (filter === "all" || r.overdue > 0) && matches(r, text, ["name", "phone", "email"]) && (!age || (age === "30" ? r.daysOverdue > 0 && r.daysOverdue <= 30 : age === "60" ? r.daysOverdue > 30 && r.daysOverdue <= 60 : age === "90" ? r.daysOverdue > 60 && r.daysOverdue <= 90 : r.daysOverdue > 90)) && (!rem || (rem === "never" ? !r.lastReminder : rem === "old" ? !r.lastReminder || new Date(r.lastReminder.at).getTime() < Date.now() - 7 * 864e5 : !!r.lastReminder)));
+  const srt = useSorted(rows0);
   if (!data) return <Loading />;
-  const rows = data.filter((r: any) => filter === "all" || r.overdue > 0);
+  const rows = srt.sorted;
   const tot = (k: string) => rows.reduce((a: number, r: any) => a + Number(r[k] || 0), 0);
   const selected = rows.filter((r: any) => sel[r.id]);
   return (
@@ -30,7 +35,8 @@ export function CollectionsPage() {
       <div className="card">
         <div className="card-h"><div><h3>التحصيل ومتابعة العملاء</h3><div className="small muted">رسالة تذكير جاهزة بروابط الفواتير تُرسل عبر واتساب أو البريد، وسجل للمتابعات</div></div>
           <div className="row"><Select value={filter} onChange={(e) => setFilter(e.target.value as any)} style={{ width: 170 }}><option value="overdue">المتأخرون فقط</option><option value="all">كل الذمم المفتوحة</option></Select><button className="btn sm" disabled={!selected.length} onClick={() => setBulk(true)}>🖨 كشوف حساب للمحدد ({selected.length})</button><ExportBtn name="التحصيل" rows={() => rows.map((r: any) => ({ العميل: r.name, الجوال: r.phone, البريد: r.email, "المستحق": r.due, "المتأخر": r.overdue, "أقدم استحقاق": r.oldestDue, "أيام التأخير": r.daysOverdue, "آخر تذكير": r.lastReminder ? `${CH[r.lastReminder.channel]} ${fmtDate(r.lastReminder.at)}` : "" }))} /></div></div>
-        {!rows.length ? <Empty text="لا توجد ذمم متأخرة 🎉" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th><input type="checkbox" onChange={(e) => { const s: Record<string, boolean> = {}; if (e.target.checked) rows.forEach((r: any) => (s[r.id] = true)); setSel(s); }} /></th><th>العميل</th><th>التواصل</th><th className="n">الفواتير</th><th className="n">المستحق</th><th className="n">المتأخر</th><th>أقدم استحقاق</th><th>آخر تذكير</th><th /></tr></thead>
+        <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={text} onChange={setText} placeholder="بحث باسم العميل / الجوال / البريد" /><Select value={age} onChange={(e) => setAge(e.target.value)}><option value="">كل فترات التأخير</option><option value="30">1–30 يوم</option><option value="60">31–60 يوم</option><option value="90">61–90 يوم</option><option value="120">أكثر من 90 يوم</option></Select><Select value={rem} onChange={(e) => setRem(e.target.value)}><option value="">كل حالات التذكير</option><option value="never">لم يُذكَّروا أبداً</option><option value="old">لم يُذكَّروا منذ أسبوع</option><option value="done">ذُكِّروا</option></Select><FilterInfo shown={rows.length} total={data.filter((r: any) => filter === "all" || r.overdue > 0).length} active={!!(text || age || rem)} onClear={() => { setText(""); setAge(""); setRem(""); }} /></div></div>
+        {!rows.length ? <Empty text={text || age || rem ? "لا نتائج مطابقة" : "لا توجد ذمم متأخرة 🎉"} /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th><input type="checkbox" onChange={(e) => { const s: Record<string, boolean> = {}; if (e.target.checked) rows.forEach((r: any) => (s[r.id] = true)); setSel(s); }} /></th><Th k="name" s={srt}>العميل</Th><th>التواصل</th><Th k="invoices" s={srt} n>الفواتير</Th><Th k="due" s={srt} n>المستحق</Th><Th k="overdue" s={srt} n>المتأخر</Th><Th k="daysOverdue" s={srt}>أقدم استحقاق</Th><th>آخر تذكير</th><th /></tr></thead>
           <tbody>{rows.map((r: any) => <tr key={r.id} className={r.daysOverdue > 60 ? "bold" : ""}><td><input type="checkbox" checked={!!sel[r.id]} onChange={(e) => setSel({ ...sel, [r.id]: e.target.checked })} /></td><td><b>{r.name}</b>{Number(r.creditLimit) > 0 && r.due > Number(r.creditLimit) && <span className="badge red" style={{ marginInlineStart: 6 }}>تجاوز الحد</span>}</td><td className="small num">{r.phone}{r.email && <div dir="ltr" style={{ textAlign: "end" }}>{r.email}</div>}</td><td className="n">{r.invoices}</td><td className="n"><Money v={r.due} /></td><td className={"n " + (r.overdue ? "neg-val" : "")}><Money v={r.overdue} blankZero /></td><td>{r.oldestDue ? <>{fmtDate(r.oldestDue)}<div className="small muted">متأخر {r.daysOverdue} يوم</div></> : <span className="muted">غير مستحق</span>}</td><td className="small">{r.lastReminder ? <>{CH[r.lastReminder.channel]} · {fmtDate(r.lastReminder.at)}<div className="muted">{r.lastReminder.by}</div></> : <span className="muted">—</span>}</td>
             <td className="row" style={{ gap: 4 }}><button className="btn sm primary" onClick={() => setMsg(r)}>تذكير</button><button className="btn sm" onClick={() => setStmt(r)}>كشف حساب</button></td></tr>)}</tbody>
           <tfoot><tr><td colSpan={4}>الإجمالي</td><td className="n"><Money v={tot("due")} /></td><td className="n"><Money v={tot("overdue")} /></td><td colSpan={3} /></tr></tfoot></table></div>}
@@ -92,7 +98,7 @@ function BulkStatements({ partners, onClose }: { partners: any[]; onClose: () =>
         <div key={st.partner.id} className="print-doc" style={{ padding: 0, marginBottom: 24, pageBreakAfter: "always" }}>
           <div className="row between"><div><h3>{me.company.nameAr}</h3><div className="small muted">كشف حساب عميل — {from} إلى {to}</div></div><div style={{ textAlign: "start" }}><b>{st.partner.name}</b><div className="small muted">{st.partner.phone}{st.partner.vatNumber ? ` · ${st.partner.vatNumber}` : ""}</div></div></div>
           <table className="tbl compact mt"><thead><tr><th>التاريخ</th><th>المستند</th><th>البيان</th><th className="n">مدين</th><th className="n">دائن</th><th className="n">الرصيد</th></tr></thead>
-            <tbody><tr><td colSpan={5}>رصيد أول المدة</td><td className="n"><Money v={st.opening} /></td></tr>{st.rows.map((r: any, i: number) => <tr key={i}><td>{fmtDate(r.date)}</td><td>{r.number}</td><td>{r.memo}</td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.balance} /></td></tr>)}</tbody>
+            <tbody><tr><td colSpan={5}>رصيد أول المدة</td><td className="n"><Money v={st.opening} /></td></tr>{st.rows.map((r: any, i: number) => <tr key={i}><td className="dt">{fmtDate(r.date)}</td><td>{r.number}</td><td>{r.memo}</td><td className="n"><Money v={r.debit} blankZero /></td><td className="n"><Money v={r.credit} blankZero /></td><td className="n"><Money v={r.balance} /></td></tr>)}</tbody>
             <tfoot><tr><td colSpan={5}>الرصيد المستحق</td><td className="n"><Money v={st.closing} /></td></tr></tfoot></table>
         </div>))}
     </Modal>

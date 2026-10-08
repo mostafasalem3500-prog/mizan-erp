@@ -112,7 +112,7 @@ export function req<T = any>(body: any, field: string, label?: string): T {
 }
 
 export function paging(q: any) {
-  const limit = Math.min(Math.max(parseInt(q.limit || "50", 10) || 50, 1), 1000);
+  const limit = Math.min(Math.max(parseInt(q.limit || "50", 10) || 50, 1), 5000);
   const offset = Math.max(parseInt(q.offset || "0", 10) || 0, 0);
   return { limit, offset };
 }
