@@ -19,6 +19,7 @@ import { LotsPage } from "./pages/Lots";
 import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 import { GlobalSearch } from "./pages/Search";
+import { ReportCenterPage } from "./pages/ReportCenter";
 
 const NAV = [
   { group: "الرئيسية" },
@@ -56,7 +57,8 @@ const NAV = [
   { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
   { to: "/budgets", ic: "🎯", label: "الموازنات التقديرية", perm: "reports.read" },
-  { to: "/reports", ic: "📊", label: "التقارير", perm: "reports.read" },
+  { to: "/reports", ic: "📊", label: "القوائم المالية", perm: "reports.read" },
+  { to: "/reports-center", ic: "📈", label: "مركز التقارير", perm: "reports.read" },
   { group: "الإعدادات" },
   { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read" },
   { to: "/settings", ic: "⚙", label: "إعدادات المنشأة", perm: "settings.read" },
@@ -159,6 +161,8 @@ export function App() {
                 <Route path="/budgets/:id" element={<BudgetsPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/reports/:tab" element={<ReportsPage />} />
+                <Route path="/reports-center" element={<ReportCenterPage />} />
+                <Route path="/reports-center/:key" element={<ReportCenterPage />} />
                 <Route path="/zatca" element={<ZatcaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />

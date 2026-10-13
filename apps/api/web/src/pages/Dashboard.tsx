@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZATCA_AR, useCompanyContext } from "../lib";
+import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZATCA_AR, useCompanyContext, useLocalState } from "../lib";
 
 const M_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const mLabel = (m: string) => M_AR[Number(m.slice(5, 7)) - 1].slice(0, 5);
@@ -20,6 +20,29 @@ function BranchesMonth() {
   );
 }
 
+/** Go-live checklist: shown to owners/admins until every required step is done (or dismissed). */
+function Readiness() {
+  const { me, can } = useCompanyContext();
+  const [hidden, setHidden] = useLocalState<Record<string, boolean>>("mz_readiness_hidden", {});
+  const { data } = useFetch(can("settings.read") ? "/readiness" : null);
+  const [open, setOpen] = useState(false);
+  if (!data || hidden[me.company.id]) return null;
+  if (data.ready && !open) return null;
+  const req = data.items.filter((i: any) => !i.optional), opt = data.items.filter((i: any) => i.optional);
+  return (
+    <div className="card readiness">
+      <div className="card-h"><div><h3>جاهزية المنشأة للتشغيل الفعلي <span className="badge teal">{data.done} / {data.total}</span></h3><div className="small muted">الخطوات الأساسية قبل بدء العمل الحقيقي — اضغط على أي خطوة للانتقال إليها</div></div><div className="row"><button className="btn sm ghost" onClick={() => setOpen((o) => !o)}>{open ? "طي" : "التفاصيل"}</button><button className="btn sm ghost" title="إخفاء البطاقة" onClick={() => setHidden({ ...hidden, [me.company.id]: true })}>✕</button></div></div>
+      <div className="card-b">
+        <div className="bar"><i style={{ width: `${(data.done / data.total) * 100}%` }} /></div>
+        {(open || !data.ready) && <div className="mt">
+          {req.map((i: any) => <Link key={i.key} to={i.to} className={"step req" + (i.ok ? " ok" : "")}><span className="ic">{i.ok ? "✓" : "!"}</span><span className="grow">{i.label}{i.hint && !i.ok && <div className="small muted">{i.hint}</div>}</span><span className="small muted">{i.ok ? "تم" : "مطلوب"}</span></Link>)}
+          {open && opt.map((i: any) => <Link key={i.key} to={i.to} className={"step" + (i.ok ? " ok" : "")}><span className="ic">{i.ok ? "✓" : "○"}</span><span className="grow">{i.label}{i.hint && !i.ok && <div className="small muted">{i.hint}</div>}</span><span className="small muted">{i.ok ? "تم" : "اختياري"}</span></Link>)}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { data, loading } = useFetch("/dashboard");
   const { me } = useCompanyContext();
@@ -27,6 +50,7 @@ export function Dashboard() {
   const d = data;
   return (
     <div className="grid">
+      <Readiness />
       {!me.company.demoLoaded && !d.recent?.length && (
         <div className="alert info">مرحباً بك في ميزان! ابدأ بإضافة الأصناف والعملاء، أو <Link to="/settings/demo">حمّل البيانات التجريبية</Link> لاستكشاف النظام بأرقام كاملة (يمكن حذفها لاحقاً بضغطة واحدة).</div>
       )}

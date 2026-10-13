@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams , Link } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg , SearchBox, FilterInfo, matches, TYPE_AR, productFetcher } from "../lib";
 import { StatementModal, StockCardModal } from "./Master";
 import { AccountLedger, PartnerStatement } from "./Statements";
@@ -29,6 +29,7 @@ export function ReportsPage() {
   const bName = b ? branches.data?.find((x: any) => x.id === b)?.name : "";
   return (
     <div className="grid">
+      <div className="alert info small no-print row between" style={{ margin: 0 }}><span>هذه القوائم المالية الأساسية. التقارير التفصيلية لكل مديول (مبيعات، مشتريات، مخزون، نقطة بيع، خزينة، مصروفات، رواتب، أصول، ضريبة) بفلاتر متعددة في <b>مركز التقارير</b>.</span><Link className="btn sm primary" to="/reports-center">📈 مركز التقارير</Link></div>
       {locked && <div className="alert info small no-print" style={{ margin: 0 }}>🔒 التقارير مقصورة على <b>{me.lockedBranch.name}</b> — صلاحيتك مقيدة بفرعك.</div>}
       <div className="tabs no-print">{TABS.filter((t) => !locked || !COMPANY_TABS.has(t.key)).map((t) => <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => nav(`/reports/${t.key}`)}>{t.label}</button>)}</div>
       {tab !== "integrity" && tab !== "statements" && <div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} />{multi && branchable && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ width: 200 }} title="تصفية حسب الفرع"><option value="">كل الفروع (المنشأة)</option>{branches.data!.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>}</div>}
