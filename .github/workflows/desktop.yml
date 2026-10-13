@@ -33,6 +33,10 @@ jobs:
           V=$(node -p "require('./apps/desktop/package.json').version")
           git config user.name "github-actions"; git config user.email "actions@github.com"
           if ! git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null; then git tag "v$V" && git push origin "v$V"; fi
+          # create the release up-front so electron-builder's parallel uploads never race to create it twice
+          gh release view "v$V" >/dev/null 2>&1 || gh release create "v$V" --title "ميزان ERP لسطح المكتب $V" --notes "نسخة ويندوز (64-bit): سحابي أو محلي على الجهاز. نزّل Mizan-ERP-Setup-$V.exe"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build & publish installer
         working-directory: apps/desktop
         env:
