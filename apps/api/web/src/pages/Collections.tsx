@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, fmtDT, addMonths, SearchBox, FilterInfo, matches, useSorted, Th } from "../lib";
+import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, fmtDT, addMonths, SearchBox, FilterInfo, matches, useSorted, Th } from "../lib";
 import { StatementModal } from "./Master";
 
 const CH: Record<string, string> = { WHATSAPP: "واتساب", EMAIL: "بريد", CALL: "اتصال", NOTE: "ملاحظة" };
@@ -49,7 +49,7 @@ export function CollectionsPage() {
 }
 
 function ReminderModal({ partner, mailOk, onClose }: { partner: any; mailOk: boolean; onClose: (s?: boolean) => void }) {
-  const { can } = useCompanyContext();
+  const { can } = useCompanyContext(); const base = useBase();
   const { run, busy } = useAction();
   const toast = useToast();
   const { data: m } = useFetch(`/collections/${partner.id}/message`);
@@ -75,7 +75,7 @@ function ReminderModal({ partner, mailOk, onClose }: { partner: any; mailOk: boo
         </div>
         <div>
           <b>الفواتير المفتوحة</b>
-          <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>الاستحقاق</th><th className="n">المتبقي</th></tr></thead><tbody>{m.invoices.map((i: any) => <tr key={i.number}><td><Link to={`/doc/${i.id || ""}`}>{i.number}</Link></td><td className={String(i.dueDate).slice(0, 10) < today() ? "neg-val" : ""}>{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.due} /></td></tr>)}</tbody></table>
+          <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>الاستحقاق</th><th className="n">المتبقي</th></tr></thead><tbody>{m.invoices.map((i: any) => <tr key={i.number}><td><Link to={`${base}/doc/${i.id || ""}`}>{i.number}</Link></td><td className={String(i.dueDate).slice(0, 10) < today() ? "neg-val" : ""}>{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.due} /></td></tr>)}</tbody></table>
           <div className="row mt" style={{ alignItems: "flex-end" }}><Field label="تسجيل اتصال / ملاحظة متابعة"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثال: وعد بالسداد يوم الخميس" /></Field><button className="btn sm" disabled={busy || !note || !can("sales.write")} onClick={() => { log("CALL", note); setNote(""); }}>حفظ</button></div>
           <b className="mt" style={{ display: "block" }}>سجل المتابعة</b>
           {!history.data ? <Loading /> : !history.data.length ? <div className="muted small">لا توجد متابعات سابقة</div> : <div className="ok-list card mt" style={{ maxHeight: 260, overflow: "auto" }}>{history.data.map((h: any) => <div key={h.id} className="item"><span className="badge blue">{CH[h.channel]}</span><div className="grow small">{h.body?.slice(0, 120)}{h.body?.length > 120 ? "…" : ""}<div className="muted">{fmtDT(h.createdAt)} · {h.sentBy}{h.amountDue ? ` · المستحق ${money(h.amountDue)}` : ""}</div></div></div>)}</div>}

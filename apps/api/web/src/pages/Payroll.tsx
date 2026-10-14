@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, SearchBox, FilterInfo, useSorted, Th, matches } from "../lib";
+import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, SearchBox, FilterInfo, useSorted, Th, matches } from "../lib";
 import { LeavesTab, LoansTab, ProvisionsTab, SettlementsTab, EmployeeStatement } from "./Hr";
 
 const NAT: Record<string, string> = { SAUDI: "سعودي", NON_SAUDI: "غير سعودي" };
@@ -9,8 +9,8 @@ const RS: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", 
 export function PayrollPage() {
   const { can } = useCompanyContext();
   const { tab = "runs" } = useParams();
-  const nav = useNavigate();
-  const setTab = (t: string) => nav(`/payroll/${t}`);
+  const nav = useNavigate(); const base = useBase();
+  const setTab = (t: string) => nav(`${base}/payroll/${t}`);
   const emps = useFetch("/employees");
   const [file, setFile] = useState<any>(null);
   const runs = useFetch("/payroll");

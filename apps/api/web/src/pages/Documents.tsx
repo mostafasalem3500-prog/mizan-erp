@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import { amountToArabicWords } from "../shared/tafqeet";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter } from "../lib";
+import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter } from "../lib";
 import { PartnerStatement } from "./Statements";
 
 const KIND_TITLE: Record<string, Record<string, string>> = {
@@ -12,7 +12,7 @@ const KIND_TITLE: Record<string, Record<string, string>> = {
 
 // ─── list ──────────────────────────────────────────────────────────────────
 export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" | "PURCHASE"; kinds: string[]; title: string }) {
-  const nav = useNavigate();
+  const nav = useNavigate(); const base = useBase();
   const { can, me } = useCompanyContext();
   const [search, setSearch] = useUrlSearch();
   const [status, setStatus] = useState("");
@@ -65,7 +65,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>الرقم</th><th>التاريخ</th><th>{direction === "SALE" ? "العميل" : "المورد"}</th><th>النوع</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>الحالة</th>{direction === "SALE" && kinds.includes("INVOICE") && <th>الهيئة</th>}</tr></thead>
             <tbody>{data.rows.map((r: any) => (
-              <tr key={r.id} className="clickable" onClick={() => r.status === "DRAFT" && (r.kind === "QUOTATION" || r.kind === "ORDER" || r.kind === "INVOICE") ? setEditor({ kind: r.kind, id: r.id }) : nav(`/doc/${r.id}`)}>
+              <tr key={r.id} className="clickable" onClick={() => r.status === "DRAFT" && (r.kind === "QUOTATION" || r.kind === "ORDER" || r.kind === "INVOICE") ? setEditor({ kind: r.kind, id: r.id }) : nav(`${base}/doc/${r.id}`)}>
                 <td><b>{r.number}</b>{r.channel === "POS" && <span className="badge gray" style={{ marginInlineStart: 4 }}>POS</span>}{r.channel === "SALLA" && <span className="badge teal" style={{ marginInlineStart: 4 }}>سلة</span>}{r.channel === "ZID" && <span className="badge teal" style={{ marginInlineStart: 4 }}>زد</span>}{r.channel === "API" && <span className="badge blue" style={{ marginInlineStart: 4 }}>API</span>}{r.branchName && multiBranch && <div className="small muted">{r.branchName}</div>}{r.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td>
                 <td className="dt">{fmtDate(r.date)}</td><td>{r.partnerName}</td><td>{KIND_AR[r.kind]}</td>
                 <td className="n"><Money v={r.taxable} /></td><td className="n"><Money v={r.vatTotal} /></td><td className="n"><b><Money v={r.total} /></b></td>
@@ -100,7 +100,7 @@ function calc(l: Line, incl: boolean) {
 export function DocEditor({ direction, kind, id, onClose, originId, prefill }: { direction: "SALE" | "PURCHASE"; kind: string; id?: string; onClose: (saved?: boolean) => void; originId?: string; prefill?: any }) {
   const { me } = useCompanyContext();
   const toast = useToast();
-  const nav = useNavigate();
+  const nav = useNavigate(); const base = useBase();
   const { run, busy } = useAction();
   const [partner, setPartner] = useState<any>(null);
   const [date, setDate] = useState(today());
@@ -174,7 +174,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
       await postWithCreditCheck(d.id, me.role === "OWNER" || me.role === "ADMIN" || me.superAdmin);
       toast("تم الترحيل وإنشاء القيد المحاسبي", "ok");
       onClose(true);
-      nav(`/doc/${d.id}`);
+      nav(`${base}/doc/${d.id}`);
     } else { toast("تم الحفظ كمسودة", "ok"); onClose(true); }
   });
   const barcodeAdd = async (code: string) => {
@@ -250,7 +250,7 @@ export function QuickPartner({ role, onClose }: { role: "CUSTOMER" | "SUPPLIER";
 // ─── view / print ──────────────────────────────────────────────────────────
 export function DocumentView() {
   const { id } = useParams();
-  const nav = useNavigate();
+  const nav = useNavigate(); const base = useBase();
   const toast = useToast();
   const { can } = useCompanyContext();
   const { data: d, loading, reload } = useFetch(id ? `/invoices/${id}` : null);
@@ -270,7 +270,7 @@ export function DocumentView() {
   const c = d.company;
   const remaining = Number(d.total) - Number(d.amountPaid);
   const post = () => run(async () => { if (!confirmDlg("ترحيل المستند؟")) return; await postWithCreditCheck(d.id, can("users.write")); reload(); }, "تم الترحيل");
-  const convert = (kind: string) => run(async () => { const r = await api(`/invoices/${d.id}/convert`, { body: { kind } }); nav(`/doc/${r.id}`); }, "تم التحويل");
+  const convert = (kind: string) => run(async () => { const r = await api(`/invoices/${d.id}/convert`, { body: { kind } }); nav(`${base}/doc/${r.id}`); }, "تم التحويل");
   const del = () => run(async () => { if (!confirmDlg("حذف المسودة؟")) return; await api(`/invoices/${d.id}`, { method: "DELETE" }); nav(-1); }, "تم الحذف");
   const creditNote = () => run(async () => { const draft = await api(`/invoices/${d.id}/credit-note`, { body: {} }); setCn(draft); });
   const resend = () => run(async () => { const r = await api(`/zatca/submit/${d.id}`, { body: {} }); toast(`نتيجة الهيئة: ${ZATCA_AR[r.status] || r.status}`, r.status === "REPORTED" || r.status === "CLEARED" ? "ok" : "err"); reload(); });
@@ -302,7 +302,7 @@ export function DocumentView() {
         <div className="grid">
           {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td className="dt">{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
           {d.landedCosts?.length > 0 && <div className="card"><div className="card-h"><h3>تكاليف الاستيراد المحمّلة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.landedCosts.map((l: any) => <tr key={l.id}><td>{l.number}</td><td className="dt">{fmtDate(l.date)}</td><td><Badge s={l.status} /></td><td className="n"><Money v={l.total} /></td></tr>)}</tbody></table></div></div>}
-          {d.related?.length > 0 && <div className="card"><div className="card-h"><h3>مستندات مرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.related.map((r: any) => <tr key={r.id}><td><Link to={`/doc/${r.id}`}>{r.number}</Link></td><td>{KIND_AR[r.kind]}</td><td><Badge s={r.status} /></td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>}
+          {d.related?.length > 0 && <div className="card"><div className="card-h"><h3>مستندات مرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.related.map((r: any) => <tr key={r.id}><td><Link to={`${base}/doc/${r.id}`}>{r.number}</Link></td><td>{KIND_AR[r.kind]}</td><td><Badge s={r.status} /></td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>}
           {isSale && d.zatcaResponse && <div className="card"><div className="card-h"><h3>استجابة هيئة الزكاة والضريبة</h3></div><div className="card-b small" dir="ltr" style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{JSON.stringify(d.zatcaResponse, null, 1)}</div></div>}
         </div>
       </div>

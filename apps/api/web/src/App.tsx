@@ -20,6 +20,7 @@ import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 import { GlobalSearch } from "./pages/Search";
 import { ReportCenterPage } from "./pages/ReportCenter";
+import { CharityApp, charityDefault } from "./charity/CharityApp";
 
 const NAV = [
   { group: "الرئيسية" },
@@ -97,6 +98,8 @@ export function App() {
   if (!me) return <Routes><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
+  const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") ? "/charity" : "/login"); };
+  if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return <AppCtx.Provider value={{ me, reload, can }}><CharityApp onLogout={logout} /></AppCtx.Provider>;
   const isPos = loc.pathname === "/pos";
   return (
     <AppCtx.Provider value={{ me, reload, can }}>
@@ -109,6 +112,7 @@ export function App() {
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
             <nav>
               {NAV.map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
+              {can("payments.read") && <NavLink to="/charity" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
               {me.superAdmin && <><div className="group">النظام</div><NavLink to="/admin"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink></>}
             </nav>
             <div className="foot">
@@ -216,7 +220,9 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
   const [demo, setDemo] = useState<any>(null);
   useEffect(() => { api("/auth/demo-credentials").then(setDemo).catch(() => undefined); }, []);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
-  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { const r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); session.token = r.token; onDone(); nav("/"); }); };
+  const loc = useLocation();
+  const charity = loc.pathname.startsWith("/charity");
+  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { const r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
   return (
     <div className="auth">
       <div className="art">
@@ -235,6 +241,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
         <form className="box card" onSubmit={submit}>
           <div className="card-b">
             <h2 className="mb">{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h2>
+            {charity && <div className="alert info small">💚 الدخول إلى واجهة الجمعيات الخيرية — نفس حساب ميزان ERP</div>}
             <div className="grid">
               {mode === "register" && <>
                 <Field label="الاسم الكامل"><Input required value={f.fullName} onChange={set("fullName")} /></Field>
