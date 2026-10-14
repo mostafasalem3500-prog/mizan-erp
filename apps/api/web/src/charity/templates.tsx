@@ -8,6 +8,8 @@ export type Col = { k: string; label: string; w?: string; n?: boolean };
 export type Section = { id: string; title: string; fields?: Field[]; checks?: { k: string; options: string[]; multi?: boolean; label?: string }[]; text?: string; sign?: boolean; thumb?: boolean; noteLines?: number; table?: { k: string; cols: Col[]; rows: number }; after?: boolean };
 export type Tpl = { key: string; code: string; title: string; subtitle?: string; sections: Section[]; signatures: string[]; note: string; seal?: boolean; pageBreak?: string };
 
+export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة الأهلية";
+export const DEFAULT_LICENSE = "1000888600";
 export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة" };
 
 const amount = (k = "amount"): Field[] => [{ k, label: "المبلغ رقماً (ريال)", kind: "amount" }, { k: k + "Words", label: "المبلغ كتابةً", span: 2, kind: "words" }];
@@ -253,7 +255,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
   const color = theme.color || "#1f6f4a";
   const accent = theme.accent || "#b7862b";
   const d = blank ? {} : data || {};
-  const name = settings?.associationName || settings?.company?.nameAr || "";
+  const name = settings?.associationName || DEFAULT_NAME;
   const logo = theme.hideLogo ? null : settings?.company?.logo;
   const sig = settings?.signatories || {};
   const val = (f: Field) => {
@@ -310,7 +312,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
               {logo ? <img src={logo} alt="" /> : <div className="a4-logo-ph">{name.slice(0, 1)}</div>}
               <div>
                 <b>{name}</b>
-                {settings?.licenseNo && <span>مسجلة لدى {settings?.authority || "المركز الوطني لتنمية القطاع غير الربحي"} برقم ترخيص ({settings.licenseNo})</span>}
+                {(settings?.licenseNo || DEFAULT_LICENSE) && <span>مسجلة لدى {settings?.authority || "المركز الوطني لتنمية القطاع غير الربحي"} برقم ترخيص ({settings.licenseNo})</span>}
                 {(settings?.address || settings?.phone) && <span className="a4-contact">{[settings?.address, settings?.phone && "هاتف: " + settings.phone, settings?.email].filter(Boolean).join(" · ")}</span>}
               </div>
             </div>
@@ -341,9 +343,9 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
               {t.seal && <div className="a4-seal">ختم الجمعية</div>}
             </div>
             {t.note && <p className="a4-note">{t.note}</p>}
-            <div className="a4-foot">{name}{settings?.licenseNo ? ` — ترخيص رقم ${settings.licenseNo}` : ""}{theme.footer ? ` — ${theme.footer}` : ""}</div>
+            <div className="a4-foot">{name}{(settings?.licenseNo || DEFAULT_LICENSE) ? ` — ترخيص رقم ${settings.licenseNo}` : ""}{theme.footer ? ` — ${theme.footer}` : ""}</div>
           </footer>
-        ) : <div className="a4-foot">{name}{settings?.licenseNo ? ` — ترخيص رقم ${settings.licenseNo}` : ""}</div>}
+        ) : <div className="a4-foot">{name}{(settings?.licenseNo || DEFAULT_LICENSE) ? ` — ترخيص رقم ${settings.licenseNo}` : ""}</div>}
       </div>
     );
   };
@@ -389,14 +391,22 @@ export function printA4(el: HTMLElement | null) {
 /** Modal with a filled A4 form and a print button. */
 export function PrintModal({ tplKey, data, settings, onClose, choices }: { tplKey: string; data: any; settings: any; onClose: () => void; choices?: string[] }) {
   const [k, setK] = useState(tplKey);
+  const empty = !data || !Object.keys(data).length;
+  const [blank, setBlank] = useState(empty);
+  const [copies, setCopies] = useState(1);
   const ref = React.useRef<HTMLDivElement>(null);
   useEffect(() => setK(tplKey), [tplKey]);
   return (
-    <Modal title={`طباعة: ${resolveTpl(k, settings?.templates?.[k]).title}`} onClose={onClose} wide footer={<>
+    <Modal title={`طباعة: ${resolveTpl(k, settings?.templates?.[k]).title}${blank ? " — نموذج فارغ" : ""}`} onClose={onClose} wide footer={<>
       {choices && choices.length > 1 && <select className="input" style={{ width: 230 }} value={k} onChange={(e) => setK(e.target.value)}>{choices.map((c) => <option key={c} value={c}>{resolveTpl(c, settings?.templates?.[c]).title}</option>)}</select>}
+      <div className="row" style={{ gap: 4 }}>
+        <button className={"btn sm" + (!blank ? " primary" : "")} disabled={empty} onClick={() => setBlank(false)}>معبأ بالبيانات</button>
+        <button className={"btn sm" + (blank ? " primary" : "")} onClick={() => setBlank(true)}>فارغ للتعبئة اليدوية</button>
+      </div>
+      {blank && <label className="row small" style={{ gap: 4 }}>عدد النسخ <input className="input" type="number" min={1} max={50} value={copies} onChange={(e) => setCopies(Math.max(1, Math.min(50, Number(e.target.value) || 1)))} style={{ width: 64 }} /></label>}
       <button className="btn primary" onClick={() => printA4(ref.current)}>🖨 طباعة A4</button><button className="btn" onClick={onClose}>إغلاق</button>
     </>}>
-      <div className="a4-stage"><div ref={ref} className="a4-wrap">{settings ? <A4 tplKey={k} settings={settings} data={data} /> : null}</div></div>
+      <div className="a4-stage"><div ref={ref} className="a4-wrap">{settings ? Array.from({ length: blank ? copies : 1 }).map((_, i) => <A4 key={i} tplKey={k} settings={settings} data={blank ? {} : data} blank={blank} />) : null}</div></div>
     </Modal>
   );
 }

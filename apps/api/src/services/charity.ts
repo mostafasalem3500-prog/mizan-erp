@@ -36,6 +36,9 @@ const METHODS = ["CASH", "TRANSFER", "CHEQUE", "CARD"];
 const PAYER_TYPES = ["INDIVIDUAL", "ENTITY", "COMPANY", "OTHER"];
 const CAPACITIES = ["VOLUNTEER", "EMPLOYEE", "SUPPLIER", "BENEFICIARY", "OTHER"];
 
+/** Identity taken from the association's own forms; editable from «إعدادات الجمعية». */
+export const DEFAULT_ASSOCIATION = { name: "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة الأهلية", licenseNo: "1000888600" };
+
 export async function ensureCharity(t: Db, companyId: string) {
   const have = await t.rows(`SELECT code, id FROM accounts WHERE company_id=$1 AND code = ANY($2)`, [companyId, ["4", "5", "1103", ...CHARITY_ACCOUNTS.map((a) => a[0])]]);
   const ids: Record<string, string> = Object.fromEntries(have.map((a: any) => [a.code, a.id]));
@@ -55,7 +58,7 @@ export async function ensureCharity(t: Db, companyId: string) {
   const s = await t.maybe(`SELECT company_id FROM charity_settings WHERE company_id=$1`, [companyId]);
   if (!s) {
     const c = await t.one(`SELECT name_ar, phone, email, city FROM companies WHERE id=$1`, [companyId]);
-    await t.exec(`INSERT INTO charity_settings(company_id, association_name, phone, email, address) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [companyId, c.nameAr, c.phone, c.email, c.city]);
+    await t.exec(`INSERT INTO charity_settings(company_id, association_name, license_no, phone, email, address) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, [companyId, DEFAULT_ASSOCIATION.name, DEFAULT_ASSOCIATION.licenseNo, c.phone, c.email, c.city]);
   }
 }
 

@@ -6,7 +6,7 @@ import { DocumentsPage, DocumentView } from "../pages/Documents";
 import { PayrollPage } from "../pages/Payroll";
 import { CollectionsPage } from "../pages/Collections";
 import { CharityDashboard, ReceiptsPage, DisbursementsPage, RequestsPage, BatchesPage, DailyPage, ArchivePage, ProjectsPage, PeoplePage, BudgetPage, ActivitiesPage } from "./pages";
-import { TemplatesCenter, CharitySettingsPage } from "./TemplatesCenter";
+import { TemplatesCenter, CharitySettingsPage, BlankFormsPage } from "./TemplatesCenter";
 import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
 import "./charity.css";
 
@@ -39,6 +39,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/archive", ic: "🗄", label: "أرشيف الفواتير والمستندات", perm: "payments.read" },
   { group: "النماذج والإعدادات" },
   { to: "/charity/templates", ic: "🖨", label: "القوالب الجاهزة A4", perm: "payments.read" },
+  { to: "/charity/blank-forms", ic: "📄", label: "النماذج الفارغة للطباعة", perm: "payments.read" },
   { to: "/charity/settings", ic: "⚙", label: "إعدادات الجمعية", perm: "settings.read", companyOnly: true },
 ];
 
@@ -104,6 +105,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/reports" element={<ActivitiesPage />} />
                   <Route path="/charity/archive" element={<ArchivePage />} />
                   <Route path="/charity/templates" element={<TemplatesCenter />} />
+                  <Route path="/charity/blank-forms" element={<BlankFormsPage />} />
                   <Route path="/charity/settings" element={<CharitySettingsPage />} />
                   <Route path="*" element={<Navigate to="/charity" />} />
                 </Routes>

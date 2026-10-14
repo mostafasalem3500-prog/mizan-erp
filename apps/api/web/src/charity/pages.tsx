@@ -63,7 +63,8 @@ export function CharityDashboard() {
     { to: "/charity/custody", ic: "💼", t: "العهد المالية", s: "طلب، صرف، تسوية" },
     { to: "/charity/purchases", ic: "🛍", t: "طلب شراء", s: "ومحضر استلام" },
     { to: "/charity/daily", ic: "📥", t: "تحصيل اليوم", s: "إقفال الصندوق اليومي" },
-    { to: "/charity/templates", ic: "🖨", t: "القوالب A4", s: "نماذج جاهزة للطباعة" },
+    { to: "/charity/blank-forms", ic: "📄", t: "نماذج فارغة", s: "طباعة للتعبئة اليدوية" },
+    { to: "/charity/templates", ic: "🖨", t: "القوالب A4", s: "تخصيص النماذج" },
   ];
   return (
     <div>
@@ -131,6 +132,7 @@ export function ReceiptsPage() {
         <h3>سندات القبض والتبرعات</h3>
         <div className="row">
           <button className="btn sm" onClick={() => exportExcel(rows.map((r) => ({ الرقم: r.number, التاريخ: fmtDate(r.date), الدافع: r.payerName, الصفة: PAYER[r.payerType], المصدر: SOURCE[r.source], الغرض: r.purpose, المشروع: r.projectName, الطريقة: METHOD[r.method], المرجع: r.refNo, المبلغ: Number(r.amount), الحالة: DOC_ST[r.status] })), "سندات-القبض")}>⬇ Excel</button>
+          <button className="btn sm" onClick={() => setPr({ blank: true })}>🖨 نموذج فارغ</button>
           {can("payments.write") && <button className="btn primary" onClick={() => setAdd(true)}>＋ سند قبض جديد</button>}
         </div>
       </div>
@@ -167,7 +169,7 @@ export function ReceiptsPage() {
         </table></div>
       )}
       {add && <ReceiptModal onClose={(saved) => { setAdd(false); if (qs.get("new")) nav("/charity/receipts", { replace: true }); if (saved) { reload(); setPr(saved); } }} />}
-      {pr && <PrintModal tplKey="receipt" choices={["receipt", "ack"]} data={fromReceipt(pr)} settings={settings} onClose={() => setPr(null)} />}
+      {pr && <PrintModal tplKey="receipt" choices={["receipt", "ack"]} data={pr.blank ? {} : fromReceipt(pr)} settings={settings} onClose={() => setPr(null)} />}
     </div>
   );
 }
@@ -237,6 +239,7 @@ export function DisbursementsPage() {
         <h3>المصروفات — سندات الصرف</h3>
         <div className="row">
           <button className="btn sm" onClick={() => exportExcel(rows.map((r) => ({ الرقم: r.number, التاريخ: fmtDate(r.date), النوع: KIND[r.kind], المستلم: r.beneficiaryName, الصفة: CAPACITY[r.capacity], السبب: r.reason, المشروع: r.projectName, "حساب المصروف": r.expenseAccountName, "من حساب": r.payAccountName, المرجع: r.refNo, الآيبان: r.iban, المبلغ: Number(r.amount), "طلب الصرف": r.requestNumber, المسير: r.batchNumber, الحالة: DOC_ST[r.status] })), "سندات-الصرف")}>⬇ Excel</button>
+          <button className="btn sm" onClick={() => setPr({ blank: true, kind: "CASH" })}>🖨 نموذج فارغ</button>
           {can("payments.write") && <button className="btn primary" onClick={() => setAdd({})}>＋ سند صرف جديد</button>}
         </div>
       </div>
@@ -273,7 +276,7 @@ export function DisbursementsPage() {
         </table></div>
       )}
       {add && <DisbModal init={add} onClose={(saved) => { setAdd(null); if (qs.get("new") || qs.get("request")) nav("/charity/expenses", { replace: true }); if (saved) { reload(); setPr(saved); } }} />}
-      {pr && <PrintModal tplKey={pr.capacity === "VOLUNTEER" ? "volunteer" : pr.kind === "CASH" ? "cash" : "voucher"} choices={[...(pr.kind === "CASH" ? ["cash", "voucher"] : ["voucher", "cheque"]), ...(pr.capacity === "VOLUNTEER" ? ["volunteer"] : [])]} data={fromDisb(pr)} settings={settings} onClose={() => setPr(null)} />}
+      {pr && <PrintModal tplKey={pr.capacity === "VOLUNTEER" ? "volunteer" : pr.kind === "CASH" ? "cash" : "voucher"} choices={pr.blank ? ["cash", "voucher", "cheque", "volunteer"] : [...(pr.kind === "CASH" ? ["cash", "voucher"] : ["voucher", "cheque"]), ...(pr.capacity === "VOLUNTEER" ? ["volunteer"] : [])]} data={pr.blank ? {} : fromDisb(pr)} settings={settings} onClose={() => setPr(null)} />}
     </div>
   );
 }

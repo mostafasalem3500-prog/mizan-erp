@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, Field, Input, Select, useAction, useCompanyContext, fileToDataUrl } from "../lib";
 import { useCharity, CH_NAV } from "./CharityApp";
-import { A4, TEMPLATES, TPL, ROLES, SAMPLE, printA4, Ov } from "./templates";
+import { A4, TEMPLATES, TPL, ROLES, SAMPLE, printA4, Ov, resolveTpl, PrintModal } from "./templates";
 
 export function TemplatesCenter() {
   const { settings, reload } = useCharity();
@@ -103,6 +103,55 @@ export function CharitySettingsPage() {
         {CH_NAV.filter((n) => n.to).map((n) => <Field key={n.to} label={n.label}><Input value={f.labels?.[n.to] || ""} placeholder={n.label} onChange={(e) => setF({ ...f, labels: { ...f.labels, [n.to]: e.target.value } })} disabled={!write} /></Field>)}
       </div></div>
       {write && <div><button className="btn primary lg" disabled={busy} onClick={save}>حفظ الإعدادات</button></div>}
+    </div>
+  );
+}
+
+/** All templates in one place, printed empty for manual filling (single, multiple copies, or a selected set). */
+export function BlankFormsPage() {
+  const { settings } = useCharity();
+  const [sel, setSel] = useState<Record<string, number>>({});
+  const [job, setJob] = useState<{ key: string; n: number }[] | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => { if (job && ref.current) { printA4(ref.current); const t = setTimeout(() => setJob(null), 1500); return () => clearTimeout(t); } }, [job]);
+  const go = (list: { key: string; n: number }[]) => setJob(list.filter((x) => x.n > 0));
+  const chosen = Object.entries(sel).filter(([, n]) => n > 0).map(([key, n]) => ({ key, n }));
+  const groups: [string, string[]][] = [
+    ["القبض والاستلام", ["receipt", "ack"]],
+    ["الصرف", ["request", "cash", "voucher", "cheque", "volunteer"]],
+    ["المشتريات", ["purchase", "receiving"]],
+    ["العهد والاسترداد", ["custodyReq", "custodySettle", "refund"]],
+  ];
+  return (
+    <div>
+      <div className="ch-hero">
+        <div><h2>النماذج الفارغة للتعبئة اليدوية</h2><div className="muted">كل النماذج بشعار واسم {settings?.associationName} ورقم الترخيص، جاهزة للطباعة على A4 وتعبئتها يدوياً</div></div>
+        <div className="row">{chosen.length > 0 && <button className="btn gold" onClick={() => go(chosen)}>🖨 طباعة المحدد ({chosen.reduce((a, x) => a + x.n, 0)} نسخة)</button>}<button className="btn" onClick={() => go(TEMPLATES.map((t) => ({ key: t.key, n: 1 })))}>🖨 نسخة من كل النماذج</button></div>
+      </div>
+      {groups.map(([g, keys]) => (
+        <div key={g} className="mb">
+          <h3 className="mb" style={{ marginBottom: 8 }}>{g}</h3>
+          <div className="ch-blank">
+            {keys.map((k) => { const t = resolveTpl(k, settings?.templates?.[k]); const n = sel[k] || 0; return (
+              <div key={k} className={"card ch-blank-card" + (n ? " on" : "")}>
+                <div className="thumb" onClick={() => setPreview(k)} title="معاينة"><div className="a4-mini"><A4 tplKey={k} settings={settings} blank /></div></div>
+                <div className="card-b">
+                  <b>{t.title}</b><div className="small muted">{t.code}{t.pageBreak ? " · صفحتان" : " · صفحة واحدة"}</div>
+                  <div className="row mt" style={{ gap: 6 }}>
+                    <label className="row small" style={{ gap: 4 }}><input type="checkbox" checked={n > 0} onChange={(e) => setSel({ ...sel, [k]: e.target.checked ? 1 : 0 })} />تحديد</label>
+                    {n > 0 && <input className="input" type="number" min={1} max={50} value={n} onChange={(e) => setSel({ ...sel, [k]: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })} style={{ width: 60 }} title="عدد النسخ" />}
+                    <div className="grow" />
+                    <button className="btn sm primary" onClick={() => go([{ key: k, n: n || 1 }])}>🖨 طباعة فارغ</button>
+                  </div>
+                </div>
+              </div>
+            ); })}
+          </div>
+        </div>
+      ))}
+      <div style={{ position: "absolute", left: -99999, top: 0 }} aria-hidden><div ref={ref}>{job?.flatMap((x) => Array.from({ length: x.n }).map((_, i) => <A4 key={x.key + i} tplKey={x.key} settings={settings} blank />))}</div></div>
+      {preview && <PrintModal tplKey={preview} data={{}} settings={settings} onClose={() => setPreview(null)} />}
     </div>
   );
 }

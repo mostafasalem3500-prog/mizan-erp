@@ -130,3 +130,9 @@
 .a4-h.mini .a4-meta { margin: 0 auto 0 0; }
 .a4-cont { text-align: left; color: #777; font-size: .85em; margin-top: .4em; }
 .a4 .a4-body { flex: 1; }
+.ch-blank { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.ch-blank-card { overflow: hidden; }
+.ch-blank-card.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+.ch-blank-card .thumb { height: 190px; overflow: hidden; background: #e9ece8; display: flex; justify-content: center; padding-top: 10px; cursor: zoom-in; }
+.ch-blank-card .a4-mini { zoom: .26; pointer-events: none; }
+.ch-blank-card .a4-mini .a4 + .a4 { display: none; }
