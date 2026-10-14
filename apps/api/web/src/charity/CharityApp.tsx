@@ -8,6 +8,7 @@ import { CollectionsPage } from "../pages/Collections";
 import { CharityDashboard, ReceiptsPage, DisbursementsPage, RequestsPage, BatchesPage, DailyPage, ArchivePage, ProjectsPage, PeoplePage, BudgetPage, ActivitiesPage } from "./pages";
 import { TemplatesCenter, CharitySettingsPage, BlankFormsPage } from "./TemplatesCenter";
 import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
+import { SponsorshipsPage, InkindPage, VolunteersPage } from "./pages3";
 import "./charity.css";
 
 export const ChCtx = createContext<{ settings: any; reload: () => void; projects: any[]; reloadProjects: () => void }>({ settings: null, reload: () => undefined, projects: [], reloadProjects: () => undefined });
@@ -20,6 +21,8 @@ export const CH_NAV: any[] = [
   { to: "/charity/receipts", ic: "💚", label: "سندات القبض والتبرعات", perm: "payments.read" },
   { to: "/charity/donors", ic: "🤝", label: "العملاء المتبرعون", perm: "partners.read" },
   { to: "/charity/collections", ic: "📞", label: "التحصيل", perm: "sales.read" },
+  { to: "/charity/sponsorships", ic: "🤲", label: "الكفالات", perm: "payments.read" },
+  { to: "/charity/inkind", ic: "📦", label: "التبرعات العينية", perm: "payments.read" },
   { to: "/charity/daily", ic: "📥", label: "تحصيل دخول الأموال اليومية", perm: "payments.read" },
   { to: "/charity/quotations", ic: "📝", label: "عروض الأسعار", perm: "sales.read" },
   { group: "المصروفات" },
@@ -27,6 +30,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/requests", ic: "📋", label: "طلبات الصرف", perm: "payments.read" },
   { to: "/charity/batches", ic: "🧾", label: "مسير المصروفات", perm: "payments.read" },
   { to: "/charity/beneficiaries", ic: "👪", label: "المستفيدون", perm: "partners.read" },
+  { to: "/charity/volunteers", ic: "🙋", label: "المتطوعون وساعات التطوع", perm: "payments.read" },
   { to: "/charity/payroll", ic: "👔", label: "الرواتب", perm: "accounting.read", companyOnly: true },
   { group: "المشتريات والعهد" },
   { to: "/charity/purchases", ic: "🛍", label: "طلبات الشراء ومحاضر الاستلام", perm: "payments.read" },
@@ -97,6 +101,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/batches" element={<BatchesPage />} />
                   <Route path="/charity/payroll" element={<PayrollPage />} />
                   <Route path="/charity/payroll/:tab" element={<PayrollPage />} />
+                  <Route path="/charity/sponsorships" element={<SponsorshipsPage />} />
+                  <Route path="/charity/inkind" element={<InkindPage />} />
+                  <Route path="/charity/volunteers" element={<VolunteersPage />} />
                   <Route path="/charity/purchases" element={<PurchasesPage />} />
                   <Route path="/charity/custody" element={<CustodyPage />} />
                   <Route path="/charity/refunds" element={<RefundsPage />} />

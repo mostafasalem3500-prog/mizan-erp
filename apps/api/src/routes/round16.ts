@@ -83,3 +83,24 @@ r16.post("/charity/forms/:kind/:id/:action", perm(W), h(async (req) => {
   await audit(req, a.toUpperCase(), "charity_form", p(req).id); return r;
 }));
 r16.delete("/charity/forms/:kind/:id", perm(W), h(async (req) => tx((t) => c2.actForm(t, cid(req), actor(req), kindOf(req), p(req).id, "delete", {}))));
+
+// ─── round 19: sponsorships, in-kind, volunteers, alerts ─────────────────────
+import * as c3 from "../services/charity3";
+r16.get("/charity/alerts", perm(R), h(async (req) => tx((t) => c3.alerts(t, cid(req)))));
+r16.get("/charity/sponsorships", perm(R), h(async (req) => c3.listSponsorships(db, cid(req), req.query)));
+r16.post("/charity/sponsorships", perm(W), h(async (req) => { const r = await tx((t) => c3.saveSponsorship(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "charity_sponsorship", r.id, { number: r.number }); return r; }));
+r16.put("/charity/sponsorships/:id", perm(W), h(async (req) => tx((t) => c3.saveSponsorship(t, cid(req), actor(req), req.body || {}, p(req).id))));
+r16.post("/charity/sponsorships/:id/collect", perm(W), h(async (req) => { const r = await tx((t) => c3.collectSponsorship(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "COLLECT", "charity_sponsorship", p(req).id, { receipt: r.number }); return r; }));
+r16.post("/charity/sponsorships-payout", perm(W), h(async (req) => tx((t) => c3.sponsorshipPayoutRun(t, cid(req), actor(req), req.body || {}))));
+r16.get("/charity/inkind/items", perm(R), h(async (req) => c3.listItems(db, cid(req))));
+r16.post("/charity/inkind/items", perm(W), h(async (req) => tx((t) => c3.saveItem(t, cid(req), req.body || {}))));
+r16.put("/charity/inkind/items/:id", perm(W), h(async (req) => tx((t) => c3.saveItem(t, cid(req), req.body || {}, p(req).id))));
+r16.get("/charity/inkind/docs", perm(R), h(async (req) => c3.listInkindDocs(db, cid(req), req.query)));
+r16.post("/charity/inkind/docs", perm(W), h(async (req) => { const r = await tx((t) => c3.createInkindDoc(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "charity_inkind", r.id, { number: r.number, total: r.total }); return r; }));
+r16.post("/charity/inkind/docs/:id/cancel", perm(W), h(async (req) => tx((t) => c3.cancelInkindDoc(t, cid(req), actor(req), p(req).id))));
+r16.get("/charity/volunteers", perm(R), h(async (req) => c3.listVolunteers(db, cid(req))));
+r16.post("/charity/volunteers", perm(W), h(async (req) => tx((t) => c3.saveVolunteer(t, cid(req), req.body || {}))));
+r16.put("/charity/volunteers/:id", perm(W), h(async (req) => tx((t) => c3.saveVolunteer(t, cid(req), req.body || {}, p(req).id))));
+r16.get("/charity/volunteers/:id/hours", perm(R), h(async (req) => c3.volunteerHours(db, cid(req), p(req).id)));
+r16.post("/charity/volunteer-hours", perm(W), h(async (req) => tx((t) => c3.addHours(t, cid(req), actor(req), req.body || {}))));
+r16.delete("/charity/volunteer-hours/:id", perm(W), h(async (req) => { await db.exec(`DELETE FROM charity_volunteer_hours WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true }; }));

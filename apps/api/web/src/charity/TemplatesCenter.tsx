@@ -122,6 +122,8 @@ export function BlankFormsPage() {
     ["الصرف", ["request", "cash", "voucher", "cheque", "volunteer"]],
     ["المشتريات", ["purchase", "receiving"]],
     ["العهد والاسترداد", ["custodyReq", "custodySettle", "refund"]],
+    ["التبرعات العينية", ["inkindIn", "inkindOut"]],
+    ["الشهادات", ["donorCert", "volunteerCert"]],
   ];
   return (
     <div>

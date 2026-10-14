@@ -4,10 +4,11 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useToast, useCompanyContext, today, fmtDate, monthStart, yearStart, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, BarChart, useUrlSearch, confirmDlg } from "../lib";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useCharity } from "./CharityApp";
-import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4 } from "./templates";
+import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData } from "./templates";
+import { AlertsCard, waLink } from "./pages3";
 
 // ─── labels ────────────────────────────────────────────────────────────────
-export const SOURCE: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", REFUND: "استرداد مبلغ", OTHER: "أخرى", GENERAL: "سند قبض عام" };
+export const SOURCE: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", REFUND: "استرداد مبلغ", OTHER: "أخرى", GENERAL: "سند قبض عام" };
 export const METHOD: Record<string, string> = { CASH: "نقدي", TRANSFER: "تحويل بنكي", CHEQUE: "شيك", CARD: "شبكة / بطاقة", BANK: "تحويل بنكي" };
 export const PAYER: Record<string, string> = { INDIVIDUAL: "فرد", ENTITY: "جهة مانحة", COMPANY: "شركة", OTHER: "أخرى" };
 export const CAPACITY: Record<string, string> = { BENEFICIARY: "مستفيد", VOLUNTEER: "متطوع", EMPLOYEE: "موظف", SUPPLIER: "مورد", OTHER: "أخرى" };
@@ -61,6 +62,8 @@ export function CharityDashboard() {
     { to: "/charity/requests?new=1", ic: "📋", t: "طلب صرف", s: "FIN-001" },
     { to: "/charity/batches", ic: "🧾", t: "مسير المصروفات", s: "صرف جماعي للمستفيدين" },
     { to: "/charity/custody", ic: "💼", t: "العهد المالية", s: "طلب، صرف، تسوية" },
+    { to: "/charity/sponsorships", ic: "🤲", t: "الكفالات", s: "تحصيل الأقساط" },
+    { to: "/charity/inkind", ic: "📦", t: "تبرع عيني", s: "استلام وتوزيع" },
     { to: "/charity/purchases", ic: "🛍", t: "طلب شراء", s: "ومحضر استلام" },
     { to: "/charity/daily", ic: "📥", t: "تحصيل اليوم", s: "إقفال الصندوق اليومي" },
     { to: "/charity/blank-forms", ic: "📄", t: "نماذج فارغة", s: "طباعة للتعبئة اليدوية" },
@@ -76,6 +79,7 @@ export function CharityDashboard() {
         <div className="row"><PeriodFilter from={from} to={to} onChange={(f, t) => { setFrom(f || yearStart()); setTo(t || today()); }} /></div>
       </div>
       <div className="ch-quick">{quick.map((x) => <Link key={x.to} to={x.to}><span className="ic">{x.ic}</span><b>{x.t}</b><small>{x.s}</small></Link>)}</div>
+      <AlertsCard />
       {loading && !data ? <Loading /> : data && <>
         <div className="grid c4">
           <Kpi label="إجمالي المقبوضات (التبرعات والدعم)" v={k.received} icon="💚" sub={<>{k.receiptsCount} سند · اليوم <Money v={k.todayIn} /></>} />
@@ -88,6 +92,9 @@ export function CharityDashboard() {
           <Kpi label="العهد المالية القائمة" v={k.custodyOpen} icon="💼" cls={k.custodyOverdue ? "danger" : ""} sub={<>{k.custodyCount} عهدة{k.custodyOverdue ? ` · ${k.custodyOverdue} متأخرة التسوية` : ""}{k.custodyPending ? ` · ${k.custodyPending} طلب جديد` : ""}</>} />
           <Kpi label="طلبات شراء بانتظار الاعتماد" v={k.purchasesPending} money={false} icon="🛍" cls={k.purchasesPending ? "accent" : ""} sub={`${k.purchasesOpen} معتمد بانتظار الاستلام`} />
           <Kpi label="طلبات استرداد مفتوحة" v={k.refundsPending} money={false} icon="↩" cls={k.refundsPending ? "accent" : ""} />
+          <Kpi label="الكفالات النشطة" v={k.sponsorshipsActive} money={false} icon="🤲" sub={<>التزام شهري <Money v={k.sponsorshipsMonthly} /></>} />
+          <Kpi label="مخزون التبرعات العينية" v={k.inkindValue} icon="📦" cls="info" sub={<>وُزّع في الفترة <Money v={k.inkindDistributed} /></>} />
+          <Kpi label="ساعات التطوع في الفترة" v={Number(k.volunteerHours).toLocaleString("en-US")} money={false} icon="🙋" cls="success" sub={`${k.volunteers} متطوع نشط`} />
           <Kpi label="المشاريع والبرامج النشطة" v={k.activeProjects} money={false} icon="🎯" cls="info" sub={<>موازنة المصروفات <Money v={data.budget.expense.budget} /> · المنفذ <Money v={data.budget.expense.actual} /></>} />
         </div>
         <div className="grid c2 mt">
@@ -162,6 +169,7 @@ export function ReceiptsPage() {
               <td><Badge s={r.status} map={DOC_ST} /></td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨 طباعة</button>
+                {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ريال (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
                 {can("payments.write") && r.status === "POSTED" && <button className="btn sm ghost" disabled={busy} onClick={() => { const why = window.prompt(`سبب إلغاء السند ${r.number}؟ (سيُعكس القيد)`); if (why !== null) run(async () => { await api(`/charity/receipts/${r.id}/cancel`, { body: { reason: why } }); reload(); }, "تم الإلغاء وعكس القيد"); }}>إلغاء</button>}
               </td>
             </tr>))}
@@ -555,6 +563,7 @@ export function DailyPage() {
   return (
     <div>
       <div className="toolbar no-print"><b>يوم التحصيل</b><Input type="date" value={d} onChange={(e) => setD(e.target.value)} style={{ width: 160 }} /><button className="btn sm ghost" onClick={() => setD(today())}>اليوم</button><div className="grow" /><button className="btn sm" onClick={() => window.print()}>🖨 طباعة تقرير اليوم</button>{data && <button className="btn sm" onClick={() => exportExcel(data.rows.map((r: any) => ({ الرقم: r.number, الطرف: r.party, المصدر: SOURCE[r.source], الطريقة: METHOD[r.method], الحساب: r.accountName, المبلغ: Number(r.amount), "بواسطة": r.createdBy })), `تحصيل-${d}`)}>⬇ Excel</button>}</div>
+      <AlertsCard />
       {loading && !data ? <Loading /> : data && <>
         <div className="grid c4">
           <Kpi label={`إجمالي المتحصلات يوم ${d}`} v={data.total} icon="📥" sub={`${data.rows.length} عملية`} />
@@ -584,7 +593,7 @@ export function DailyPage() {
 }
 
 // ─── archive (أرشيف الفواتير والمستندات) ────────────────────────────────────
-const ARCH: Record<string, string> = { INVOICE: "فواتير وعروض أسعار", DONATION: "سندات قبض الجمعية", DISB: "سندات صرف الجمعية", REQUEST: "طلبات الصرف", CUSTODY: "العهد المالية", FORM: "طلبات الشراء والاستلام والاسترداد", PAYMENT: "سندات القبض والصرف العامة", EXPENSE: "المصروفات العامة" };
+const ARCH: Record<string, string> = { INVOICE: "فواتير وعروض أسعار", DONATION: "سندات قبض الجمعية", DISB: "سندات صرف الجمعية", REQUEST: "طلبات الصرف", CUSTODY: "العهد المالية", FORM: "طلبات الشراء والاستلام والاسترداد", INKIND: "التبرعات العينية", PAYMENT: "سندات القبض والصرف العامة", EXPENSE: "المصروفات العامة" };
 const FORM_AR: Record<string, string> = { PURCHASE: "طلب شراء", RECEIVING: "محضر استلام", REFUND: "طلب استرداد" };
 const SUB: Record<string, string> = { INVOICE: "فاتورة", QUOTATION: "عرض سعر", ORDER: "أمر", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" };
 export function ArchivePage() {
@@ -603,10 +612,11 @@ export function ArchivePage() {
     if (r.t === "REQUEST") return nav(`/charity/requests?q=${encodeURIComponent(r.number)}`);
     if (r.t === "PAYMENT") return nav(`/${r.dir === "OUT" ? "vouchers" : "receipts"}?q=${encodeURIComponent(r.number)}`);
     if (r.t === "EXPENSE") return nav(`/expenses?q=${encodeURIComponent(r.number)}`);
+    if (r.t === "INKIND") return nav(`/charity/inkind?q=${encodeURIComponent(r.number)}`);
     if (r.t === "CUSTODY") return nav(`/charity/custody?q=${encodeURIComponent(r.number)}`);
     if (r.t === "FORM") return nav(`/charity/${r.sub === "REFUND" ? "refunds" : "purchases"}?q=${encodeURIComponent(r.number)}`);
   };
-  const label = (r: any) => r.t === "INVOICE" ? `${SUB[r.sub] || r.sub} ${r.dir === "PURCHASE" ? "مشتريات" : "مبيعات"}` : r.t === "DONATION" ? `سند قبض · ${SOURCE[r.sub] || ""}` : r.t === "DISB" ? `سند صرف · ${KIND[r.sub] || ""}` : r.t === "REQUEST" ? "طلب صرف" : r.t === "PAYMENT" ? (r.dir === "OUT" ? "سند صرف عام" : "سند قبض عام") : r.t === "CUSTODY" ? "عهدة مالية" : r.t === "FORM" ? FORM_AR[r.sub] || "نموذج" : "مصروف";
+  const label = (r: any) => r.t === "INVOICE" ? `${SUB[r.sub] || r.sub} ${r.dir === "PURCHASE" ? "مشتريات" : "مبيعات"}` : r.t === "DONATION" ? `سند قبض · ${SOURCE[r.sub] || ""}` : r.t === "DISB" ? `سند صرف · ${KIND[r.sub] || ""}` : r.t === "REQUEST" ? "طلب صرف" : r.t === "PAYMENT" ? (r.dir === "OUT" ? "سند صرف عام" : "سند قبض عام") : r.t === "CUSTODY" ? "عهدة مالية" : r.t === "INKIND" ? (r.sub === "IN" ? "استلام تبرع عيني" : "صرف مساعدات عينية") : r.t === "FORM" ? FORM_AR[r.sub] || "نموذج" : "مصروف";
   return (
     <div className="card">
       <div className="card-h"><h3>أرشيف الفواتير والمستندات</h3><button className="btn sm" onClick={() => exportExcel(rows.map((r) => ({ النوع: label(r), الرقم: r.number, التاريخ: fmtDate(r.date), الطرف: r.party, المبلغ: Number(r.amount), الحالة: REQ_ST[r.status] || DOC_ST[r.status] || r.status })), "أرشيف-المستندات")}>⬇ Excel</button></div>
@@ -753,8 +763,10 @@ function HistoryModal({ role, p, onClose }: { role: "DONOR" | "BENEFICIARY"; p: 
   const [pr, setPr] = useState<any>(null);
   const list = role === "DONOR" ? data?.receipts : data?.disbursements;
   const ok = (list || []).filter((x: any) => x.status === "POSTED");
+  const [certYear, setCertYear] = useState("");
+  const [cert, setCert] = useState<any>(null);
   return (
-    <Modal title={`${role === "DONOR" ? "سجل تبرعات" : "سجل مساعدات"}: ${p.name}`} wide onClose={onClose} footer={<><button className="btn" onClick={() => window.print()}>🖨 طباعة الكشف</button><button className="btn" onClick={onClose}>إغلاق</button></>}>
+    <Modal title={`${role === "DONOR" ? "سجل تبرعات" : "سجل مساعدات"}: ${p.name}`} wide onClose={onClose} footer={<>{role === "DONOR" && data && <><select className="input" style={{ width: 150 }} value={certYear} onChange={(e) => setCertYear(e.target.value)}><option value="">كل السنوات</option>{data.byYear.map((y: any) => <option key={y.year} value={y.year}>{y.year}</option>)}</select><button className="btn primary" onClick={() => { const list = ok.filter((x: any) => !certYear || String(x.date).startsWith(certYear)); const amt = list.reduce((a: number, x: any) => a + Number(x.amount), 0); setCert(donorCertData(p.name, amt, certYear ? `عام ${certYear}م` : list.length ? `من ${fmtDate(list[list.length - 1].date)} إلى ${fmtDate(list[0].date)}` : "")); }}>🎖 شهادة شكر وتقدير</button></>}<button className="btn" onClick={() => window.print()}>🖨 طباعة الكشف</button><button className="btn" onClick={onClose}>إغلاق</button></>}>
       {!data ? <Loading /> : <div className="print-doc stmt">
         <div className="head"><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo ? `ترخيص رقم ${settings.licenseNo}` : ""}</div></div><div style={{ textAlign: "left" }}><h3>{role === "DONOR" ? "كشف تبرعات" : "كشف مساعدات"}</h3><div>{p.name} — {p.code}</div><div className="small">تاريخ الطباعة {today()}</div></div></div>
         {role === "DONOR" && data.byYear.length > 0 && <div className="row mb">{data.byYear.map((y: any) => <div key={y.year} className="badge teal" style={{ fontSize: 13 }}>{y.year}: {money(y.total)} ({y.count})</div>)}</div>}
@@ -763,6 +775,7 @@ function HistoryModal({ role, p, onClose }: { role: "DONOR" | "BENEFICIARY"; p: 
           <tfoot><tr><td colSpan={5}>الإجمالي ({ok.length} سند) — {words(ok.reduce((a: number, x: any) => a + Number(x.amount), 0))}</td><td className="num"><Money v={ok.reduce((a: number, x: any) => a + Number(x.amount), 0)} /></td><td colSpan={2} /></tr></tfoot></table>
         {role === "DONOR" && <p className="mt">تتقدم {settings?.associationName} بالشكر والتقدير على دعمكم المتواصل، سائلين الله أن يجعله في موازين حسناتكم.</p>}
       </div>}
+      {cert && <PrintModal tplKey="donorCert" data={cert} settings={settings} onClose={() => setCert(null)} />}
       {pr && <PrintModal tplKey={role === "DONOR" ? "receipt" : pr.kind === "CASH" ? "cash" : "voucher"} choices={role === "DONOR" ? ["receipt", "ack"] : ["cash", "voucher", "cheque"]} data={role === "DONOR" ? fromReceipt({ ...pr, payerName: pr.payerName }) : fromDisb(pr)} settings={settings} onClose={() => setPr(null)} />}
     </Modal>
   );

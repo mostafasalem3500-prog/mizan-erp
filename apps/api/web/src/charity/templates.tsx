@@ -5,12 +5,12 @@ import { fmtDate, money, Modal } from "../lib";
 
 export type Field = { k: string; label: string; span?: 1 | 2 | 3; kind?: "amount" | "words" | "date" | "para" | "ltr" | "money" };
 export type Col = { k: string; label: string; w?: string; n?: boolean };
-export type Section = { id: string; title: string; fields?: Field[]; checks?: { k: string; options: string[]; multi?: boolean; label?: string }[]; text?: string; sign?: boolean; thumb?: boolean; noteLines?: number; table?: { k: string; cols: Col[]; rows: number }; after?: boolean };
-export type Tpl = { key: string; code: string; title: string; subtitle?: string; sections: Section[]; signatures: string[]; note: string; seal?: boolean; pageBreak?: string };
+export type Section = { id: string; title: string; fields?: Field[]; checks?: { k: string; options: string[]; multi?: boolean; label?: string }[]; text?: string; big?: boolean; sign?: boolean; thumb?: boolean; noteLines?: number; table?: { k: string; cols: Col[]; rows: number }; after?: boolean };
+export type Tpl = { key: string; code: string; title: string; subtitle?: string; sections: Section[]; signatures: string[]; note: string; seal?: boolean; pageBreak?: string; letter?: boolean };
 
 export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة الأهلية";
 export const DEFAULT_LICENSE = "1000888600";
-export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة" };
+export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة", storekeeper: "أمين المستودع", chairman: "رئيس مجلس الإدارة" };
 
 const amount = (k = "amount"): Field[] => [{ k, label: "المبلغ رقماً (ريال)", kind: "amount" }, { k: k + "Words", label: "المبلغ كتابةً", span: 2, kind: "words" }];
 
@@ -188,6 +188,55 @@ export const TEMPLATES: Tpl[] = [
     note: "تنبيه تنظيمي: الأصل في التطوع أنه عمل دون مقابل مالي. إذا كان المبلغ بدل مصروفات فعلية أو تعويضًا معتمدًا أو مكافأة مصرحًا بها، فيجب توضيح طبيعته والغرض منه وتوثيق أساس الصرف قبل توقيع الإقرار.",
     seal: true,
   },
+  {
+    key: "inkindIn", code: "FIN-013", title: "سند استلام تبرع عيني", subtitle: "إثبات استلام تبرعات عينية وقيدها بقيمتها التقديرية",
+    sections: [
+      { id: "info", title: "", fields: [{ k: "number", label: "رقم السند", kind: "ltr" }, { k: "date", label: "التاريخ", kind: "date" }, { k: "journalNo", label: "رقم القيد المالي", kind: "ltr" }] },
+      { id: "donor", title: "أولًا: بيانات المتبرع", fields: [{ k: "party", label: "اسم المتبرع / الجهة", span: 2 }, { k: "idNo", label: "الهوية / السجل التجاري", kind: "ltr" }, { k: "phone", label: "رقم التواصل", kind: "ltr" }, { k: "project", label: "المشروع / البرنامج المخصص له", span: 2 }] },
+      { id: "items", title: "ثانيًا: بيان الأصناف المستلمة", table: { k: "lines", rows: 8, cols: [{ k: "#", label: "م", w: "5%" }, { k: "name", label: "الصنف", w: "33%" }, { k: "unit", label: "الوحدة", w: "11%" }, { k: "qty", label: "الكمية", w: "11%", n: true }, { k: "unitValue", label: "القيمة التقديرية للوحدة", w: "18%", n: true }, { k: "value", label: "القيمة الإجمالية", w: "22%", n: true }] }, fields: [{ k: "amount", label: "إجمالي القيمة التقديرية (ريال)", kind: "amount" }, { k: "amountWords", label: "كتابةً", span: 2, kind: "words" }] },
+      { id: "cond", title: "حالة الأصناف", checks: [{ k: "condition", options: ["جديدة", "مستعملة بحالة جيدة", "تحتاج فرز / صيانة"] }], fields: [{ k: "notes", label: "ملاحظات", span: 3 }] },
+      { id: "decl", title: "ثالثًا: الإقرار", text: "تقر {association} باستلام الأصناف الموضحة أعلاه تبرعًا عينيًا، وقد تم فحصها وإدخالها إلى مستودع الجمعية وقيدها بقيمتها التقديرية العادلة، وتتعهد الجمعية بتوجيهها لمستحقيها وفق أغراضها وأنظمتها المعتمدة." },
+    ],
+    signatures: ["storekeeper", "finance", "authority"],
+    note: "تُقدَّر قيمة التبرعات العينية بالقيمة السوقية العادلة وقت الاستلام، ويُحفظ السند مع ما يؤيد التقدير عند الاقتضاء.",
+    seal: true,
+  },
+  {
+    key: "inkindOut", code: "FIN-014", title: "محضر صرف مساعدات عينية", subtitle: "توزيع مساعدات عينية من مستودع الجمعية على المستفيدين",
+    sections: [
+      { id: "info", title: "", fields: [{ k: "number", label: "رقم المحضر", kind: "ltr" }, { k: "date", label: "التاريخ", kind: "date" }, { k: "project", label: "المشروع / البرنامج" }] },
+      { id: "benef", title: "أولًا: بيانات المستفيد", fields: [{ k: "party", label: "اسم المستفيد / رب الأسرة", span: 2 }, { k: "idNo", label: "رقم الهوية", kind: "ltr" }, { k: "phone", label: "رقم الجوال", kind: "ltr" }, { k: "familySize", label: "عدد أفراد الأسرة" }, { k: "category", label: "فئة المستفيد" }] },
+      { id: "items", title: "ثانيًا: بيان المساعدات المصروفة", table: { k: "lines", rows: 8, cols: [{ k: "#", label: "م", w: "6%" }, { k: "name", label: "الصنف", w: "44%" }, { k: "unit", label: "الوحدة", w: "15%" }, { k: "qty", label: "الكمية", w: "15%", n: true }, { k: "notes", label: "ملاحظات", w: "20%" }] } },
+      { id: "decl", title: "ثالثًا: إقرار المستفيد بالاستلام", text: "أقر أنا الموقع أدناه بأنني استلمت من {association} المساعدات العينية الموضحة أعلاه كاملة وبحالة سليمة، وأتعهد باستخدامها للغرض الذي صُرفت من أجله.", sign: true, thumb: true },
+    ],
+    signatures: ["storekeeper", "programLead", "authority"],
+    note: "يُرفق بالمحضر ما يثبت أهلية المستفيد (دراسة الحالة) وصورة الهوية عند الاقتضاء وبما يتوافق مع ضوابط حماية البيانات.",
+    seal: true,
+  },
+  {
+    key: "donorCert", code: "CRT-01", title: "شهادة شكر وتقدير", letter: true,
+    sections: [
+      { id: "a", title: "", text: "تتقدم {association} بخالص الشكر وعظيم الامتنان إلى" },
+      { id: "b", title: "", big: true, text: "{donor}" },
+      { id: "c", title: "", text: "على عطائكم الكريم ودعمكم المتواصل لبرامج الجمعية ومشاريعها، حيث بلغت مساهماتكم مبلغًا وقدره {amountFmt} ريال ({words}) خلال الفترة {period}، والتي كان لها أطيب الأثر في خدمة المستفيدين وتحقيق رسالة الجمعية." },
+      { id: "d", title: "", text: "سائلين المولى عز وجل أن يبارك لكم في أموالكم، وأن يجزيكم خير الجزاء، وأن يجعل ذلك في موازين حسناتكم." },
+    ],
+    signatures: ["chairman"],
+    note: "",
+    seal: true,
+  },
+  {
+    key: "volunteerCert", code: "CRT-02", title: "شهادة تطوع", letter: true,
+    sections: [
+      { id: "a", title: "", text: "تشهد {association} بأن المتطوع / المتطوعة" },
+      { id: "b", title: "", big: true, text: "{name}" },
+      { id: "c", title: "", text: "رقم الهوية ({idNo}) قد شارك في الأعمال التطوعية للجمعية بإجمالي ({hours}) ساعة تطوعية خلال الفترة {period}، في: {programs}." },
+      { id: "d", title: "", text: "وقد أبدى روحًا عالية من المسؤولية والعطاء والتعاون، ومُنح هذه الشهادة تقديرًا لجهوده، متمنين له دوام التوفيق والسداد." },
+    ],
+    signatures: ["programLead", "chairman"],
+    note: "",
+    seal: true,
+  },
 ];
 export const TPL = Object.fromEntries(TEMPLATES.map((t) => [t.key, t])) as Record<string, Tpl>;
 
@@ -232,7 +281,15 @@ export const fromForm = (f: any) => {
 };
 export const fromRequest = (r: any) => ({ number: r.number, date: fmtDate(r.date), requester: r.requester, department: r.department, beneficiary: r.beneficiaryName, idNo: r.beneficiaryIdNo, purpose: r.purpose, project: r.projectName, budgetLine: r.budgetLine || r.expenseAccountName, method: MTH_AR[r.method], amount: r.amount, justification: r.justification, attachments: r.attachments || [], review: Object.entries(r.review || {}).filter(([, v]) => v).map(([k]) => k), decision: r.status === "APPROVED" || r.status === "PAID" ? "موافق" : r.status === "REJECTED" ? "غير موافق" : "", decisionNote: r.decisionNote });
 
+export const fromInkind = (k: any, p?: any) => ({ number: k.number, date: fmtDate(k.date), journalNo: k.journalNumber, party: k.partyName, idNo: p?.idNumber || p?.crNumber, phone: p?.phone, familySize: p?.beneficiaryInfo?.familySize, category: p?.beneficiaryInfo?.category, project: k.projectName, lines: (k.lines || []).map((l: any) => ({ ...l, unitValue: money(l.unitValue), value: money(l.value) })), amount: k.total, notes: k.notes, signName: k.partyName });
+const iso = (x: string) => String(x || "").replace(/(\d{4}-\d{2}-\d{2})/g, "\u2066$1\u2069");
+export const donorCertData = (donor: string, amount: number, period: string) => ({ donor, amountFmt: "\u2066" + money(amount) + "\u2069", words: amount ? amountToArabicWords(amount).replace(/^فقط\s*/, "").replace(/\s*لا غير$/, "") : "", period: iso(period) });
+export const volunteerCertData = (v: any, period: string, programs: string) => ({ name: v.name, idNo: "\u2066" + (v.idNo || "—") + "\u2069", hours: Number(v.hours || 0).toLocaleString("en-US"), period: iso(period), programs: programs || "برامج الجمعية ومبادراتها" });
 export const SAMPLE: Record<string, any> = {
+  inkindIn: { number: "INK-2026-00012", date: "2026-10-14", journalNo: "JV-2026-00510", party: "مؤسسة الخير التجارية", idNo: "1010404040", phone: "0112223333", project: "مشروع الشتاء الدافئ", lines: [{ name: "بطانية شتوية", unit: "حبة", qty: 100, unitValue: "45.00", value: "4,500.00" }, { name: "سلة غذائية", unit: "سلة", qty: 30, unitValue: "150.00", value: "4,500.00" }], amount: 9000, condition: "جديدة" },
+  inkindOut: { number: "IKD-2026-00031", date: "2026-10-15", project: "مشروع الشتاء الدافئ", party: "سالم عبدالله", idNo: "1023456789", phone: "0550001111", familySize: 6, category: "أسر محتاجة", lines: [{ name: "بطانية شتوية", unit: "حبة", qty: 6 }, { name: "سلة غذائية", unit: "سلة", qty: 1 }], signName: "سالم عبدالله" },
+  donorCert: { donor: "شركة داعمة للخير", amountFmt: "125,000.00", words: "مائة وخمسة وعشرون ألف ريال", period: "عام 2026م" },
+  volunteerCert: { name: "سعد علي محمد القحطاني", idNo: "1087654321", hours: "64", period: "من 2026-03-01 إلى 2026-10-14", programs: "مبادرة إفطار صائم، ومشروع السلة الغذائية" },
   request: { number: "FRQ-2026-00012", date: "2026-10-14", requester: "منسق البرامج", department: "إدارة البرامج", beneficiary: "أسرة مستفيدة (ملف 245)", idNo: "1012345678", purpose: "شراء سلال غذائية لشهر أكتوبر", project: "مشروع السلة الغذائية", budgetLine: "مساعدات عينية", method: "تحويل بنكي", amount: 4500, justification: "حسب دراسة الحالة المعتمدة واحتياج الأسر المسجلة.", attachments: ["عرض سعر", "دراسة حالة"] },
   cash: { number: "DSB-2026-00031", date: "2026-10-14", requestNo: "FRQ-2026-00012", beneficiary: "محمد عبدالله", idNo: "1098765432", phone: "0550000000", capacity: "متطوع", amount: 300, reason: "مكافأة مشاركة في توزيع السلال", project: "مشروع السلة الغذائية", budgetLine: "مكافآت المتطوعين", docs: ["طلب صرف معتمد", "كشف حضور / تكليف"] },
   voucher: { number: "DSB-2026-00032", date: "2026-10-14", requestNo: "FRQ-2026-00012", beneficiary: "مؤسسة التموين المتحدة", idNo: "1010101010", department: "إدارة البرامج", project: "مشروع السلة الغذائية", amount: 4500, reason: "قيمة سلال غذائية", method: "تحويل بنكي", bank: "مصرف الراجحي", holder: "مؤسسة التموين المتحدة", iban: "SA0380000000608010167519", ref: "TRX-88231", execDate: "2026-10-14", docs: ["طلب صرف معتمد", "فاتورة"] },
@@ -267,7 +324,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
   };
   const norm = (x: any) => String(x ?? "").replace(/[ًٌٍ]/g, "").replace(/ وفق .*$/, "").replace(/ بنكي$/, "").trim().replace(/ا$/, "").replace(/ي$/, "");
   const isOn = (k: string, o: string) => { const v = d[k]; return Array.isArray(v) ? v.some((x) => x === o || norm(x) === norm(o)) : v !== undefined && v !== null && v !== "" && (v === o || norm(v) === norm(o)); };
-  const fill = (txt: string) => txt.replace(/\{association\}/g, name || "الجمعية");
+  const fill = (txt: string) => txt.replace(/\{(\w+)\}/g, (_m, k) => (k === "association" ? name || "الجمعية" : d[k] !== undefined && d[k] !== null && d[k] !== "" ? String(d[k]) : t.letter ? "........................" : ""));
   const signName = d.signName ?? d.requester ?? d.holder ?? d.beneficiary ?? "";
   const table = (tb: NonNullable<Section["table"]>) => {
     const items: any[] = Array.isArray(d[tb.k]) ? d[tb.k] : [];
@@ -291,9 +348,9 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
   const bi = t.pageBreak ? t.sections.findIndex((x) => x.id === t.pageBreak) : -1;
   const parts = bi > 0 ? [t.sections.slice(0, bi), t.sections.slice(bi)] : [t.sections];
   const sec = (s: Section) => (
-    <section key={s.id} className="a4-sec">
+    <section key={s.id} className={"a4-sec" + (t.letter ? " plain" : "")}>
       {s.title && <h4>{s.title}</h4>}
-      {s.text && <p className="a4-text">{fill(s.text)}</p>}
+      {s.text && <p className={"a4-text" + (s.big ? " big" : "")}>{fill(s.text)}</p>}
       {s.checks?.map((c) => (
         <div key={c.k} className="a4-checks">{c.label && <label>{c.label}:</label>}{c.options.map((o) => <span key={o} className={"a4-cb" + (isOn(c.k, o) ? " on" : "")}><i>{isOn(c.k, o) ? "✓" : ""}</i>{o}</span>)}</div>
       ))}
@@ -305,7 +362,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
   const page = (copy: string | undefined, secs: Section[], pi: number, pn: number) => {
     const last = pi === pn - 1;
     return (
-      <div key={(copy || "") + pi} className={"a4" + (pi > 0 ? " cont" : "") + (t.onePage ? " one" : "")} style={{ ["--a4c" as any]: color, ["--a4a" as any]: accent, fontSize: `${12.5 * t.scale}px` }}>
+      <div key={(copy || "") + pi} className={"a4" + (pi > 0 ? " cont" : "") + (t.onePage ? " one" : "") + (t.letter ? " letter" : "")} style={{ ["--a4c" as any]: color, ["--a4a" as any]: accent, fontSize: `${12.5 * t.scale}px` }}>
         {pi === 0 ? (
           <header className="a4-h">
             <div className="a4-org">

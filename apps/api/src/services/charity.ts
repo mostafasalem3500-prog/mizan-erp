@@ -21,16 +21,21 @@ const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE" | "ASSET"
   ["4305", "الزكاة المستلمة", "Zakat Received", "REVENUE", "OTHER_INCOME", "DON_ZAKAT"],
   ["4306", "تبرعات مقيدة لمشاريع", "Restricted Project Donations", "REVENUE", "OTHER_INCOME", "DON_RESTRICTED"],
   ["4307", "اشتراكات الأعضاء", "Membership Fees", "REVENUE", "OTHER_INCOME", "DON_MEMBERSHIP"],
+  ["4308", "تبرعات عينية", "In-kind Donations", "REVENUE", "OTHER_INCOME", "DON_INKIND"],
+  ["4309", "إيرادات الكفالات", "Sponsorship Income", "REVENUE", "OTHER_INCOME", "DON_SPONSOR"],
+  ["110391", "مخزون التبرعات العينية", "In-kind Donations Stock", "ASSET", "CURRENT_ASSET", "CH_INKIND_STOCK"],
   ["55", "مصروفات البرامج والمساعدات", "Program Services & Aid", "EXPENSE", "EXPENSE", null],
   ["5501", "مساعدات نقدية للمستفيدين", "Cash Aid to Beneficiaries", "EXPENSE", "EXPENSE", "CH_AID"],
   ["5502", "مصروفات البرامج والمشاريع", "Program & Project Expenses", "EXPENSE", "EXPENSE", "CH_PROGRAMS"],
   ["5503", "مكافآت المتطوعين", "Volunteer Rewards", "EXPENSE", "EXPENSE", "CH_VOLUNTEERS"],
   ["5504", "مصروفات الأنشطة والفعاليات", "Activities & Events", "EXPENSE", "EXPENSE", "CH_EVENTS"],
   ["5505", "مساعدات عينية مشتراة", "In-kind Aid Purchased", "EXPENSE", "EXPENSE", "CH_INKIND"],
+  ["5506", "مساعدات عينية موزعة من التبرعات", "Distributed In-kind Aid", "EXPENSE", "EXPENSE", "CH_INKIND_DIST"],
+  ["5507", "كفالات مصروفة للمستفيدين", "Sponsorships Paid", "EXPENSE", "EXPENSE", "CH_SPONSOR_PAID"],
 ];
 
-export const SOURCE_AR: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", REFUND: "استرداد مبلغ", OTHER: "أخرى" };
-const SOURCE_KEY: Record<string, string> = { CASH_DONATION: "DON_GENERAL", SUPPORT: "DON_GRANTS", FOUNDING: "DON_FOUNDING", PROGRAM: "DON_PROGRAMS", ZAKAT: "DON_ZAKAT", MEMBERSHIP: "DON_MEMBERSHIP", REFUND: "OTHER_INCOME", OTHER: "OTHER_INCOME" };
+export const SOURCE_AR: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", REFUND: "استرداد مبلغ", OTHER: "أخرى" };
+const SOURCE_KEY: Record<string, string> = { CASH_DONATION: "DON_GENERAL", SUPPORT: "DON_GRANTS", FOUNDING: "DON_FOUNDING", PROGRAM: "DON_PROGRAMS", ZAKAT: "DON_ZAKAT", MEMBERSHIP: "DON_MEMBERSHIP", SPONSORSHIP: "DON_SPONSOR", REFUND: "OTHER_INCOME", OTHER: "OTHER_INCOME" };
 const CAPACITY_KEY: Record<string, string> = { BENEFICIARY: "CH_AID", VOLUNTEER: "CH_VOLUNTEERS", EMPLOYEE: "CH_PROGRAMS", SUPPLIER: "CH_PROGRAMS", OTHER: "CH_PROGRAMS" };
 const METHODS = ["CASH", "TRANSFER", "CHEQUE", "CARD"];
 const PAYER_TYPES = ["INDIVIDUAL", "ENTITY", "COMPANY", "OTHER"];
@@ -243,6 +248,7 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
     payerType: pick(b.payerType, PAYER_TYPES, p?.donorType || "INDIVIDUAL"), source, purpose: b.purpose || null, projectId: pr?.id || null, restricted, amount, method,
     cashAccountId: cash.id, revenueAccountId: rev.id, bankName: b.bankName || null, refNo: b.refNo || null, depositDate: isDate(b.depositDate) ? b.depositDate : null,
     notes: b.notes || null, isDemo: !!b.isDemo, createdBy: user,
+    sponsorshipId: b.sponsorshipId || null, periodsCount: b.periodsCount || null, periodLabel: b.periodLabel || null,
   });
   const je = await post(t, companyId, {
     date: d, type: "DONATION", sourceType: "CHARITY_RECEIPT", sourceId: row.id, reference: number, memo, createdBy: user, isDemo: !!b.isDemo,
@@ -572,6 +578,7 @@ export async function archive(t: Db, companyId: string, q: any) {
   if (want("EXPENSE")) parts.push(`SELECT 'EXPENSE', e.id, e.number, e.date, COALESCE(e.payee,'—'), e.total, e.status, NULL, NULL, e.created_at FROM expenses e WHERE e.company_id=$1${dateW("e.date")}`);
   if (want("CUSTODY")) parts.push(`SELECT 'CUSTODY', c.id, c.number, c.date, c.holder_name, COALESCE(c.disbursed_amount, c.amount), c.status, c.method, NULL, c.created_at FROM charity_custody c WHERE c.company_id=$1${dateW("c.date")}`);
   if (want("FORM")) parts.push(`SELECT 'FORM', f.id, f.number, f.date, f.party, f.amount, f.status, f.kind, NULL, f.created_at FROM charity_forms f WHERE f.company_id=$1${dateW("f.date")}`);
+  if (want("INKIND")) parts.push(`SELECT 'INKIND', k.id, k.number, k.date, k.party_name, k.total, k.status, k.kind, NULL, k.created_at FROM charity_inkind_docs k WHERE k.company_id=$1${dateW("k.date")}`);
   if (!parts.length) return [];
   let where = "";
   if (q.q) { params.push(`%${String(q.q).trim()}%`); where += ` WHERE (x.number ILIKE $${params.length} OR x.party ILIKE $${params.length})`; }
@@ -606,7 +613,13 @@ export async function dashboard(t: Db, companyId: string, q: any) {
        (SELECT COUNT(*) FROM charity_custody WHERE company_id=$1 AND status IN ('REQUESTED','REVIEWED'))::int custody_pending,
        (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='PURCHASE' AND status IN ('SUBMITTED','REVIEWED'))::int purchases_pending,
        (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='PURCHASE' AND status IN ('APPROVED','ORDERED'))::int purchases_open,
-       (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='REFUND' AND status IN ('SUBMITTED','REVIEWED','APPROVED'))::int refunds_pending`, P);
+       (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='REFUND' AND status IN ('SUBMITTED','REVIEWED','APPROVED'))::int refunds_pending,
+       (SELECT COUNT(*) FROM charity_sponsorships WHERE company_id=$1 AND status='ACTIVE')::int sponsorships_active,
+       COALESCE((SELECT SUM(amount/frequency) FROM charity_sponsorships WHERE company_id=$1 AND status='ACTIVE'),0) sponsorships_monthly,
+       COALESCE((SELECT SUM(value) FROM charity_inkind_items WHERE company_id=$1),0) inkind_value,
+       COALESCE((SELECT SUM(total) FROM charity_inkind_docs WHERE company_id=$1 AND kind='OUT' AND status='POSTED' AND date BETWEEN $2 AND $3),0) inkind_distributed,
+       (SELECT COUNT(*) FROM charity_volunteers WHERE company_id=$1 AND status='ACTIVE')::int volunteers,
+       COALESCE((SELECT SUM(hours) FROM charity_volunteer_hours WHERE company_id=$1 AND date BETWEEN $2 AND $3),0) volunteer_hours`, P);
   const cash = await t.rows(
     `SELECT a.id, a.code, a.name_ar, COALESCE(SUM(l.debit-l.credit),0) balance FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id
        LEFT JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'
