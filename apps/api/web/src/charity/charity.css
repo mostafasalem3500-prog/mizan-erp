@@ -102,3 +102,31 @@
   body.printing-a4 #a4-print-root .a4 { box-shadow: none !important; width: 210mm; min-height: 296mm; margin: 0; break-after: page; page-break-after: always; }
   body.printing-a4 #a4-print-root .a4:last-child { break-after: auto; page-break-after: auto; }
 }
+.a4-sigs { flex-wrap: nowrap; }
+.a4-sig { flex: 1 1 0; min-width: 0; }
+.a4-seal { flex: 0 0 6.6em !important; height: 6.6em !important; }
+.a4-sig .ln { margin-top: 1.1em !important; }
+.a4-tbl { width: 100%; border-collapse: collapse; font-size: .9em; margin: 2px 0 6px; }
+.a4-tbl th, .a4-tbl td { border: 1px solid #b9c6bf; padding: 2px 5px; height: 1.85em; text-align: start; }
+.a4-tbl th { background: color-mix(in srgb, var(--a4c) 9%, #fff); color: #222; font-weight: 700; font-size: .92em; }
+.a4-tbl td.n { text-align: center; direction: ltr; }
+/* scale-friendly spacing (em) so long forms can be fitted on one A4 sheet */
+.a4 .a4-h { padding-bottom: .75em; margin-bottom: .75em; gap: 1em; }
+.a4 .a4-org img { width: 5.6em; height: 5.6em; }
+.a4 .a4-logo-ph { width: 4.8em; height: 4.8em; }
+.a4 .a4-sec { padding: .45em .8em .5em; margin-bottom: .45em; }
+.a4 .a4-sec h4 { margin: -.45em -.8em .4em; padding: .3em .8em; }
+.a4 .a4-grid { gap: .3em 1.1em; }
+.a4 .a4-checks { gap: .25em 1.1em; margin: .15em 0 .4em; }
+.a4 .a4-sign-inline { margin-top: .45em; gap: 1em; }
+.a4 .a4-sigs { gap: .7em; }
+.a4 .a4-sig { padding: .45em .6em; }
+.a4 .a4-note { margin-top: .6em; padding: .4em .7em; }
+.a4 .a4-foot { margin-top: .6em; padding-top: .4em; }
+.a4 .a4-f-sign { margin-top: .45em; }
+.a4 .a4-cb i { width: 1.1em; height: 1.1em; font-size: .85em; }
+.a4-h.mini { display: flex; align-items: center; gap: 1em; font-size: .9em; padding-bottom: .5em; }
+.a4-h.mini b { color: var(--a4c); }
+.a4-h.mini .a4-meta { margin: 0 auto 0 0; }
+.a4-cont { text-align: left; color: #777; font-size: .85em; margin-top: .4em; }
+.a4 .a4-body { flex: 1; }

@@ -25,7 +25,7 @@ export function TemplatesCenter() {
     <div className="ch-tpl">
       <div className="list">
         <div className="small muted" style={{ marginBottom: 8 }}>القوالب الجاهزة (A4)</div>
-        {TEMPLATES.map((t) => { const o = all[t.key] || {}; return <button key={t.key} className={key === t.key ? "on" : ""} onClick={() => setKey(t.key)}><b>{o.title || t.title}</b><small>{o.code ?? t.code} · {t.sections.length} أقسام</small></button>; })}
+        {TEMPLATES.map((t) => { const o = all[t.key] || {}; return <button key={t.key} className={key === t.key ? "on" : ""} onClick={() => setKey(t.key)}><b>{o.title || t.title}</b><small>{o.code ?? t.code} · {t.sections.length} أقسام{t.pageBreak && !o.onePage ? " · صفحتان" : ""}</small></button>; })}
         <div className="card card-b small muted mt">كل قالب يُطبع فارغاً للتعبئة اليدوية، أو معبأً تلقائياً من السند عند الضغط على «طباعة» في شاشات القبض والصرف والطلبات. الشعار واسم الجمعية ورقم الترخيص وأسماء المعتمدين تُضبط من إعدادات الجمعية.</div>
       </div>
 
@@ -40,7 +40,7 @@ export function TemplatesCenter() {
         {base.sections.filter((s) => s.text !== undefined).map((s) => <Field key={s.id} label={`نص: ${s.title || "الإثبات"}`}><textarea className="input" rows={3} disabled={!write} value={ov.texts?.[s.id] ?? s.text} onChange={(e) => setOv({ texts: { ...(ov.texts || {}), [s.id]: e.target.value } })} /></Field>)}
         <Field label="حقول إضافية (حقل في كل سطر)" hint="تظهر في قسم «بيانات إضافية»"><textarea className="input" rows={2} disabled={!write} value={(ov.extra || []).join("\n")} onChange={(e) => setOv({ extra: e.target.value.split("\n") })} /></Field>
         <Field label="ملاحظة أسفل النموذج"><textarea className="input" rows={2} disabled={!write} value={ov.note ?? base.note} onChange={(e) => setOv({ note: e.target.value })} /></Field>
-        <div className="row"><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={ov.seal ?? base.seal ?? true} onChange={(e) => setOv({ seal: e.target.checked })} />مكان الختم</label><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={!!ov.copy2} onChange={(e) => setOv({ copy2: e.target.checked })} />طباعة نسختين (أصل + نسخة)</label></div>
+        <div className="row"><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={ov.seal ?? base.seal ?? true} onChange={(e) => setOv({ seal: e.target.checked })} />مكان الختم</label><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={!!ov.copy2} onChange={(e) => setOv({ copy2: e.target.checked })} />طباعة نسختين (أصل + نسخة)</label>{base.pageBreak && <label className="row" style={{ gap: 6 }} title="النموذج طويل ويُطبع افتراضياً على صفحتين بخط مقروء"><input type="checkbox" disabled={!write} checked={!!ov.onePage} onChange={(e) => setOv({ onePage: e.target.checked })} />ضغطه في صفحة واحدة</label>}</div>
         <h4 className="mt">الهوية البصرية (لكل القوالب)</h4>
         <div className="grid c2">
           <Field label="اللون الرئيسي"><Input type="color" disabled={!write} value={theme.color || "#1f6f4a"} onChange={(e) => { setTheme({ ...theme, color: e.target.value }); setDirty(true); }} /></Field>

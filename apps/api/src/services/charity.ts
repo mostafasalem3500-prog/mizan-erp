@@ -11,7 +11,8 @@ import { bad, conflict, notFound, r2, D, num, isDate, today } from "../lib/core"
 import { post, reverse, nextNumber } from "../accounting/engine";
 
 // ─── chart of accounts additions (idempotent; created on first use) ─────────
-const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE", string, string | null][] = [
+const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE" | "ASSET", string, string | null][] = [
+  ["110390", "العهد المالية المؤقتة", "Temporary Cash Custody", "ASSET", "CURRENT_ASSET", "CH_CUSTODY"],
   ["43", "إيرادات الجمعية (التبرعات والمنح)", "Association Revenue (Donations & Grants)", "REVENUE", "OTHER_INCOME", null],
   ["4301", "تبرعات نقدية عامة", "General Cash Donations", "REVENUE", "OTHER_INCOME", "DON_GENERAL"],
   ["4302", "دعم مالي ومنح", "Financial Support & Grants", "REVENUE", "OTHER_INCOME", "DON_GRANTS"],
@@ -36,16 +37,16 @@ const PAYER_TYPES = ["INDIVIDUAL", "ENTITY", "COMPANY", "OTHER"];
 const CAPACITIES = ["VOLUNTEER", "EMPLOYEE", "SUPPLIER", "BENEFICIARY", "OTHER"];
 
 export async function ensureCharity(t: Db, companyId: string) {
-  const have = await t.rows(`SELECT code, id FROM accounts WHERE company_id=$1 AND code = ANY($2)`, [companyId, ["4", "5", ...CHARITY_ACCOUNTS.map((a) => a[0])]]);
+  const have = await t.rows(`SELECT code, id FROM accounts WHERE company_id=$1 AND code = ANY($2)`, [companyId, ["4", "5", "1103", ...CHARITY_ACCOUNTS.map((a) => a[0])]]);
   const ids: Record<string, string> = Object.fromEntries(have.map((a: any) => [a.code, a.id]));
   if (CHARITY_ACCOUNTS.some(([code]) => !ids[code])) {
     for (const [code, nameAr, nameEn, type, subtype, key] of CHARITY_ACCOUNTS) {
       if (ids[code]) continue;
-      const parentCode = code.length === 2 ? code[0] : code.slice(0, 2);
+      const parentCode = code.length === 2 ? code[0] : code.slice(0, code.length - 2);
       if (!ids[parentCode]) continue;
       const keyTaken = key ? await t.maybe(`SELECT id FROM accounts WHERE company_id=$1 AND system_key=$2`, [companyId, key]) : null;
       const a = await t.insert("accounts", {
-        companyId, code, nameAr, nameEn, type, subtype, parentId: ids[parentCode], level: code.length === 2 ? 2 : 3,
+        companyId, code, nameAr, nameEn, type, subtype, parentId: ids[parentCode], level: code.length === 2 ? 2 : code.length === 4 ? 3 : 4,
         isGroup: code.length === 2, isSystem: !!key || code.length === 2, systemKey: keyTaken ? null : key, isCashBank: false,
       });
       ids[code] = a.id;
@@ -58,7 +59,7 @@ export async function ensureCharity(t: Db, companyId: string) {
   }
 }
 
-async function acct(t: Db, companyId: string, id: string | null | undefined, key: string | null, label: string, opts: { cash?: boolean; type?: string } = {}) {
+export async function acct(t: Db, companyId: string, id: string | null | undefined, key: string | null, label: string, opts: { cash?: boolean; type?: string } = {}) {
   let a: any = null;
   if (id) a = await t.maybe(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2`, [id, companyId]);
   else if (key) a = await t.maybe(`SELECT * FROM accounts WHERE system_key=$1 AND company_id=$2`, [key, companyId]);
@@ -69,7 +70,7 @@ async function acct(t: Db, companyId: string, id: string | null | undefined, key
   return a;
 }
 
-async function project(t: Db, companyId: string, id: any) {
+export async function project(t: Db, companyId: string, id: any) {
   if (!id) return null;
   return t.one(`SELECT * FROM charity_projects WHERE id=$1 AND company_id=$2`, [id, companyId], "المشروع / البرنامج غير موجود");
 }
@@ -311,6 +312,7 @@ export async function createDisbursement(t: Db, companyId: string, user: string,
     budgetLine: b.budgetLine || rq?.budgetLine || null, expenseAccountId: exp.id, payAccountId: pay.id, requestId: rq?.id || null, batchId: b.batchId || null,
     bankName: b.bankName || null, accountHolder: b.accountHolder || null, iban: b.iban ? String(b.iban).replace(/\s/g, "").toUpperCase() : null, refNo: b.refNo || null,
     execDate: isDate(b.execDate) ? b.execDate : null, docs: JSON.stringify(Array.isArray(b.docs) ? b.docs.slice(0, 20) : []), notes: b.notes || null, isDemo: !!b.isDemo, createdBy: user,
+    programName: b.programName || null, periodFrom: isDate(b.periodFrom) ? b.periodFrom : null, periodTo: isDate(b.periodTo) ? b.periodTo : null, sourceType: b.sourceType || null, sourceId: b.sourceId || null,
   });
   const je = await post(t, companyId, {
     date: d, type: "CHARITY_DISB", sourceType: "CHARITY_DISB", sourceId: row.id, reference: number, memo, createdBy: user, isDemo: !!b.isDemo,
@@ -327,6 +329,12 @@ export async function createDisbursement(t: Db, companyId: string, user: string,
 export async function cancelDisbursement(t: Db, companyId: string, user: string, id: string, reason?: string) {
   const r = await t.one(`SELECT * FROM charity_disbursements WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "السند غير موجود");
   if (r.status === "CANCELLED") throw bad("السند ملغى مسبقاً");
+  if (r.sourceType === "CUSTODY") {
+    const c = await t.maybe(`SELECT status, number FROM charity_custody WHERE id=$1`, [r.sourceId]);
+    if (c && c.status !== "DISBURSED") throw bad(`العهدة ${c.number} تمت تسويتها — لا يمكن إلغاء سند صرفها`);
+    if (c) await t.exec(`UPDATE charity_custody SET status='APPROVED', disbursed_amount=NULL, disbursed_date=NULL, disburse_journal_id=NULL WHERE id=$1`, [r.sourceId]);
+  }
+  if (r.sourceType === "REFUND") await t.exec(`UPDATE charity_forms SET status='APPROVED', disbursement_id=NULL WHERE id=$1`, [r.sourceId]);
   if (r.journalId) await reverse(t, companyId, r.journalId, today() < String(r.date).slice(0, 10) ? r.date : today(), `إلغاء سند صرف ${r.number}${reason ? " — " + reason : ""}`, user);
   await t.exec(`UPDATE charity_disbursements SET status='CANCELLED' WHERE id=$1`, [id]);
   if (r.requestId) await t.exec(`UPDATE charity_requests SET status='APPROVED', disbursement_id=NULL WHERE id=$1 AND disbursement_id=$2`, [r.requestId, id]);
@@ -559,6 +567,8 @@ export async function archive(t: Db, companyId: string, q: any) {
   if (want("REQUEST")) parts.push(`SELECT 'REQUEST', r.id, r.number, r.date, r.beneficiary_name, r.amount, r.status, r.method, NULL, r.created_at FROM charity_requests r WHERE r.company_id=$1${dateW("r.date")}`);
   if (want("PAYMENT")) parts.push(`SELECT 'PAYMENT', p.id, p.number, p.date, COALESCE(pt.name,'—'), p.amount, p.status, p.method, p.direction, p.created_at FROM payments p LEFT JOIN partners pt ON pt.id=p.partner_id WHERE p.company_id=$1${dateW("p.date")}`);
   if (want("EXPENSE")) parts.push(`SELECT 'EXPENSE', e.id, e.number, e.date, COALESCE(e.payee,'—'), e.total, e.status, NULL, NULL, e.created_at FROM expenses e WHERE e.company_id=$1${dateW("e.date")}`);
+  if (want("CUSTODY")) parts.push(`SELECT 'CUSTODY', c.id, c.number, c.date, c.holder_name, COALESCE(c.disbursed_amount, c.amount), c.status, c.method, NULL, c.created_at FROM charity_custody c WHERE c.company_id=$1${dateW("c.date")}`);
+  if (want("FORM")) parts.push(`SELECT 'FORM', f.id, f.number, f.date, f.party, f.amount, f.status, f.kind, NULL, f.created_at FROM charity_forms f WHERE f.company_id=$1${dateW("f.date")}`);
   if (!parts.length) return [];
   let where = "";
   if (q.q) { params.push(`%${String(q.q).trim()}%`); where += ` WHERE (x.number ILIKE $${params.length} OR x.party ILIKE $${params.length})`; }
@@ -586,7 +596,14 @@ export async function dashboard(t: Db, companyId: string, q: any) {
        (SELECT COUNT(*) FROM charity_requests WHERE company_id=$1 AND status IN ('SUBMITTED','REVIEWED'))::int pending_requests,
        COALESCE((SELECT SUM(amount) FROM charity_requests WHERE company_id=$1 AND status IN ('SUBMITTED','REVIEWED')),0) pending_amount,
        (SELECT COUNT(*) FROM charity_requests WHERE company_id=$1 AND status='APPROVED')::int approved_unpaid,
-       (SELECT COUNT(*) FROM charity_projects WHERE company_id=$1 AND status='ACTIVE')::int active_projects`, P);
+       (SELECT COUNT(*) FROM charity_projects WHERE company_id=$1 AND status='ACTIVE')::int active_projects,
+       COALESCE((SELECT SUM(disbursed_amount) FROM charity_custody WHERE company_id=$1 AND status='DISBURSED'),0) custody_open,
+       (SELECT COUNT(*) FROM charity_custody WHERE company_id=$1 AND status='DISBURSED')::int custody_count,
+       (SELECT COUNT(*) FROM charity_custody WHERE company_id=$1 AND status='DISBURSED' AND settle_due < CURRENT_DATE)::int custody_overdue,
+       (SELECT COUNT(*) FROM charity_custody WHERE company_id=$1 AND status IN ('REQUESTED','REVIEWED'))::int custody_pending,
+       (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='PURCHASE' AND status IN ('SUBMITTED','REVIEWED'))::int purchases_pending,
+       (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='PURCHASE' AND status IN ('APPROVED','ORDERED'))::int purchases_open,
+       (SELECT COUNT(*) FROM charity_forms WHERE company_id=$1 AND kind='REFUND' AND status IN ('SUBMITTED','REVIEWED','APPROVED'))::int refunds_pending`, P);
   const cash = await t.rows(
     `SELECT a.id, a.code, a.name_ar, COALESCE(SUM(l.debit-l.credit),0) balance FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id
        LEFT JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'

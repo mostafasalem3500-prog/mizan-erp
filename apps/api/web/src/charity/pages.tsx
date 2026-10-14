@@ -60,6 +60,8 @@ export function CharityDashboard() {
     { to: "/charity/expenses?new=1", ic: "💸", t: "سند صرف", s: "نقدي أو شيك أو تحويل" },
     { to: "/charity/requests?new=1", ic: "📋", t: "طلب صرف", s: "FIN-001" },
     { to: "/charity/batches", ic: "🧾", t: "مسير المصروفات", s: "صرف جماعي للمستفيدين" },
+    { to: "/charity/custody", ic: "💼", t: "العهد المالية", s: "طلب، صرف، تسوية" },
+    { to: "/charity/purchases", ic: "🛍", t: "طلب شراء", s: "ومحضر استلام" },
     { to: "/charity/daily", ic: "📥", t: "تحصيل اليوم", s: "إقفال الصندوق اليومي" },
     { to: "/charity/templates", ic: "🖨", t: "القوالب A4", s: "نماذج جاهزة للطباعة" },
   ];
@@ -82,6 +84,9 @@ export function CharityDashboard() {
           <Kpi label="المتبرعون" v={k.donors} money={false} icon="🤝" sub={<>مقبوضات الشهر <Money v={k.monthIn} /></>} />
           <Kpi label="المستفيدون (خُدموا في الفترة)" v={`${k.served} / ${k.beneficiaries}`} money={false} icon="👪" cls="success" />
           <Kpi label="طلبات صرف بانتظار القرار" v={k.pendingRequests} money={false} icon="📋" cls={k.pendingRequests ? "accent" : ""} sub={<><Money v={k.pendingAmount} /> · {k.approvedUnpaid} معتمد بانتظار الصرف</>} />
+          <Kpi label="العهد المالية القائمة" v={k.custodyOpen} icon="💼" cls={k.custodyOverdue ? "danger" : ""} sub={<>{k.custodyCount} عهدة{k.custodyOverdue ? ` · ${k.custodyOverdue} متأخرة التسوية` : ""}{k.custodyPending ? ` · ${k.custodyPending} طلب جديد` : ""}</>} />
+          <Kpi label="طلبات شراء بانتظار الاعتماد" v={k.purchasesPending} money={false} icon="🛍" cls={k.purchasesPending ? "accent" : ""} sub={`${k.purchasesOpen} معتمد بانتظار الاستلام`} />
+          <Kpi label="طلبات استرداد مفتوحة" v={k.refundsPending} money={false} icon="↩" cls={k.refundsPending ? "accent" : ""} />
           <Kpi label="المشاريع والبرامج النشطة" v={k.activeProjects} money={false} icon="🎯" cls="info" sub={<>موازنة المصروفات <Money v={data.budget.expense.budget} /> · المنفذ <Money v={data.budget.expense.actual} /></>} />
         </div>
         <div className="grid c2 mt">
@@ -268,7 +273,7 @@ export function DisbursementsPage() {
         </table></div>
       )}
       {add && <DisbModal init={add} onClose={(saved) => { setAdd(null); if (qs.get("new") || qs.get("request")) nav("/charity/expenses", { replace: true }); if (saved) { reload(); setPr(saved); } }} />}
-      {pr && <PrintModal tplKey={pr.kind === "CASH" ? "cash" : "voucher"} choices={pr.kind === "CASH" ? ["cash", "voucher"] : ["voucher", "cheque"]} data={fromDisb(pr)} settings={settings} onClose={() => setPr(null)} />}
+      {pr && <PrintModal tplKey={pr.capacity === "VOLUNTEER" ? "volunteer" : pr.kind === "CASH" ? "cash" : "voucher"} choices={[...(pr.kind === "CASH" ? ["cash", "voucher"] : ["voucher", "cheque"]), ...(pr.capacity === "VOLUNTEER" ? ["volunteer"] : [])]} data={fromDisb(pr)} settings={settings} onClose={() => setPr(null)} />}
     </div>
   );
 }
@@ -281,7 +286,7 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
   const [exp, setExp] = useState<any>(null);
   const [pay, setPay] = useState<any>(null);
   const [quick, setQuick] = useState(false);
-  const [f, setF] = useState<any>({ date: today(), kind: "CASH", capacity: "BENEFICIARY", beneficiaryName: "", beneficiaryIdNo: "", beneficiaryPhone: "", department: "", amount: "", reason: "", projectId: "", budgetLine: "", requestId: init?.requestId || "", bankName: "", accountHolder: "", iban: "", refNo: "", execDate: "", docs: [] as string[], notes: "" });
+  const [f, setF] = useState<any>({ date: today(), kind: "CASH", capacity: "BENEFICIARY", beneficiaryName: "", beneficiaryIdNo: "", beneficiaryPhone: "", department: "", amount: "", reason: "", projectId: "", budgetLine: "", requestId: init?.requestId || "", bankName: "", accountHolder: "", iban: "", refNo: "", execDate: "", docs: [] as string[], notes: "", programName: "", periodFrom: "", periodTo: "" });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e?.target ? e.target.value : e });
   const pickBenef = (b: any) => { setBenef(b); if (b) setF({ ...f, beneficiaryName: b.name, beneficiaryIdNo: b.idNumber || b.crNumber || "", beneficiaryPhone: b.phone || "", iban: b.beneficiaryInfo?.iban || f.iban, bankName: b.beneficiaryInfo?.bankName || f.bankName, accountHolder: b.name }); };
   const applyReq = (id: string, list = reqs.data) => {
@@ -305,6 +310,12 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
         <Field label="اسم المستلم / المستفيد"><Input value={f.beneficiaryName} onChange={set("beneficiaryName")} /></Field>
         <Field label="رقم الهوية / السجل"><Input value={f.beneficiaryIdNo} onChange={set("beneficiaryIdNo")} dir="ltr" /></Field>
         <Field label="الجوال"><Input value={f.beneficiaryPhone} onChange={set("beneficiaryPhone")} dir="ltr" /></Field>
+        {f.capacity === "VOLUNTEER" && <>
+          <Field label="البرنامج / المبادرة التطوعية"><Input value={f.programName} onChange={set("programName")} /></Field>
+          <Field label="الفترة التطوعية من"><Input type="date" value={f.periodFrom} onChange={set("periodFrom")} /></Field>
+          <Field label="إلى"><Input type="date" value={f.periodTo} onChange={set("periodTo")} /></Field>
+          <div className="alert warn small" style={{ gridColumn: "1 / -1", margin: 0 }}>الأصل في التطوع أنه دون مقابل؛ وضّح في السبب طبيعة المبلغ (بدل مصروفات فعلية / تعويض معتمد / مكافأة مصرح بها). يُطبع له «إقرار استلام مستحقات متطوع».</div>
+        </>}
         <Field label="المبلغ (ريال)"><NumInput value={f.amount} onChange={set("amount")} /></Field>
         <Field label="المبلغ كتابةً" span2><div className="input" style={{ background: "var(--surface-2)", minHeight: 36 }}>{words(f.amount)}</div></Field>
         <Field label="سبب الصرف" span2><Input value={f.reason} onChange={set("reason")} /></Field>
@@ -570,7 +581,8 @@ export function DailyPage() {
 }
 
 // ─── archive (أرشيف الفواتير والمستندات) ────────────────────────────────────
-const ARCH: Record<string, string> = { INVOICE: "فواتير وعروض أسعار", DONATION: "سندات قبض الجمعية", DISB: "سندات صرف الجمعية", REQUEST: "طلبات الصرف", PAYMENT: "سندات القبض والصرف العامة", EXPENSE: "المصروفات العامة" };
+const ARCH: Record<string, string> = { INVOICE: "فواتير وعروض أسعار", DONATION: "سندات قبض الجمعية", DISB: "سندات صرف الجمعية", REQUEST: "طلبات الصرف", CUSTODY: "العهد المالية", FORM: "طلبات الشراء والاستلام والاسترداد", PAYMENT: "سندات القبض والصرف العامة", EXPENSE: "المصروفات العامة" };
+const FORM_AR: Record<string, string> = { PURCHASE: "طلب شراء", RECEIVING: "محضر استلام", REFUND: "طلب استرداد" };
 const SUB: Record<string, string> = { INVOICE: "فاتورة", QUOTATION: "عرض سعر", ORDER: "أمر", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" };
 export function ArchivePage() {
   const nav = useNavigate();
@@ -588,8 +600,10 @@ export function ArchivePage() {
     if (r.t === "REQUEST") return nav(`/charity/requests?q=${encodeURIComponent(r.number)}`);
     if (r.t === "PAYMENT") return nav(`/${r.dir === "OUT" ? "vouchers" : "receipts"}?q=${encodeURIComponent(r.number)}`);
     if (r.t === "EXPENSE") return nav(`/expenses?q=${encodeURIComponent(r.number)}`);
+    if (r.t === "CUSTODY") return nav(`/charity/custody?q=${encodeURIComponent(r.number)}`);
+    if (r.t === "FORM") return nav(`/charity/${r.sub === "REFUND" ? "refunds" : "purchases"}?q=${encodeURIComponent(r.number)}`);
   };
-  const label = (r: any) => r.t === "INVOICE" ? `${SUB[r.sub] || r.sub} ${r.dir === "PURCHASE" ? "مشتريات" : "مبيعات"}` : r.t === "DONATION" ? `سند قبض · ${SOURCE[r.sub] || ""}` : r.t === "DISB" ? `سند صرف · ${KIND[r.sub] || ""}` : r.t === "REQUEST" ? "طلب صرف" : r.t === "PAYMENT" ? (r.dir === "OUT" ? "سند صرف عام" : "سند قبض عام") : "مصروف";
+  const label = (r: any) => r.t === "INVOICE" ? `${SUB[r.sub] || r.sub} ${r.dir === "PURCHASE" ? "مشتريات" : "مبيعات"}` : r.t === "DONATION" ? `سند قبض · ${SOURCE[r.sub] || ""}` : r.t === "DISB" ? `سند صرف · ${KIND[r.sub] || ""}` : r.t === "REQUEST" ? "طلب صرف" : r.t === "PAYMENT" ? (r.dir === "OUT" ? "سند صرف عام" : "سند قبض عام") : r.t === "CUSTODY" ? "عهدة مالية" : r.t === "FORM" ? FORM_AR[r.sub] || "نموذج" : "مصروف";
   return (
     <div className="card">
       <div className="card-h"><h3>أرشيف الفواتير والمستندات</h3><button className="btn sm" onClick={() => exportExcel(rows.map((r) => ({ النوع: label(r), الرقم: r.number, التاريخ: fmtDate(r.date), الطرف: r.party, المبلغ: Number(r.amount), الحالة: REQ_ST[r.status] || DOC_ST[r.status] || r.status })), "أرشيف-المستندات")}>⬇ Excel</button></div>

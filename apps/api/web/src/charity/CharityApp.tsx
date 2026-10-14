@@ -7,6 +7,7 @@ import { PayrollPage } from "../pages/Payroll";
 import { CollectionsPage } from "../pages/Collections";
 import { CharityDashboard, ReceiptsPage, DisbursementsPage, RequestsPage, BatchesPage, DailyPage, ArchivePage, ProjectsPage, PeoplePage, BudgetPage, ActivitiesPage } from "./pages";
 import { TemplatesCenter, CharitySettingsPage } from "./TemplatesCenter";
+import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
 import "./charity.css";
 
 export const ChCtx = createContext<{ settings: any; reload: () => void; projects: any[]; reloadProjects: () => void }>({ settings: null, reload: () => undefined, projects: [], reloadProjects: () => undefined });
@@ -27,6 +28,10 @@ export const CH_NAV: any[] = [
   { to: "/charity/batches", ic: "🧾", label: "مسير المصروفات", perm: "payments.read" },
   { to: "/charity/beneficiaries", ic: "👪", label: "المستفيدون", perm: "partners.read" },
   { to: "/charity/payroll", ic: "👔", label: "الرواتب", perm: "accounting.read", companyOnly: true },
+  { group: "المشتريات والعهد" },
+  { to: "/charity/purchases", ic: "🛍", label: "طلبات الشراء ومحاضر الاستلام", perm: "payments.read" },
+  { to: "/charity/custody", ic: "💼", label: "العهد المالية", perm: "payments.read" },
+  { to: "/charity/refunds", ic: "↩", label: "طلبات الاسترداد", perm: "payments.read" },
   { group: "التخطيط والرقابة" },
   { to: "/charity/projects", ic: "🎯", label: "المشاريع والبرامج", perm: "payments.read" },
   { to: "/charity/budget", ic: "📊", label: "الموازنة التقديرية", perm: "reports.read", companyOnly: true },
@@ -91,6 +96,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/batches" element={<BatchesPage />} />
                   <Route path="/charity/payroll" element={<PayrollPage />} />
                   <Route path="/charity/payroll/:tab" element={<PayrollPage />} />
+                  <Route path="/charity/purchases" element={<PurchasesPage />} />
+                  <Route path="/charity/custody" element={<CustodyPage />} />
+                  <Route path="/charity/refunds" element={<RefundsPage />} />
                   <Route path="/charity/projects" element={<ProjectsPage />} />
                   <Route path="/charity/budget" element={<BudgetPage />} />
                   <Route path="/charity/reports" element={<ActivitiesPage />} />
