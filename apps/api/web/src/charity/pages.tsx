@@ -1,7 +1,7 @@
 /** Charity interface screens. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useToast, useCompanyContext, today, fmtDate, monthStart, yearStart, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, BarChart, useUrlSearch, confirmDlg } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useToast, useCompanyContext, today, fmtDate, monthStart, yearStart, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, BarChart, useUrlSearch, confirmDlg, PdfBtn } from "../lib";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useCharity } from "./CharityApp";
 import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData } from "./templates";
@@ -562,7 +562,7 @@ export function DailyPage() {
   const diff = counted === "" ? 0 : Number(counted) - Number(data?.expectedCash || 0);
   return (
     <div>
-      <div className="toolbar no-print"><b>يوم التحصيل</b><Input type="date" value={d} onChange={(e) => setD(e.target.value)} style={{ width: 160 }} /><button className="btn sm ghost" onClick={() => setD(today())}>اليوم</button><div className="grow" /><button className="btn sm" onClick={() => window.print()}>🖨 طباعة تقرير اليوم</button>{data && <button className="btn sm" onClick={() => exportExcel(data.rows.map((r: any) => ({ الرقم: r.number, الطرف: r.party, المصدر: SOURCE[r.source], الطريقة: METHOD[r.method], الحساب: r.accountName, المبلغ: Number(r.amount), "بواسطة": r.createdBy })), `تحصيل-${d}`)}>⬇ Excel</button>}</div>
+      <div className="toolbar no-print"><b>يوم التحصيل</b><Input type="date" value={d} onChange={(e) => setD(e.target.value)} style={{ width: 160 }} /><button className="btn sm ghost" onClick={() => setD(today())}>اليوم</button><div className="grow" /><button className="btn sm" onClick={() => window.print()}>🖨 طباعة تقرير اليوم</button><PdfBtn name={`تحصيل يوم ${d}`} />{data && <button className="btn sm" onClick={() => exportExcel(data.rows.map((r: any) => ({ الرقم: r.number, الطرف: r.party, المصدر: SOURCE[r.source], الطريقة: METHOD[r.method], الحساب: r.accountName, المبلغ: Number(r.amount), "بواسطة": r.createdBy })), `تحصيل-${d}`)}>⬇ Excel</button>}</div>
       <AlertsCard />
       {loading && !data ? <Loading /> : data && <>
         <div className="grid c4">
@@ -766,7 +766,7 @@ function HistoryModal({ role, p, onClose }: { role: "DONOR" | "BENEFICIARY"; p: 
   const [certYear, setCertYear] = useState("");
   const [cert, setCert] = useState<any>(null);
   return (
-    <Modal title={`${role === "DONOR" ? "سجل تبرعات" : "سجل مساعدات"}: ${p.name}`} wide onClose={onClose} footer={<>{role === "DONOR" && data && <><select className="input" style={{ width: 150 }} value={certYear} onChange={(e) => setCertYear(e.target.value)}><option value="">كل السنوات</option>{data.byYear.map((y: any) => <option key={y.year} value={y.year}>{y.year}</option>)}</select><button className="btn primary" onClick={() => { const list = ok.filter((x: any) => !certYear || String(x.date).startsWith(certYear)); const amt = list.reduce((a: number, x: any) => a + Number(x.amount), 0); setCert(donorCertData(p.name, amt, certYear ? `عام ${certYear}م` : list.length ? `من ${fmtDate(list[list.length - 1].date)} إلى ${fmtDate(list[0].date)}` : "")); }}>🎖 شهادة شكر وتقدير</button></>}<button className="btn" onClick={() => window.print()}>🖨 طباعة الكشف</button><button className="btn" onClick={onClose}>إغلاق</button></>}>
+    <Modal title={`${role === "DONOR" ? "سجل تبرعات" : "سجل مساعدات"}: ${p.name}`} wide onClose={onClose} footer={<>{role === "DONOR" && data && <><select className="input" style={{ width: 150 }} value={certYear} onChange={(e) => setCertYear(e.target.value)}><option value="">كل السنوات</option>{data.byYear.map((y: any) => <option key={y.year} value={y.year}>{y.year}</option>)}</select><button className="btn primary" onClick={() => { const list = ok.filter((x: any) => !certYear || String(x.date).startsWith(certYear)); const amt = list.reduce((a: number, x: any) => a + Number(x.amount), 0); setCert(donorCertData(p.name, amt, certYear ? `عام ${certYear}م` : list.length ? `من ${fmtDate(list[list.length - 1].date)} إلى ${fmtDate(list[0].date)}` : "")); }}>🎖 شهادة شكر وتقدير</button></>}<button className="btn" onClick={() => window.print()}>🖨 طباعة الكشف</button><PdfBtn className="btn" name={`كشف ${p.name}`} /><button className="btn" onClick={onClose}>إغلاق</button></>}>
       {!data ? <Loading /> : <div className="print-doc stmt">
         <div className="head"><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo ? `ترخيص رقم ${settings.licenseNo}` : ""}</div></div><div style={{ textAlign: "left" }}><h3>{role === "DONOR" ? "كشف تبرعات" : "كشف مساعدات"}</h3><div>{p.name} — {p.code}</div><div className="small">تاريخ الطباعة {today()}</div></div></div>
         {role === "DONOR" && data.byYear.length > 0 && <div className="row mb">{data.byYear.map((y: any) => <div key={y.year} className="badge teal" style={{ fontSize: 13 }}>{y.year}: {money(y.total)} ({y.count})</div>)}</div>}
@@ -808,7 +808,7 @@ export function BudgetPage() {
     <div className="card">
       <div className="card-h"><h3>الموازنة التقديرية {year}</h3><div className="row no-print">
         <Select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 110 }}>{[-2, -1, 0, 1, 2].map((d) => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}</Select>
-        <button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button>
+        <button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button><PdfBtn name={`الموازنة التقديرية ${year}`} />
         {data && <button className="btn sm" onClick={() => exportExcel(data.lines.map((l: any) => ({ النوع: l.kind === "REVENUE" ? "إيرادات" : "مصروفات", البند: l.name, الحساب: `${l.accountCode} ${l.accountName}`, المشروع: l.projectName || "عام", المقدر: l.amount, الفعلي: l.actual, الانحراف: l.variance, "نسبة التنفيذ %": l.pct })), `الموازنة-${year}`)}>⬇ Excel</button>}
         {can("accounting.write") && <><button className="btn sm" onClick={() => setCopy(true)}>نسخ من سنة سابقة</button><button className="btn primary" onClick={() => setEdit({ year })}>＋ بند موازنة</button></>}
       </div></div>
@@ -859,7 +859,7 @@ export function ActivitiesPage() {
   const grp: Record<string, string> = { PROGRAM: "مصروفات البرامج والأنشطة", ADMIN: "المصروفات العمومية والإدارية", OTHER: "مصروفات أخرى" };
   return (
     <div>
-      <div className="toolbar no-print"><PeriodFilter from={from} to={to} onChange={(a, b) => { setFrom(a || yearStart()); setTo(b || today()); }} /><div className="grow" /><button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button>{data && <button className="btn sm" onClick={() => exportExcel([...data.revenues.map((r: any) => ({ القسم: "الإيرادات", الحساب: `${r.code} ${r.nameAr}`, المبلغ: r.amount })), ...data.expenses.map((r: any) => ({ القسم: grp[r.group], الحساب: `${r.code} ${r.nameAr}`, المبلغ: r.amount }))], "قائمة-الأنشطة")}>⬇ Excel</button>}<Link className="btn sm" to="/reports-center">مركز التقارير الكامل ←</Link></div>
+      <div className="toolbar no-print"><PeriodFilter from={from} to={to} onChange={(a, b) => { setFrom(a || yearStart()); setTo(b || today()); }} /><div className="grow" /><button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button><PdfBtn name="قائمة الأنشطة" />{data && <button className="btn sm" onClick={() => exportExcel([...data.revenues.map((r: any) => ({ القسم: "الإيرادات", الحساب: `${r.code} ${r.nameAr}`, المبلغ: r.amount })), ...data.expenses.map((r: any) => ({ القسم: grp[r.group], الحساب: `${r.code} ${r.nameAr}`, المبلغ: r.amount }))], "قائمة-الأنشطة")}>⬇ Excel</button>}<Link className="btn sm" to="/reports-center">مركز التقارير الكامل ←</Link></div>
       {loading && !data ? <Loading /> : data && <>
         <div className="grid c4 no-print">
           <Kpi label="إجمالي الإيرادات والتبرعات" v={data.totalRevenue} icon="💚" />

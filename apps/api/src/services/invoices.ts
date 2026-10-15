@@ -118,6 +118,8 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   if (!isDate(date)) throw bad("التاريخ غير صحيح");
   if (!input.partnerId) throw bad(input.direction === "SALE" ? "اختر العميل" : "اختر المورد");
   const partner = await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [input.partnerId, companyId], "الطرف غير موجود");
+  // a stopped customer/supplier takes no new sales/purchase documents (returns & credit notes on earlier invoices stay allowed)
+  if (!partner.isActive && ["INVOICE", "QUOTATION", "ORDER"].includes(input.kind)) throw bad(`${input.direction === "SALE" ? "العميل" : "المورد"} «${partner.name}» موقوف — أعد تفعيله أولاً`);
   // warehouse: explicit → (editing) the draft's current one → (notes) the original document's → branch/company default
   if (input.warehouseId) await t.one(`SELECT id FROM warehouses WHERE id=$1 AND company_id=$2`, [input.warehouseId, companyId], "المستودع غير موجود");
   else if (id) input = { ...input, warehouseId: (await t.maybe(`SELECT warehouse_id FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId]))?.warehouseId || null };
@@ -180,6 +182,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     fcTotal: currency === BASE ? null : toFc(total, rate),
     priceListId: input.priceListId || null,
     isDemo: !!input.isDemo,
+    salesperson: (input as any).salesperson || partner.salesperson || null,
   };
   // branch: chosen on the document → the warehouse's branch → request/user/main branch
   doc.branchId = input.branchId ? await resolveBranch(t, companyId, input.branchId) : await warehouseBranch(t, companyId, doc.warehouseId);

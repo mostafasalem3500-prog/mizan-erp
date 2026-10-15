@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { BranchField } from "./Branches";
 import { AccountLedger } from "./Statements";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, JTYPE_AR, TYPE_AR, confirmDlg, SearchBox, FilterInfo, useUrlSearch, normalizeAr } from "../lib";
@@ -14,6 +15,7 @@ export function AccountsPage() {
   const [openAll, setOpenAll] = useState(false);
   const [type, setType] = useState("");
   const [only, setOnly] = useState("");
+  const [lines, setLines] = useState<Record<string, boolean>>({});
   const tree = useMemo(() => {
     if (!data) return [];
     const rows = data.rows;
@@ -45,12 +47,14 @@ export function AccountsPage() {
         </div>
         {loading && !data ? <Loading /> : (
           <div className="table-wrap"><table className="tbl"><thead><tr><th>الحساب</th><th>النوع</th><th>التصنيف</th><th className="n">الرصيد (مدين +/دائن −)</th><th /></tr></thead>
-            <tbody>{tree.map((a: any) => (
-              <tr key={a.id} className={a.isGroup ? "group" : ""}>
+            <tbody>{tree.map((a: any) => (<React.Fragment key={a.id}>
+              <tr className={a.isGroup ? "group" : ""}>
                 <td style={{ paddingInlineStart: 12 + a.depth * 22 }}>{a.isGroup ? <span className="tree-toggle" onClick={() => setOpen({ ...open, [a.id]: !open[a.id] })}>{open[a.id] || openAll ? "▾" : "▸"}</span> : <span className="tree-toggle" />}<span className="num" style={{ marginInlineEnd: 8, color: "var(--muted)" }}>{a.code}</span>{a.nameAr}{a.systemKey && <span className="badge teal small" style={{ marginInlineStart: 6 }}>نظامي</span>}{!a.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{a.isCashBank && <span className="badge blue" style={{ marginInlineStart: 6 }}>نقدية/بنك</span>}</td>
                 <td>{TYPE_AR[a.type]}</td><td className="small muted">{data.subtypes[a.subtype]}</td><td className="n"><Money v={a.balance} sign /></td>
-                <td className="row" style={{ gap: 4 }}>{!a.isGroup && <button className="btn sm" onClick={() => setLedger(a)}>كشف حساب</button>}{can("accounting.write") && <button className="btn sm ghost" onClick={() => setEdit(a)}>تعديل</button>}{can("accounting.write") && a.isGroup && <button className="btn sm ghost" onClick={() => setEdit({ parentId: a.id, parent: a })}>＋ فرعي</button>}</td>
-              </tr>))}
+                <td className="row" style={{ gap: 4 }}><button className={"btn sm" + (lines[a.id] ? " primary" : "")} title="إظهار القيود داخل الشجرة" onClick={() => setLines({ ...lines, [a.id]: !lines[a.id] })}>{lines[a.id] ? "▴ القيود" : "▾ القيود"}</button>{!a.isGroup && <button className="btn sm" onClick={() => setLedger(a)}>كشف حساب</button>}{can("accounting.write") && <button className="btn sm ghost" onClick={() => setEdit(a)}>تعديل</button>}{can("accounting.write") && a.isGroup && <button className="btn sm ghost" onClick={() => setEdit({ parentId: a.id, parent: a })}>＋ فرعي</button>}</td>
+              </tr>
+              {lines[a.id] && <tr className="expand"><td colSpan={5}><AccountLinesInline id={a.id} onLedger={!a.isGroup ? () => setLedger(a) : undefined} /></td></tr>}
+            </React.Fragment>))}
             </tbody></table></div>
         )}
       </div>
@@ -120,7 +124,7 @@ export function JournalsPage() {
         {loading && !data ? <Loading /> : !data?.rows.length ? <Empty /> : (
           <div className="table-wrap"><table className="tbl compact"><thead><tr><th style={{ width: 24 }} /><th>الرقم</th><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المرجع</th><th className="n">المبلغ</th><th>الحالة</th><th /></tr></thead>
             <tbody>{data.rows.map((e: any) => <React.Fragment key={e.id}>
-              <tr className="clickable" onClick={() => setExpanded({ ...expanded, [e.id]: !expanded[e.id] })}><td>{expanded[e.id] ? "▾" : "▸"}</td><td><b>{e.number}</b></td><td className="dt">{fmtDate(e.date)}</td><td><span className="badge gray">{JTYPE_AR[e.type]}</span></td><td>{e.memo}</td><td className="dt small">{e.reference}</td><td className="n"><Money v={e.totalDebit} /></td><td>{e.reversedBy ? <span className="badge red">معكوس</span> : e.reversalOf ? <span className="badge amber">عكسي</span> : <Badge s={e.status} />}</td>
+              <tr className="clickable" onClick={() => setExpanded({ ...expanded, [e.id]: !expanded[e.id] })}><td>{expanded[e.id] ? "▾" : "▸"}</td><td><b><Link to={`/journals/${e.id}`} onClick={(ev) => ev.stopPropagation()}>{e.number}</Link></b></td><td className="dt">{fmtDate(e.date)}</td><td><span className="badge gray">{JTYPE_AR[e.type]}</span></td><td>{e.memo}</td><td className="dt small">{e.reference}</td><td className="n"><Money v={e.totalDebit} /></td><td>{e.reversedBy ? <span className="badge red">معكوس</span> : e.reversalOf ? <span className="badge amber">عكسي</span> : <Badge s={e.status} />}</td>
                 <td>{can("accounting.write") && e.status === "POSTED" && !e.reversedBy && !["CLOSING", "REVERSAL"].includes(e.type) && <button className="btn sm ghost" onClick={(ev) => { ev.stopPropagation(); run(async () => { if (confirmDlg(`عكس القيد ${e.number}؟ (ينشئ قيداً مضاداً بتاريخ اليوم)`)) { await api(`/journals/${e.id}/reverse`, { body: {} }); reload(); } }, "تم عكس القيد"); }}>عكس</button>}</td></tr>
               {expanded[e.id] && e.lines.map((l: any) => <tr key={l.id} className="sub"><td /><td colSpan={3}>{l.code} {l.nameAr}{l.partnerName && <span className="muted"> — {l.partnerName}</span>}</td><td colSpan={2} className="small">{l.description}</td><td className="n"><span className="small muted">مدين</span> <Money v={l.debit} blankZero /> <span className="small muted">دائن</span> <Money v={l.credit} blankZero /></td><td colSpan={2} /></tr>)}
             </React.Fragment>)}</tbody></table></div>
@@ -170,6 +174,20 @@ export function PeriodsPage() {
         <div className="hint mb">قفل الفترة يمنع أي ترحيل بتاريخ داخلها (لمنع التعديل بعد تقديم الإقرار الضريبي مثلاً).</div>
         <table className="tbl compact"><thead><tr><th>الفترة</th><th>من</th><th>إلى</th><th>الحالة</th><th /></tr></thead><tbody>{data.periods.map((p: any) => <tr key={p.id}><td>{p.name}</td><td className="dt">{fmtDate(p.startDate)}</td><td className="dt">{fmtDate(p.endDate)}</td><td><Badge s={p.status} /></td><td>{can("accounting.write") && data.years.find((y: any) => y.id === p.fiscalYearId)?.status === "OPEN" && <button className="btn sm ghost" onClick={() => run(async () => { await api(`/periods/${p.id}`, { method: "PUT", body: { status: p.status === "OPEN" ? "LOCKED" : "OPEN" } }); reload(); })}>{p.status === "OPEN" ? "قفل" : "فتح"}</button>}</td></tr>)}</tbody></table>
       </div></div>
+    </div>
+  );
+}
+
+/** Latest journal lines of an account (or a whole group) shown inside the chart-of-accounts tree. */
+function AccountLinesInline({ id, onLedger }: { id: string; onLedger?: () => void }) {
+  const [limit, setLimit] = useState(15);
+  const { data } = useFetch(`/accounts/${id}/lines?limit=${limit}`);
+  if (!data) return <div className="acc-lines"><Loading /></div>;
+  return (
+    <div className="acc-lines">
+      <div className="row small mb" style={{ marginBottom: 6 }}><span>عدد القيود: <b className="num">{data.count}</b></span><span>مدين <b><Money v={data.debit} /></b></span><span>دائن <b><Money v={data.credit} /></b></span><span>الرصيد <b><Money v={data.balance} sign /></b></span><div className="grow" />{data.count > limit && <button className="btn sm" onClick={() => setLimit(limit + 50)}>المزيد</button>}{onLedger && <button className="btn sm" onClick={onLedger}>كشف الحساب الكامل</button>}</div>
+      {!data.rows.length ? <span className="muted small">لا توجد قيود مرحّلة على هذا الحساب</span> : <table className="tbl compact"><thead><tr><th>القيد</th><th>التاريخ</th><th>الحساب</th><th>البيان</th><th>الطرف</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead>
+        <tbody>{data.rows.map((l: any) => <tr key={l.id}><td><Link to={`/journals/${l.entryId}`}>{l.number}</Link></td><td className="dt">{fmtDate(l.date)}</td><td className="small">{l.code} {l.accountName}</td><td className="small">{l.description || l.memo}</td><td className="small">{l.partnerName}</td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table>}
     </div>
   );
 }

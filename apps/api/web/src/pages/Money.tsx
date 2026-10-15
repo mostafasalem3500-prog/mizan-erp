@@ -51,9 +51,9 @@ export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
   );
 }
 
-function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClose: (s?: boolean) => void }) {
+export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: "IN" | "OUT"; onClose: (s?: boolean) => void; partner?: any }) {
   const { run, busy } = useAction();
-  const [partner, setPartner] = useState<any>(null);
+  const [partner, setPartner] = useState<any>(p0 || null);
   const [account, setAccount] = useState<any>(null);
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState<string>("");
@@ -110,7 +110,7 @@ function PaymentEditor({ direction, onClose }: { direction: "IN" | "OUT"; onClos
   );
 }
 
-function VoucherPrint({ p, direction, onClose }: { p: any; direction: string; onClose: () => void }) {
+export function VoucherPrint({ p, direction, onClose }: { p: any; direction: string; onClose: () => void }) {
   const { me } = useCompanyContext();
   return (
     <Modal title={`${direction === "IN" ? "سند قبض" : "سند صرف"} ${p.number}`} onClose={onClose} footer={<><PrintBtn /><button className="btn" onClick={onClose}>إغلاق</button></>}>

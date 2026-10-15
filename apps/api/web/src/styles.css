@@ -379,3 +379,22 @@ tr.items-row td { background: var(--bg); font-size: 12px; color: var(--muted); p
 .readiness .bar i { display: block; height: 100%; background: var(--primary); }
 @media (max-width: 900px) { .rc { grid-template-columns: 1fr; } .rc-side { position: static; max-height: none; } }
 @media print { .rc { display: block; } .rc-side { display: none; } .rc-tbl { font-size: 11px; } }
+/* round 20 */
+.modal.nudge { animation: mz-nudge .25s; }
+@keyframes mz-nudge { 0%, 100% { transform: none; } 30% { transform: scale(1.012); } 60% { transform: scale(.995); } }
+.tabs-bar { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tabs-bar button { border: 0; background: transparent; padding: 9px 14px; font: inherit; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs-bar button.on { color: var(--primary); border-bottom-color: var(--primary); font-weight: 700; }
+.profile-h { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.profile-h .avatar { width: 54px; height: 54px; border-radius: 14px; background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; font-size: 24px; font-weight: 800; }
+.profile-h .meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.action-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.mini-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.mini-kpis > div { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.mini-kpis span { display: block; color: var(--muted); font-size: 12px; }
+.mini-kpis b { font-size: 18px; }
+tr.expand > td { background: var(--surface-2); padding: 0 !important; }
+.acc-lines { padding: 8px 14px 12px; }
+.jv-doc { max-width: 900px; }
+.jv-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; text-align: center; font-size: 12px; }
+.jv-sign div { border-top: 1px dotted #999; padding-top: 6px; }

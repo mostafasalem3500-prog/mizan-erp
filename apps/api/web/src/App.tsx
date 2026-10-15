@@ -20,6 +20,8 @@ import { ReportsPage, VatPage } from "./pages/Reports";
 import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 import { GlobalSearch } from "./pages/Search";
 import { ReportCenterPage } from "./pages/ReportCenter";
+import { PartnerProfilePage } from "./pages/PartnerProfile";
+import { ProductProfilePage, TreasuryPage, JournalView, CountSheetPage } from "./pages/Round20";
 import { CharityApp, charityDefault } from "./charity/CharityApp";
 
 const NAV = [
@@ -44,12 +46,14 @@ const NAV = [
   { group: "المخزون" },
   { to: "/products", ic: "🏷", label: "الأصناف", perm: "products.read" },
   { to: "/inventory", ic: "🏬", label: "المستودعات والجرد", perm: "inventory.read" },
+  { to: "/inventory/count-sheet", ic: "📋", label: "ورقة الجرد وملخص العمليات", perm: "inventory.read" },
   { to: "/lots", ic: "⏳", label: "الدفعات والصلاحية", perm: "inventory.read" },
   { to: "/reorder", ic: "🔔", label: "إعادة الطلب", perm: "inventory.read" },
   { to: "/labels", ic: "🏷", label: "ملصقات الباركود", perm: "products.read" },
   { group: "المحاسبة" },
   { to: "/accounts", ic: "🌳", label: "دليل الحسابات", perm: "accounting.read" },
   { to: "/journals", ic: "📒", label: "القيود اليومية", perm: "accounting.read" },
+  { to: "/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
   { to: "/cheques", ic: "🧾", label: "الشيكات", perm: "payments.read" },
   { to: "/bank", ic: "🏦", label: "التسوية البنكية", perm: "accounting.read" },
   { to: "/recurring", ic: "🔁", label: "القيود الدورية", perm: "accounting.read" },
@@ -141,10 +145,16 @@ export function App() {
                 <Route path="/doc/:id" element={<DocumentView />} />
                 <Route path="/customers" element={<PartnersPage role="CUSTOMER" />} />
                 <Route path="/suppliers" element={<PartnersPage role="SUPPLIER" />} />
+                <Route path="/customers/:id" element={<PartnerProfilePage role="CUSTOMER" />} />
+                <Route path="/suppliers/:id" element={<PartnerProfilePage role="SUPPLIER" />} />
                 <Route path="/receipts" element={<PaymentsPage direction="IN" />} />
                 <Route path="/vouchers" element={<PaymentsPage direction="OUT" />} />
                 <Route path="/expenses" element={<ExpensesPage />} />
                 <Route path="/products" element={<ProductsPage />} />
+                <Route path="/products/:id" element={<ProductProfilePage />} />
+                <Route path="/treasury" element={<TreasuryPage />} />
+                <Route path="/journals/:id" element={<JournalView />} />
+                <Route path="/inventory/count-sheet" element={<CountSheetPage />} />
                 <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/lots" element={<LotsPage />} />
                 <Route path="/reorder" element={<ReorderPage />} />

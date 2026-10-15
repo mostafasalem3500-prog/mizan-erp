@@ -1,13 +1,14 @@
 import { PartnerStatement } from "./Statements";
 import { ProductImagesModal } from "./ProductImages";
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ImportModal } from "./Import";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
 export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const { can } = useCompanyContext();
+  const nav = useNavigate();
   const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
@@ -54,10 +55,10 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
         {loading && !data ? <Loading /> : !filtered.length ? <Empty text={active ? "لا نتائج مطابقة للفلاتر" : "لا توجد بيانات"} /> : (
           <div className="table-wrap"><table className="tbl"><thead><tr><Th k="code" s={s}>الكود</Th><Th k="name" s={s}>الاسم</Th><th>النوع</th><th>الرقم الضريبي</th><th>الجوال</th><Th k="city" s={s}>المدينة</Th><th>شروط السداد</th><Th k="lastDocDate" s={s}>آخر حركة</Th><Th k="overdue" s={s} n>المتأخر</Th><Th k="balance" s={s} n>الرصيد</Th><th /></tr></thead>
             <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
-              <td className="dt">{p.code}</td><td><b>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}{isCust && Number(p.creditLimit) > 0 && Number(p.balance) > Number(p.creditLimit) && <span className="badge red" style={{ marginInlineStart: 4 }}>تجاوز الحد</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td><td className="small dt">{fmtDate(p.lastDocDate)}</td>
+              <td className="dt">{p.code}</td><td><b className="link" style={{ cursor: "pointer", color: "var(--primary)" }} onClick={() => nav(`/${isCust ? "customers" : "suppliers"}/${p.id}`)}>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}{isCust && Number(p.creditLimit) > 0 && Number(p.balance) > Number(p.creditLimit) && <span className="badge red" style={{ marginInlineStart: 4 }}>تجاوز الحد</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td><td className="small dt">{fmtDate(p.lastDocDate)}</td>
               <td className="n">{Number(p.overdue) > 0 ? <span className="neg-val"><Money v={p.overdue} /></span> : ""}</td>
               <td className="n"><Money v={p.balance} sign /></td>
-              <td className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => setStmt(p)}>كشف حساب</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
+              <td className="row" style={{ gap: 4 }}><button className="btn sm primary" onClick={() => nav(`/${isCust ? "customers" : "suppliers"}/${p.id}`)}>الملف</button><button className="btn sm" onClick={() => setStmt(p)}>كشف حساب</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
             </tr>)}</tbody>
             <tfoot><tr><td colSpan={8}>الإجمالي ({filtered.length})</td><td className="n"><Money v={sum("overdue")} /></td><td className="n"><Money v={sum("balance")} /></td><td /></tr></tfoot></table></div>
         )}
@@ -69,7 +70,7 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   );
 }
 
-function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s?: boolean) => void }) {
+export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
   const { data: currencies } = useFetch("/currencies");
@@ -120,6 +121,7 @@ export function ProductsPage() {
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
   const [card, setCard] = useState<any>(null);
+  const navP = useNavigate();
   const [cats, setCats] = useState(false);
   const [imp, setImp] = useState(false);
   const [images, setImages] = useState<any[] | null>(null);
@@ -168,7 +170,7 @@ export function ProductsPage() {
               <td className="n"><Money v={p.salePrice} /></td><td className="n">{p.type === "STOCK" ? <Money v={p.avgCost} /> : ""}</td>
               <td className={"n " + (p.type === "STOCK" && Number(p.qty) <= Number(p.reorderLevel) ? "neg-val" : "")}>{p.type === "STOCK" ? Number(p.qty) : "—"}</td>
               <td className="n">{p.type === "STOCK" ? <Money v={p.stockValue} /> : ""}</td><td className="small dt">{TAX_AR[p.taxCode]}</td>
-              <td className="row" style={{ gap: 4 }}>{p.type === "STOCK" && <button className="btn sm" onClick={() => setCard(p)}>كرت الصنف</button>}{can("products.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
+              <td className="row" style={{ gap: 4 }}><button className="btn sm primary" onClick={() => navP(`/products/${p.id}`)}>الملف</button>{p.type === "STOCK" && <button className="btn sm" onClick={() => setCard(p)}>كرت الصنف</button>}{can("products.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
             </tr>)}</tbody>
             <tfoot><tr><td colSpan={7}>الإجمالي ({filtered.length})</td><td className="n"><Money v={filtered.reduce((a: number, p: any) => a + (p.type === "STOCK" ? Number(p.stockValue) : 0), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>
         )}
@@ -182,7 +184,7 @@ export function ProductsPage() {
   );
 }
 
-function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; onClose: (s?: boolean) => void }) {
+export function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
   const [f, setF] = useState<any>({ type: "STOCK", unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p, uoms: (p.uoms || []).map((u: any) => ({ ...u, key: Math.random() })) });
@@ -290,14 +292,14 @@ export function InventoryPage() {
   );
 }
 
-function AdjustmentModal({ kind, warehouses, onClose }: { kind: string; warehouses: any[]; onClose: (s?: boolean) => void }) {
+export function AdjustmentModal({ kind, warehouses, onClose, product }: { kind: string; warehouses: any[]; onClose: (s?: boolean) => void; product?: any }) {
   const { run, busy } = useAction();
   const [date, setDate] = useState(today());
   const [wh, setWh] = useState(warehouses[0]?.id || "");
   const [to, setTo] = useState(warehouses[1]?.id || "");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<{ key: number; product: any; qty: number; unitCost: number }[]>([{ key: 1, product: null, qty: 0, unitCost: 0 }]);
-  const title = { COUNT: "جرد فعلي (تسوية الرصيد إلى الكمية المعدودة)", OPENING: "أرصدة افتتاحية للمخزون", TRANSFER: "تحويل بين المستودعات" }[kind];
+  const [lines, setLines] = useState<{ key: number; product: any; qty: number; unitCost: number }[]>([{ key: 1, product: product || null, qty: 0, unitCost: product ? Number(product.purchasePrice || 0) : 0 }]);
+  const title = { COUNT: "جرد فعلي (تسوية الرصيد إلى الكمية المعدودة)", OPENING: "أرصدة افتتاحية للمخزون", TRANSFER: "تحويل بين المستودعات", DAMAGE: "إتلاف / صرف تالف من المخزون" }[kind];
   return (
     <Modal wide title={title} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { await api("/inventory/adjustments", { body: { kind, date, warehouseId: wh, toWarehouse: to, notes, lines: lines.filter((l) => l.product).map((l) => ({ productId: l.product.id, qty: l.qty, unitCost: l.unitCost })) } }); onClose(true); }, "تم الترحيل")}>ترحيل</button></>}>
       <div className="form-grid">
@@ -306,10 +308,11 @@ function AdjustmentModal({ kind, warehouses, onClose }: { kind: string; warehous
         {kind === "TRANSFER" && <Field label="إلى مستودع"><Select value={to} onChange={(e) => setTo(e.target.value)}>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select></Field>}
         <Field label="ملاحظات" span2><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       </div>
-      <table className="tbl compact mt"><thead><tr><th style={{ width: "50%" }}>الصنف</th><th>{kind === "COUNT" ? "الكمية المعدودة" : "الكمية"}</th>{kind !== "TRANSFER" && <th>تكلفة الوحدة</th>}<th /></tr></thead>
-        <tbody>{lines.map((l) => <tr key={l.key}><td><Picker value={l.product} onChange={(p: any) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, product: p, unitCost: p ? Number(p.avgCost || p.purchasePrice) : 0 } : x)))} fetcher={async (s) => (await productFetcher(s)).filter((p: any) => p.type === "STOCK")} label={(p: any) => `${p.name} (متاح ${Number(p.qty)})`} /></td><td><NumInput value={l.qty} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: Number(e.target.value) } : x)))} /></td>{kind !== "TRANSFER" && <td><NumInput value={l.unitCost} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, unitCost: Number(e.target.value) } : x)))} /></td>}<td><button className="btn ghost sm" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>✕</button></td></tr>)}</tbody></table>
+      <table className="tbl compact mt"><thead><tr><th style={{ width: "50%" }}>الصنف</th><th>{kind === "COUNT" ? "الكمية المعدودة" : "الكمية"}</th>{kind !== "TRANSFER" && kind !== "DAMAGE" && <th>تكلفة الوحدة</th>}<th /></tr></thead>
+        <tbody>{lines.map((l) => <tr key={l.key}><td><Picker value={l.product} onChange={(p: any) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, product: p, unitCost: p ? Number(p.avgCost || p.purchasePrice) : 0 } : x)))} fetcher={async (s) => (await productFetcher(s)).filter((p: any) => p.type === "STOCK")} label={(p: any) => `${p.name} (متاح ${Number(p.qty)})`} /></td><td><NumInput value={l.qty} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: Number(e.target.value) } : x)))} /></td>{kind !== "TRANSFER" && kind !== "DAMAGE" && <td><NumInput value={l.unitCost} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, unitCost: Number(e.target.value) } : x)))} /></td>}<td><button className="btn ghost sm" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}>✕</button></td></tr>)}</tbody></table>
       <button className="btn sm mt" onClick={() => setLines((ls) => [...ls, { key: Date.now(), product: null, qty: 0, unitCost: 0 }])}>＋ سطر</button>
       {kind === "COUNT" && <div className="hint mt">الفروق تُرحّل تلقائياً: الزيادة إلى «أرباح فروقات الجرد» والعجز إلى «عجز وتالف المخزون».</div>}
+      {kind === "DAMAGE" && <div className="hint mt">يُخرج الصنف من المخزون بمتوسط تكلفته، والقيد: من ح/ عجز وتالف المخزون إلى ح/ المخزون. اذكر السبب في الملاحظات.</div>}
     </Modal>
   );
 }

@@ -132,7 +132,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   }, [partner?.id]);
   const changeCurrency = async (cur: string) => { setCurrency(cur); if (cur === "SAR") setRate(1); else try { const r = await api(`/currencies/${cur}/rate${q({ date })}`); setRate(Number(r.rate)); } catch {} };
   useEffect(() => {
-    if (prefill) { setPartner(prefill.partner); setLines(prefill.lines); setReason(prefill.reason || ""); setLoaded(true); return; }
+    if (prefill) { setPartner(prefill.partner); if (prefill.lines) setLines(prefill.lines); setReason(prefill.reason || ""); setLoaded(true); return; }
     if (!id) return;
     api(`/invoices/${id}`).then((d) => {
       setPartner(d.partner || { id: d.partnerId, name: d.partnerName });
@@ -175,6 +175,10 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
       toast("تم الترحيل وإنشاء القيد المحاسبي", "ok");
       onClose(true);
       nav(`${base}/doc/${d.id}`);
+    } else if (kind === "QUOTATION" || kind === "ORDER") {
+      // a saved quotation / order opens as its own document page (print, PDF, share, copy, convert)
+      toast(`تم حفظ ${KIND_TITLE[direction][kind]} ${d.number}`, "ok"); onClose(true);
+      if (!window.location.pathname.endsWith(`/doc/${d.id}`)) nav(`${base}/doc/${d.id}`);
     } else { toast("تم الحفظ كمسودة", "ok"); onClose(true); }
   });
   const barcodeAdd = async (code: string) => {
@@ -261,6 +265,10 @@ export function DocumentView() {
   const [landed, setLanded] = useState(false);
   const [customs, setCustoms] = useState(false);
   const [pstmt, setPstmt] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [fix, setFix] = useState(false);
+  const [voucher, setVoucher] = useState(false);
+  const extras = useFetch(id ? `/invoices/${id}/extras` : null, [d?.status]);
   const mail = useFetch("/mail/status");
   const { run, busy } = useAction();
   useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
@@ -273,6 +281,7 @@ export function DocumentView() {
   const convert = (kind: string) => run(async () => { const r = await api(`/invoices/${d.id}/convert`, { body: { kind } }); nav(`${base}/doc/${r.id}`); }, "تم التحويل");
   const del = () => run(async () => { if (!confirmDlg("حذف المسودة؟")) return; await api(`/invoices/${d.id}`, { method: "DELETE" }); nav(-1); }, "تم الحذف");
   const creditNote = () => run(async () => { const draft = await api(`/invoices/${d.id}/credit-note`, { body: {} }); setCn(draft); });
+  const copy = (kind?: string) => run(async () => { const r = await api(`/invoices/${d.id}/copy`, { body: { kind } }); toast(`تم إنشاء ${KIND_AR[r.kind]} جديد ${r.number.startsWith("DRAFT") ? "(مسودة)" : r.number}`, "ok"); nav(`${base}/doc/${r.id}`); });
   const resend = () => run(async () => { const r = await api(`/zatca/submit/${d.id}`, { body: {} }); toast(`نتيجة الهيئة: ${ZATCA_AR[r.status] || r.status}`, r.status === "REPORTED" || r.status === "CLEARED" ? "ok" : "err"); reload(); });
   return (
     <div className="grid">
@@ -281,6 +290,9 @@ export function DocumentView() {
         <h2>{title} {d.number}</h2>
         <Badge s={d.status} />{d.kind === "INVOICE" && d.status === "POSTED" && <Badge s={d.paymentStatus} />}{d.zatcaStatus && <Badge s={d.zatcaStatus} map={ZATCA_AR} />}
         <div className="grow" />
+        {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" onClick={() => (d.status === "DRAFT" ? setEdit(true) : setFix(true))}>✏ تعديل</button>}
+        {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" disabled={busy} onClick={() => copy()}>⧉ نسخ</button>}
+        {d.kind === "QUOTATION" && d.status === "DRAFT" && can(isSale ? "sales.write" : "purchases.write") && <button className="btn primary sm" disabled={busy} onClick={() => convert("INVOICE")}>تحويل لفاتورة ←</button>}
         {d.status === "DRAFT" && (d.kind === "QUOTATION" || d.kind === "ORDER") && can(isSale ? "sales.write" : "purchases.write") && <><button className="btn primary sm" onClick={() => convert(d.kind === "QUOTATION" ? "ORDER" : "INVOICE")}>تحويل إلى {d.kind === "QUOTATION" ? "أمر" : "فاتورة"} →</button>{d.kind === "QUOTATION" && <button className="btn sm" onClick={() => convert("INVOICE")}>تحويل إلى فاتورة مباشرة</button>}</>}
         {d.status === "DRAFT" && d.kind !== "QUOTATION" && d.kind !== "ORDER" && <button className="btn primary sm" disabled={busy} onClick={post}>ترحيل ✓</button>}
         {d.status === "DRAFT" && <button className="btn danger sm" onClick={del}>حذف</button>}
@@ -297,6 +309,17 @@ export function DocumentView() {
         {isSale && mail.data?.configured && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && can("sales.write") && <button className="btn sm" disabled={busy} onClick={() => run(async () => { const to = prompt("إرسال المستند بالبريد إلى:", d.partner?.email || ""); if (!to) return; await api(`/invoices/${d.id}/email`, { body: { to } }); }, "تم إرسال البريد")}>✉ بريد</button>}
       </div>
       {layout === "thermal" ? <Thermal d={d} qr={qr} /> : <InvoiceA4 d={d} qr={qr} />}
+      <div className="grid c3 no-print">
+        <NotesCard d={d} canEdit={can(isSale ? "sales.write" : "purchases.write")} onSaved={reload} />
+        {extras.data?.profit && <div className="card"><div className="card-h"><h3>💹 ربح الفاتورة</h3></div><div className="card-b stat-list">
+          <div className="item"><span>الإيراد قبل الضريبة</span><b><Money v={extras.data.profit.revenue} /></b></div>
+          <div className="item"><span>تكلفة البضاعة (المتوسط المرجح)</span><b><Money v={extras.data.profit.cost} /></b></div>
+          <div className="item"><span>مجمل الربح</span><b className={extras.data.profit.profit < 0 ? "neg-val" : "pos-val"}><Money v={extras.data.profit.profit} /></b></div>
+          <div className="item"><span>هامش الربح</span><b className="num">{extras.data.profit.margin}%</b></div>
+        </div></div>}
+        {extras.data?.moves?.length > 0 && <div className="card"><div className="card-h"><h3>📦 المخزون</h3><button className="btn sm" onClick={() => setVoucher(true)}>🖨 {isSale ? (d.kind === "CREDIT_NOTE" ? "إذن إدخال مرتجع" : "إذن صرف مخزني") : d.kind === "CREDIT_NOTE" ? "إذن صرف مرتجع" : "إذن استلام مخزني"}</button></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th>المستودع</th><th className="n">الكمية</th><th className="n">التكلفة</th><th className="n">الرصيد بعدها</th></tr></thead>
+          <tbody>{extras.data.moves.map((m: any) => <tr key={m.id}><td>{m.name}<div className="small muted num">{m.sku}</div></td><td className="small">{m.warehouse}</td><td className={"n " + (Number(m.qty) < 0 ? "neg-val" : "pos-val")}>{Number(m.qty) > 0 ? "+" : ""}{Number(m.qty)}</td><td className="n"><Money v={Math.abs(Number(m.value))} /></td><td className="n">{Number(m.balanceQty)}</td></tr>)}</tbody></table></div></div>}
+      </div>
       <div className="grid c2 no-print">
         {d.journal?.length > 0 && <div className="card"><div className="card-h"><h3>القيد المحاسبي</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{d.journal.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table></div></div>}
         <div className="grid">
@@ -311,6 +334,16 @@ export function DocumentView() {
       {landed && <LandedCostModal doc={d} onClose={(s) => { setLanded(false); if (s) reload(); }} />}
       {customs && <PayCustomsModal doc={d} onClose={(s) => { setCustoms(false); if (s) reload(); }} />}
       {pstmt && <PartnerStatement partner={{ id: d.partnerId, name: d.partnerName, ...(d.partner || {}) }} role={isSale ? "CUSTOMER" : "SUPPLIER"} onClose={() => setPstmt(false)} />}
+      {edit && <DocEditor direction={d.direction} kind={d.kind} id={d.id} onClose={(s) => { setEdit(false); if (s) reload(); }} />}
+      {fix && <Modal narrow title="تعديل مستند مرحّل" onClose={() => setFix(false)} footer={<><button className="btn" onClick={() => setFix(false)}>إغلاق</button></>}>
+        <p>المستند المرحّل لا يُعدَّل مباشرة حفاظاً على سلامة القيود وتسلسل الفواتير المُبلّغة لهيئة الزكاة والضريبة والجمارك. التصحيح الصحيح محاسبياً:</p>
+        <div className="stat-list">
+          {d.kind === "INVOICE" && <button className="item" style={{ border: 0, cursor: "pointer", font: "inherit" }} onClick={() => { setFix(false); creditNote(); }}><span>1) إصدار إشعار دائن {isSale ? "/ مرتجع" : "(مرتجع مشتريات)"} يُلغي الفاتورة كلياً أو جزئياً</span><b>←</b></button>}
+          <button className="item" style={{ border: 0, cursor: "pointer", font: "inherit" }} onClick={() => { setFix(false); copy(); }}><span>{d.kind === "INVOICE" ? "2) " : ""}إنشاء نسخة جديدة مطابقة كمسودة لتعديلها ثم ترحيلها</span><b>←</b></button>
+        </div>
+        <div className="small muted mt">الملاحظات غير المالية يمكن تعديلها مباشرة من بطاقة «ملاحظات» أسفل المستند.</div>
+      </Modal>}
+      {voucher && extras.data && <StockVoucher d={d} moves={extras.data.moves} onClose={() => setVoucher(false)} />}
     </div>
   );
 }
@@ -348,7 +381,7 @@ function LandedCostModal({ doc, onClose }: { doc: any; onClose: (s?: boolean) =>
   );
 }
 
-function QuickPayment({ doc, onClose }: { doc: any; onClose: (s?: boolean) => void }) {
+export function QuickPayment({ doc, onClose }: { doc: any; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const isSale = doc.direction === "SALE";
   const remaining = Math.round((Number(doc.total) - Number(doc.amountPaid)) * 100) / 100;
@@ -496,5 +529,36 @@ export function PublicInvoice() {
       <InvoiceA4 d={d} qr={qr} publicView />
       <div className="small muted no-print mt" style={{ textAlign: "center" }}>صادر عبر نظام ميزان — mizan-erp</div>
     </div>
+  );
+}
+
+function NotesCard({ d, canEdit, onSaved }: { d: any; canEdit: boolean; onSaved: () => void }) {
+  const [v, setV] = useState(d.notes || "");
+  const [ed, setEd] = useState(false);
+  const { run, busy } = useAction();
+  useEffect(() => setV(d.notes || ""), [d.notes]);
+  return (
+    <div className="card"><div className="card-h"><h3>🗒 ملاحظات</h3>{canEdit && !ed && <button className="btn sm" onClick={() => setEd(true)}>تعديل</button>}</div><div className="card-b">
+      {ed ? <><textarea className="input" rows={4} value={v} onChange={(e) => setV(e.target.value)} /><div className="row mt"><button className="btn sm primary" disabled={busy} onClick={() => run(async () => { await api(`/invoices/${d.id}/notes`, { method: "PUT", body: { notes: v } }); setEd(false); onSaved(); }, "تم حفظ الملاحظات")}>حفظ</button><button className="btn sm" onClick={() => { setEd(false); setV(d.notes || ""); }}>إلغاء</button></div><div className="small muted mt">تعديل الملاحظات لا يغيّر القيد ولا بيانات الفاتورة المالية.</div></>
+        : <div style={{ whiteSpace: "pre-wrap" }}>{d.notes || <span className="muted">لا توجد ملاحظات</span>}</div>}
+    </div></div>
+  );
+}
+
+function StockVoucher({ d, moves, onClose }: { d: any; moves: any[]; onClose: () => void }) {
+  const isIn = moves.some((m) => Number(m.qty) > 0) && !moves.some((m) => Number(m.qty) < 0);
+  const title = isIn ? "إذن استلام / إدخال مخزني" : "إذن صرف مخزني";
+  const c = d.company || {};
+  return (
+    <Modal wide title={title} onClose={onClose} footer={<><PrintBtn pdfName={`${title} ${d.number}`} /><button className="btn" onClick={onClose}>إغلاق</button></>}>
+      <div className="print-doc">
+        <div className="head"><div><h2>{c.nameAr}</h2><div className="small">{c.vatNumber && `الرقم الضريبي ${c.vatNumber}`}</div></div><div style={{ textAlign: "left" }}><h2>{title}</h2><div className="num">{d.number}</div><div className="small">{String(d.date).slice(0, 10)}</div></div></div>
+        <div className="grid c3 mb small"><div>{d.direction === "SALE" ? "العميل" : "المورد"}: <b>{d.partnerName}</b></div><div>المستودع: <b>{moves[0]?.warehouse}</b></div><div>المستند المرجعي: <b className="num">{d.number}</b>{d.supplierRef ? <> · فاتورة المورد <b className="num">{d.supplierRef}</b></> : null}</div></div>
+        <table><thead><tr><th>#</th><th>رمز الصنف</th><th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>تكلفة الوحدة</th><th>القيمة</th><th>ملاحظات الاستلام</th></tr></thead>
+          <tbody>{moves.map((m, i) => <tr key={m.id}><td>{i + 1}</td><td className="num">{m.sku}</td><td>{m.name}</td><td>{m.unit}</td><td className="num">{Math.abs(Number(m.qty))}</td><td className="num"><Money v={m.unitCost} /></td><td className="num"><Money v={Math.abs(Number(m.value))} /></td><td style={{ width: 120 }} /></tr>)}</tbody>
+          <tfoot><tr><td colSpan={6}>الإجمالي</td><td className="num"><Money v={moves.reduce((a, m) => a + Math.abs(Number(m.value)), 0)} /></td><td /></tr></tfoot></table>
+        <div className="jv-sign"><div>أمين المستودع</div><div>{isIn ? "المستلم / المورد" : "المستلم"}</div><div>المحاسب</div></div>
+      </div>
+    </Modal>
   );
 }

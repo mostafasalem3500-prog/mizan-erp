@@ -129,12 +129,17 @@ export function useFetch<T = any>(path: string | null, deps: any[] = []) {
 }
 
 // ─── UI primitives ─────────────────────────────────────────────────────────
+/** Dialog. Never closes on an outside click (forms used to vanish and be re-created); ✕ / Esc ask first when something was typed. */
 export function Modal({ title, onClose, children, footer, wide, narrow }: { title: React.ReactNode; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean; narrow?: boolean }) {
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && onClose(); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
+  const dirty = useRef(false);
+  const box = useRef<HTMLDivElement>(null);
+  const tryClose = () => { if (!dirty.current || window.confirm("توجد بيانات لم تُحفظ — إغلاق النافذة وفقدانها؟")) onClose(); };
+  const closeRef = useRef(tryClose); closeRef.current = tryClose;
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && box.current && box.current === [...document.querySelectorAll(".modal")].pop()) closeRef.current(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
   return (
-    <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={"modal" + (wide ? " wide" : "") + (narrow ? " narrow" : "")}>
-        <div className="m-h"><h3>{title}</h3><button className="btn ghost sm" onClick={onClose}>✕</button></div>
+    <div className="modal-bg" onMouseDown={(e) => { if (e.target === e.currentTarget) { box.current?.classList.remove("nudge"); void box.current?.offsetWidth; box.current?.classList.add("nudge"); } }}>
+      <div ref={box} className={"modal" + (wide ? " wide" : "") + (narrow ? " narrow" : "")} onInput={() => { dirty.current = true; }}>
+        <div className="m-h"><h3>{title}</h3><button className="btn ghost sm" title="إغلاق" onClick={tryClose}>✕</button></div>
         <div className="m-b">{children}</div>
         {footer && <div className="m-f">{footer}</div>}
       </div>
@@ -187,7 +192,23 @@ export function exportExcel(rows: any[], name: string, sheet = "Sheet1") {
 export function ExportBtn({ rows, name }: { rows: any[] | (() => any[]); name: string }) {
   return <button className="btn sm" onClick={() => exportExcel(typeof rows === "function" ? rows() : rows, name)}>⬇ Excel</button>;
 }
-export function PrintBtn() { return <button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button>; }
+export function PrintBtn({ pdfName }: { pdfName?: string } = {}) { return <><button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button><PdfBtn name={pdfName} /></>; }
+
+/** Downloads a real PDF of the surrounding document (open dialog, print document, card or page) — or of `target()` when given. */
+export function PdfBtn({ name, target, label = "⬇ PDF", className = "btn sm" }: { name?: string; target?: () => HTMLElement | null; label?: string; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  return <button className={className} disabled={busy} title="تنزيل PDF" onClick={async (e) => {
+    setBusy(true);
+    try {
+      const { elementToPdf, pdfTarget } = await import("./shared/pdf");
+      const el = target ? target() : pdfTarget(e.currentTarget as HTMLElement);
+      if (!el) throw new Error("لا يوجد محتوى للتصدير");
+      const title = name || (document.querySelector(".modal .m-h h3")?.textContent || document.querySelector(".topbar .title")?.textContent || "ميزان").trim();
+      await elementToPdf(el, `${title} ${today()}`);
+    } catch (er: any) { toast(er.message || "تعذّر إنشاء PDF", "err"); } finally { setBusy(false); }
+  }}>{busy ? "…" : label}</button>;
+}
 
 /** searchable picker (partners / products / accounts) */
 export function Picker<T extends { id: string }>({ value, onChange, fetcher, label, placeholder, renderItem, allowClear = true, autoFocus, onCreate }: { value: T | null; onChange: (v: T | null) => void; fetcher: (q: string) => Promise<T[]>; label: (t: T) => string; placeholder?: string; renderItem?: (t: T) => React.ReactNode; allowClear?: boolean; autoFocus?: boolean; onCreate?: () => void }) {

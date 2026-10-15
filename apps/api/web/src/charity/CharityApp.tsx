@@ -9,6 +9,7 @@ import { CharityDashboard, ReceiptsPage, DisbursementsPage, RequestsPage, Batche
 import { TemplatesCenter, CharitySettingsPage, BlankFormsPage } from "./TemplatesCenter";
 import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
 import { SponsorshipsPage, InkindPage, VolunteersPage } from "./pages3";
+import { TreasuryPage, JournalView } from "../pages/Round20";
 import "./charity.css";
 
 export const ChCtx = createContext<{ settings: any; reload: () => void; projects: any[]; reloadProjects: () => void }>({ settings: null, reload: () => undefined, projects: [], reloadProjects: () => undefined });
@@ -37,6 +38,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/custody", ic: "💼", label: "العهد المالية", perm: "payments.read" },
   { to: "/charity/refunds", ic: "↩", label: "طلبات الاسترداد", perm: "payments.read" },
   { group: "التخطيط والرقابة" },
+  { to: "/charity/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
   { to: "/charity/projects", ic: "🎯", label: "المشاريع والبرامج", perm: "payments.read" },
   { to: "/charity/budget", ic: "📊", label: "الموازنة التقديرية", perm: "reports.read", companyOnly: true },
   { to: "/charity/reports", ic: "📈", label: "قائمة الأنشطة والتقارير", perm: "reports.read" },
@@ -107,6 +109,8 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/purchases" element={<PurchasesPage />} />
                   <Route path="/charity/custody" element={<CustodyPage />} />
                   <Route path="/charity/refunds" element={<RefundsPage />} />
+                  <Route path="/charity/treasury" element={<TreasuryPage />} />
+                  <Route path="/charity/journals/:id" element={<JournalView />} />
                   <Route path="/charity/projects" element={<ProjectsPage />} />
                   <Route path="/charity/budget" element={<BudgetPage />} />
                   <Route path="/charity/reports" element={<ActivitiesPage />} />

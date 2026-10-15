@@ -86,8 +86,13 @@ ops.post("/invoices/:id/credit-note", dyn(true), h(async (req) => {
   if (o.kind !== "INVOICE" || o.status !== "POSTED") throw bad("يمكن إصدار إشعار دائن لفاتورة مرحلة فقط");
   const returned = await db.rows(`SELECT l.product_id, l.description, SUM(l.qty * l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.origin_id=$1 AND i.kind='CREDIT_NOTE' AND i.status='POSTED' GROUP BY l.product_id, l.description`, [o.id]);
   const lines = o.lines.map((l: any) => { const r = returned.find((x) => (x.productId || null) === (l.productId || null) && (x.productId || x.description === l.description)); const qty = Number(l.qty) - Number(r?.q || 0) / Number(l.factor || 1); return { productId: l.productId, accountId: l.accountId, description: l.description, qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uomId || null }; }).filter((l: any) => l.qty > 0);
+  if (req.body?.financial) {
+    // إشعار دائن مالي (خصم / تسوية سعر) بلا إرجاع بضاعة: سطر واحد على حساب المردودات والمسموحات
+    const acc = await db.maybe(`SELECT id FROM accounts WHERE company_id=$1 AND system_key=$2`, [cid(req), o.direction === "SALE" ? "SALES_RETURNS" : "PURCHASE_EXPENSE"]);
+    lines.splice(0, lines.length, { productId: null, accountId: acc?.id || null, description: `خصم / تسوية سعر على الفاتورة ${o.number}`, qty: 1, unitPrice: 0, discountPct: 0, taxCode: o.lines[0]?.taxCode || "S" } as any);
+  }
   if (!lines.length) throw conflict("تم إرجاع كامل الفاتورة مسبقاً");
-  const d = await tx((t) => inv.saveDraft(t, req.company, actor(req), { direction: o.direction, kind: "CREDIT_NOTE", partnerId: o.partnerId, warehouseId: o.warehouseId, originId: o.id, invoiceType: o.invoiceType, reason: req.body?.reason || "إلغاء / إرجاع", lines, isDemo: o.isDemo, pricesIncludeVat: false, date: req.body?.date }));
+  const d = await tx((t) => inv.saveDraft(t, req.company, actor(req), { direction: o.direction, kind: "CREDIT_NOTE", partnerId: o.partnerId, warehouseId: o.warehouseId, originId: o.id, invoiceType: o.invoiceType, reason: req.body?.reason || (req.body?.financial ? "خصم / تسوية سعر" : "إلغاء / إرجاع"), lines, isDemo: o.isDemo, pricesIncludeVat: false, date: req.body?.date }));
   return inv.getInvoice(db, cid(req), d.id);
 }));
 ops.delete("/invoices/:id", dyn(true), h(async (req) => {

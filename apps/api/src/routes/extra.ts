@@ -184,7 +184,7 @@ extra.get(
   h(async (req) => {
     const from = isDate(req.query.from) ? req.query.from : "1900-01-01", to = isDate(req.query.to) ? req.query.to : today();
     return db.rows(
-      `SELECT COALESCE(created_by,'—') salesperson, COUNT(*)::int invoices, SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END) total, SUM(CASE WHEN kind='CREDIT_NOTE' THEN -(taxable-cost_total) ELSE taxable-cost_total END) gross_profit,
+      `SELECT COALESCE(salesperson, created_by, '—') salesperson, COUNT(*)::int invoices, SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END) total, SUM(CASE WHEN kind='CREDIT_NOTE' THEN -(taxable-cost_total) ELSE taxable-cost_total END) gross_profit,
          SUM(CASE WHEN channel='POS' THEN 1 ELSE 0 END)::int pos_tickets
        FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date BETWEEN $2 AND $3 GROUP BY 1 ORDER BY total DESC`,
       [cid(req), from, to],

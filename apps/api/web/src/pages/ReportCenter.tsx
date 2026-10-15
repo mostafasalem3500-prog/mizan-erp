@@ -1,7 +1,7 @@
 /** Report center: one generic renderer for every module report — filter bar built from the catalog, KPIs, chart, sortable table, Excel/print, saved presets, URL-synced filters. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
-import { api, q as qs, useFetch, Money, money, Loading, Empty, Input, Select, Picker, partnerFetcher, productFetcher, accountFetcher, useCompanyContext, useToast, exportExcel, today, yearStart, fmtDate, fmtDT, useSorted, Th, SearchBox, PeriodFilter, BarChart, useLocalState, matches, addMonths } from "../lib";
+import { api, q as qs, useFetch, Money, money, Loading, Empty, Input, Select, Picker, partnerFetcher, productFetcher, accountFetcher, useCompanyContext, useToast, exportExcel, today, yearStart, fmtDate, fmtDT, useSorted, Th, SearchBox, PeriodFilter, BarChart, useLocalState, matches, addMonths, PdfBtn } from "../lib";
 
 type Def = { key: string; module: string; title: string; desc: string; filters: string[]; groupBy?: { key: string; label: string }[]; chart?: string };
 type Col = { key: string; label: string; type?: string; sum?: boolean };
@@ -156,7 +156,7 @@ export function ReportCenterPage() {
                 {(presets[def.key] || []).length > 0 && <Select value="" onChange={(e) => { const p = presets[def.key].find((x) => x.name === e.target.value); if (p) applyPreset(p); }}><option value="">فلاتر محفوظة…</option>{presets[def.key].map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}</Select>}
                 <button className="btn sm" onClick={savePreset} title="حفظ الفلاتر الحالية باسم">💾 حفظ الفلتر</button>
                 <button className="btn sm" onClick={copyLink}>🔗 نسخ الرابط</button>
-                <button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button>
+                <button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button><PdfBtn name={def.title} />
                 {result && <button className="btn sm" onClick={() => exportExcel(exportRows(), def.title)}>⬇ Excel</button>}
               </div>
             </div>

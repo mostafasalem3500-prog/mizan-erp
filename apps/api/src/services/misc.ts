@@ -40,7 +40,7 @@ export async function payVat(t: Db, companyId: string, user: string, returnId: s
 export interface AdjustmentInput {
   date?: string;
   warehouseId?: string;
-  kind?: "COUNT" | "OPENING" | "TRANSFER";
+  kind?: "COUNT" | "OPENING" | "TRANSFER" | "DAMAGE";
   toWarehouse?: string;
   notes?: string;
   lines: { productId: string; qty: number; unitCost?: number; lotNo?: string; expiryDate?: string }[]; // COUNT: qty = counted (actual) qty ; OPENING: qty to add ; TRANSFER: qty to move
@@ -53,7 +53,7 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
   const kind = a.kind || "COUNT";
   const wh = a.warehouseId || (await t.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC LIMIT 1`, [companyId])).id;
   if (!a.lines?.length) throw bad("أضف صنفاً واحداً على الأقل");
-  const number = await nextNumber(t, companyId, kind === "TRANSFER" ? "TRF" : kind === "OPENING" ? "OPN" : "ADJ", date);
+  const number = await nextNumber(t, companyId, kind === "TRANSFER" ? "TRF" : kind === "OPENING" ? "OPN" : kind === "DAMAGE" ? "DMG" : "ADJ", date);
   const jl: any[] = [];
   const out: any[] = [];
   let totalValue = 0;
@@ -74,6 +74,15 @@ export async function stockAdjustment(t: Db, companyId: string, user: string, a:
       jl.push({ key: "INVENTORY", debit: v, description: `رصيد افتتاحي ${p.name}` });
       totalValue = r2(totalValue + v);
       out.push({ productId: p.id, name: p.name, qty, value: v });
+      continue;
+    }
+    if (kind === "DAMAGE") {
+      // إتلاف / صرف تالف: out of stock at average cost → عجز وتالف المخزون
+      if (!(qty > 0)) throw bad("كمية الإتلاف يجب أن تكون أكبر من صفر");
+      const v = await stockOut(t, companyId, { productId: p.id, warehouseId: wh, qty, date, sourceType: "ADJUSTMENT", reference: number, isDemo: a.isDemo, productName: p.name });
+      jl.push({ key: "INV_LOSS", debit: v, description: `إتلاف ${p.name}${a.notes ? " — " + a.notes : ""}` }, { key: "INVENTORY", credit: v, description: `إتلاف ${p.name}` });
+      totalValue = r2(totalValue - v);
+      out.push({ productId: p.id, name: p.name, qty: -qty, value: -v });
       continue;
     }
     // COUNT: bring balance to counted qty

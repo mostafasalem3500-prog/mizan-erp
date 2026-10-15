@@ -451,6 +451,7 @@ export function PrintModal({ tplKey, data, settings, onClose, choices }: { tplKe
   const empty = !data || !Object.keys(data).length;
   const [blank, setBlank] = useState(empty);
   const [copies, setCopies] = useState(1);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   useEffect(() => setK(tplKey), [tplKey]);
   return (
@@ -461,7 +462,9 @@ export function PrintModal({ tplKey, data, settings, onClose, choices }: { tplKe
         <button className={"btn sm" + (blank ? " primary" : "")} onClick={() => setBlank(true)}>فارغ للتعبئة اليدوية</button>
       </div>
       {blank && <label className="row small" style={{ gap: 4 }}>عدد النسخ <input className="input" type="number" min={1} max={50} value={copies} onChange={(e) => setCopies(Math.max(1, Math.min(50, Number(e.target.value) || 1)))} style={{ width: 64 }} /></label>}
-      <button className="btn primary" onClick={() => printA4(ref.current)}>🖨 طباعة A4</button><button className="btn" onClick={onClose}>إغلاق</button>
+      <button className="btn primary" onClick={() => printA4(ref.current)}>🖨 طباعة A4</button>
+      <button className="btn" disabled={pdfBusy} onClick={async () => { setPdfBusy(true); try { const { pagesToPdf } = await import("../shared/pdf"); await pagesToPdf([...(ref.current?.querySelectorAll(".a4") || [])] as HTMLElement[], `${resolveTpl(k, settings?.templates?.[k]).title} ${data?.number || ""}`); } finally { setPdfBusy(false); } }}>{pdfBusy ? "…" : "⬇ PDF"}</button>
+      <button className="btn" onClick={onClose}>إغلاق</button>
     </>}>
       <div className="a4-stage"><div ref={ref} className="a4-wrap">{settings ? Array.from({ length: blank ? copies : 1 }).map((_, i) => <A4 key={i} tplKey={k} settings={settings} data={blank ? {} : data} blank={blank} />) : null}</div></div>
     </Modal>
