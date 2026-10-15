@@ -10,7 +10,16 @@ import { TemplatesCenter, CharitySettingsPage, BlankFormsPage } from "./Template
 import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
 import { SponsorshipsPage, InkindPage, VolunteersPage } from "./pages3";
 import { TreasuryPage, JournalView } from "../pages/Round20";
+import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
+
+/** The association's logo becomes the tab icon while inside /charity; the Mizan icon comes back on leave. */
+function swapFavicon(href: string) {
+  const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"], link[rel="apple-touch-icon"]'));
+  const prev = links.map((l) => [l, l.href, l.type] as const);
+  links.forEach((l) => { l.href = href; l.type = "image/png"; });
+  return () => prev.forEach(([l, h, t]) => { l.href = h; l.type = t; });
+}
 
 export const ChCtx = createContext<{ settings: any; reload: () => void; projects: any[]; reloadProjects: () => void }>({ settings: null, reload: () => undefined, projects: [], reloadProjects: () => undefined });
 export const useCharity = () => useContext(ChCtx);
@@ -57,7 +66,8 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
   const st = useFetch("/charity/settings");
   const pr = useFetch<any[]>("/charity/projects");
   useEffect(() => setMenu(false), [loc.pathname]);
-  useEffect(() => { document.title = (st.data?.associationName || "الجمعية") + " — ميزان"; return () => { document.title = "ميزان ERP"; }; }, [st.data?.associationName]);
+  useEffect(() => { document.title = st.data?.associationName || DEFAULT_NAME; return () => { document.title = "ميزان ERP"; }; }, [st.data?.associationName]);
+  useEffect(() => swapFavicon(st.data?.logoUrl || DEFAULT_LOGO), [st.data?.logoUrl]);
   const s = st.data;
   const labels: Record<string, string> = s?.theme?.labels || {};
   const items = CH_NAV.filter((n) => n.group || (can(n.perm) && !(me.lockedBranch && n.companyOnly)));
@@ -68,8 +78,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
         <div className="app charity-app">
           <aside className={"sidebar" + (menu ? " open" : "")}>
             <div className="brand">
-              <div className="ch-logo">{s?.company?.logo ? <img src={s.company.logo} alt="" /> : <div className="ph">{(s?.associationName || me.company.nameAr).slice(0, 1)}</div>}<span className="ch-name">{s?.associationName || me.company.nameAr}</span></div>
-              <small>{s?.licenseNo ? `ترخيص رقم ${s.licenseNo}` : "واجهة الجمعيات الخيرية"}</small>
+              <div className="ch-logo"><img src={s?.logoUrl || DEFAULT_LOGO} alt={s?.associationName || DEFAULT_NAME} /></div>
+              <span className="ch-name">{s?.associationName || DEFAULT_NAME}</span>
+              <small>{`ترخيص رقم ${s?.licenseNo || DEFAULT_LICENSE}`}</small>
             </div>
             <nav>
               {items.map((n, i) => n.group ? <div key={i} className="group">{n.group}</div> : <NavLink key={n.to} to={n.to} end={n.to === "/charity"}><span className="ic">{n.ic}</span>{labels[n.to] || n.label}</NavLink>)}

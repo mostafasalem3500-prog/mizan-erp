@@ -43,11 +43,12 @@ export function TemplatesCenter() {
         <div className="row"><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={ov.seal ?? base.seal ?? true} onChange={(e) => setOv({ seal: e.target.checked })} />مكان الختم</label><label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={!!ov.copy2} onChange={(e) => setOv({ copy2: e.target.checked })} />طباعة نسختين (أصل + نسخة)</label>{base.pageBreak && <label className="row" style={{ gap: 6 }} title="النموذج طويل ويُطبع افتراضياً على صفحتين بخط مقروء"><input type="checkbox" disabled={!write} checked={!!ov.onePage} onChange={(e) => setOv({ onePage: e.target.checked })} />ضغطه في صفحة واحدة</label>}</div>
         <h4 className="mt">الهوية البصرية (لكل القوالب)</h4>
         <div className="grid c2">
-          <Field label="اللون الرئيسي"><Input type="color" disabled={!write} value={theme.color || "#1f6f4a"} onChange={(e) => { setTheme({ ...theme, color: e.target.value }); setDirty(true); }} /></Field>
-          <Field label="اللون الثانوي"><Input type="color" disabled={!write} value={theme.accent || "#b7862b"} onChange={(e) => { setTheme({ ...theme, accent: e.target.value }); setDirty(true); }} /></Field>
+          <Field label="اللون الرئيسي"><Input type="color" disabled={!write} value={theme.color || "#1c3f8a"} onChange={(e) => { setTheme({ ...theme, color: e.target.value }); setDirty(true); }} /></Field>
+          <Field label="اللون الثانوي"><Input type="color" disabled={!write} value={theme.accent || "#3f86d8"} onChange={(e) => { setTheme({ ...theme, accent: e.target.value }); setDirty(true); }} /></Field>
         </div>
         <Field label="نص التذييل (اختياري)"><Input disabled={!write} value={theme.footer || ""} onChange={(e) => { setTheme({ ...theme, footer: e.target.value }); setDirty(true); }} placeholder="مثال: العنوان الوطني أو الموقع الإلكتروني" /></Field>
         <label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write} checked={!theme.hideLogo} onChange={(e) => { setTheme({ ...theme, hideLogo: !e.target.checked }); setDirty(true); }} />إظهار الشعار</label>
+        <label className="row" style={{ gap: 6 }}><input type="checkbox" disabled={!write || !!theme.hideLogo} checked={!theme.hideLogo && !theme.hideWatermark} onChange={(e) => { setTheme({ ...theme, hideWatermark: !e.target.checked }); setDirty(true); }} />علامة مائية بالشعار</label>
         <div className="row mt">
           {write && <button className="btn primary" disabled={busy || !dirty} onClick={save}>حفظ</button>}
           {write && (all[key] && Object.keys(all[key]).length > 0) && <button className="btn ghost" onClick={() => { const n = { ...all }; delete n[key]; setAll(n); setDirty(true); }}>استعادة الافتراضي</button>}
@@ -76,7 +77,8 @@ export function CharitySettingsPage() {
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const sig = (r: string, k: string, v: string) => setF({ ...f, signatories: { ...f.signatories, [r]: { ...(f.signatories?.[r] || {}), [k]: v } } });
   const write = can("settings.write");
-  const curLogo = logo === undefined ? settings?.company?.logo : logo;
+  const curLogo = logo === undefined ? settings?.logoUrl : logo === null ? "/charity/logo.png" : logo;
+  const isDefault = logo === null || (logo === undefined && settings?.logoIsDefault);
   const save = () => run(async () => { const { labels, ...rest } = f; await api("/charity/settings", { method: "PUT", body: { ...rest, theme: { ...(settings?.theme || {}), labels }, ...(logo !== undefined ? { logo } : {}) } }); setLogo(undefined); reload(); }, "تم حفظ إعدادات الجمعية");
   return (
     <div className="grid c2">
@@ -89,7 +91,7 @@ export function CharitySettingsPage() {
           <Field label="البريد الإلكتروني"><Input value={f.email || ""} onChange={set("email")} disabled={!write} dir="ltr" /></Field>
         </div>
         <Field label="العنوان"><Input value={f.address || ""} onChange={set("address")} disabled={!write} /></Field>
-        <Field label="الشعار"><div className="row">{curLogo ? <img src={curLogo} alt="" style={{ height: 64, background: "#fff", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }} /> : <span className="muted small">لا يوجد شعار</span>}{write && <label className="btn sm">رفع شعار<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setLogo(await fileToDataUrl(file, 400)); }} /></label>}{write && curLogo && <button className="btn sm ghost" onClick={() => setLogo(null)}>إزالة</button>}</div></Field>
+        <Field label="الشعار"><div className="row">{curLogo ? <img src={curLogo} alt="" style={{ height: 72, width: 72, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: 12, padding: 2 }} /> : <span className="muted small">لا يوجد شعار</span>}{write && <label className="btn sm">رفع شعار<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setLogo(await fileToDataUrl(file, 400)); }} /></label>}{write && !isDefault && <button className="btn sm ghost" onClick={() => setLogo(null)}>استعادة شعار الجمعية الأصلي</button>}{isDefault && <span className="muted small">الشعار الرسمي للجمعية</span>}</div></Field>
         <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={!!f.defaultUi} onChange={set("defaultUi")} disabled={!write} />فتح واجهة الجمعية تلقائياً بعد تسجيل الدخول</label>
         <div className="alert info small">رابط واجهة الجمعية المستقل: <b dir="ltr">{location.origin}/charity</b> — يستخدم نفس الحسابات والقيود والمستخدمين، ويمكن الانتقال للبرنامج المحاسبي الأساسي في أي وقت.</div>
       </div></div>

@@ -23,6 +23,7 @@ import { ReportCenterPage } from "./pages/ReportCenter";
 import { PartnerProfilePage } from "./pages/PartnerProfile";
 import { ProductProfilePage, TreasuryPage, JournalView, CountSheetPage } from "./pages/Round20";
 import { CharityApp, charityDefault } from "./charity/CharityApp";
+import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/templates";
 
 const NAV = [
   { group: "الرئيسية" },
@@ -232,10 +233,20 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   const loc = useLocation();
   const charity = loc.pathname.startsWith("/charity");
+  useEffect(() => { if (!charity) return; document.title = DEFAULT_NAME; const l = document.querySelector<HTMLLinkElement>('link[rel~="icon"]'); const h = l?.href, ty = l?.type; if (l) { l.href = DEFAULT_LOGO; l.type = "image/png"; } return () => { document.title = "ميزان ERP"; if (l && h) { l.href = h; l.type = ty || ""; } }; }, [charity]);
   const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { const r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
   return (
-    <div className="auth">
-      <div className="art">
+    <div className={"auth" + (charity ? " ch-auth" : "")}>
+      {charity ? <div className="art">
+        <div className="ch-auth-id"><img src={DEFAULT_LOGO} alt={DEFAULT_NAME} /><h1>{DEFAULT_NAME}</h1><div style={{ opacity: .85 }}>ترخيص رقم {DEFAULT_LICENSE}</div></div>
+        <ul>
+          <li>✔ سندات القبض والصرف والتبرعات والكفالات</li>
+          <li>✔ المستفيدون والمتطوعون والمشاريع والميزانية</li>
+          <li>✔ العهد والمشتريات وطلبات الصرف والمسيّرات</li>
+          <li>✔ نماذج A4 رسمية بشعار الجمعية — مطبوعة أو فارغة</li>
+          <li>✔ قيود محاسبية آلية وقائمة الأنشطة</li>
+        </ul>
+      </div> : <div className="art">
         <div className="row"><img src="/favicon.svg" width={54} alt="" /><h1>ميزان ERP</h1></div>
         <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للمنشآت السعودية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافق مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p>
         <ul>
@@ -246,12 +257,12 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
           <li>✔ ميزان مراجعة، قائمة دخل، ميزانية، تدفقات نقدية، أعمار ديون، إقرار ضريبي</li>
           <li>✔ متعدد الشركات والمستخدمين مع صلاحيات وسجل تدقيق</li>
         </ul>
-      </div>
+      </div>}
       <div className="form">
         <form className="box card" onSubmit={submit}>
           <div className="card-b">
-            <h2 className="mb">{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h2>
-            {charity && <div className="alert info small">💚 الدخول إلى واجهة الجمعيات الخيرية — نفس حساب ميزان ERP</div>}
+            {charity && <div className="ch-auth-m"><img src={DEFAULT_LOGO} alt="" /><b>{DEFAULT_NAME}</b></div>}<h2 className="mb">{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h2>
+            {charity && <div className="alert info small">الدخول إلى منصة {DEFAULT_NAME} — بحساب ميزان ERP نفسه</div>}
             <div className="grid">
               {mode === "register" && <>
                 <Field label="الاسم الكامل"><Input required value={f.fullName} onChange={set("fullName")} /></Field>

@@ -42,7 +42,7 @@ const PAYER_TYPES = ["INDIVIDUAL", "ENTITY", "COMPANY", "OTHER"];
 const CAPACITIES = ["VOLUNTEER", "EMPLOYEE", "SUPPLIER", "BENEFICIARY", "OTHER"];
 
 /** Identity taken from the association's own forms; editable from «إعدادات الجمعية». */
-export const DEFAULT_ASSOCIATION = { name: "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة الأهلية", licenseNo: "1000888600" };
+export const DEFAULT_ASSOCIATION = { name: "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة", licenseNo: "1000888600", logo: "/charity/logo.png" };
 
 export async function ensureCharity(t: Db, companyId: string) {
   const have = await t.rows(`SELECT code, id FROM accounts WHERE company_id=$1 AND code = ANY($2)`, [companyId, ["4", "5", "1103", ...CHARITY_ACCOUNTS.map((a) => a[0])]]);
@@ -96,7 +96,7 @@ export async function getSettings(t: Db, companyId: string) {
   await ensureCharity(t, companyId);
   const s = await t.one(`SELECT * FROM charity_settings WHERE company_id=$1`, [companyId]);
   const c = await t.one(`SELECT name_ar, name_en, logo, vat_number, cr_number, phone, email, city, district, street FROM companies WHERE id=$1`, [companyId]);
-  return { ...s, company: c };
+  return { ...s, logoUrl: s.logo || DEFAULT_ASSOCIATION.logo, logoIsDefault: !s.logo, company: c };
 }
 
 export async function saveSettings(t: Db, companyId: string, b: any) {
@@ -113,7 +113,7 @@ export async function saveSettings(t: Db, companyId: string, b: any) {
   await t.update("charity_settings", { companyId }, upd);
   if (b.logo !== undefined) {
     if (b.logo && (!/^data:image\/(png|jpe?g|webp|svg\+xml);base64,/.test(String(b.logo)) || String(b.logo).length > 400_000)) throw bad("الشعار يجب أن يكون صورة لا تتجاوز 300 كيلوبايت");
-    await t.exec(`UPDATE companies SET logo=$1 WHERE id=$2`, [b.logo || null, companyId]);
+    await t.exec(`UPDATE charity_settings SET logo=$1 WHERE company_id=$2`, [b.logo || null, companyId]);
   }
   return getSettings(t, companyId);
 }

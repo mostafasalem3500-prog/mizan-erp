@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useToast, useCompanyContext, today, fmtDate, monthStart, yearStart, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, BarChart, useUrlSearch, confirmDlg, PdfBtn } from "../lib";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useCharity } from "./CharityApp";
-import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData } from "./templates";
+import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData, DEFAULT_LOGO } from "./templates";
 import { AlertsCard, waLink } from "./pages3";
 
 // ─── labels ────────────────────────────────────────────────────────────────
@@ -72,10 +72,10 @@ export function CharityDashboard() {
   return (
     <div>
       <div className="ch-hero">
-        <div>
+        <div className="ch-hero-id"><img src={settings?.logoUrl || DEFAULT_LOGO} alt="" /><div>
           <h2>{settings?.associationName}</h2>
           <div className="muted">{settings?.licenseNo ? `ترخيص رقم ${settings.licenseNo}` : "أضف رقم الترخيص من إعدادات الجمعية"} · مؤشرات الفترة من {from} إلى {to}</div>
-        </div>
+        </div></div>
         <div className="row"><PeriodFilter from={from} to={to} onChange={(f, t) => { setFrom(f || yearStart()); setTo(t || today()); }} /></div>
       </div>
       <div className="ch-quick">{quick.map((x) => <Link key={x.to} to={x.to}><span className="ic">{x.ic}</span><b>{x.t}</b><small>{x.s}</small></Link>)}</div>
@@ -536,8 +536,8 @@ function BatchSheet({ b, onClose }: { b: any; onClose: () => void }) {
   const lines: any[] = b.lines || [];
   return (
     <Modal title={`كشف المسير ${b.number}`} wide onClose={onClose} footer={<><button className="btn" onClick={() => exportExcel(lines.map((l, i) => ({ "#": i + 1, الاسم: l.name, الهوية: l.idNo, البنك: l.bankName, الآيبان: l.iban, المبلغ: Number(l.amount), السبب: l.reason || b.title })), `مسير-${b.number}`)}>⬇ Excel للبنك</button><button className="btn primary" onClick={() => printA4(ref.current)}>🖨 طباعة A4</button><button className="btn" onClick={onClose}>إغلاق</button></>}>
-      <div className="a4-stage"><div className="a4-wrap" ref={ref}><div className="a4" style={{ ["--a4c" as any]: settings?.theme?.color || "#1f6f4a", ["--a4a" as any]: settings?.theme?.accent || "#b7862b", fontSize: 12 }}>
-        <header className="a4-h"><div className="a4-org">{settings?.company?.logo ? <img src={settings.company.logo} alt="" /> : <div className="a4-logo-ph">{(settings?.associationName || "").slice(0, 1)}</div>}<div><b>{settings?.associationName}</b>{settings?.licenseNo && <span>ترخيص رقم ({settings.licenseNo})</span>}</div></div><div className="a4-title"><h1>كشف مسير المصروفات</h1><p>{b.title}</p><div className="a4-meta"><span className="a4-code">{b.number}</span></div></div></header>
+      <div className="a4-stage"><div className="a4-wrap" ref={ref}><div className="a4" style={{ ["--a4c" as any]: settings?.theme?.color || "#1c3f8a", ["--a4a" as any]: settings?.theme?.accent || "#3f86d8", fontSize: 12 }}>
+        <header className="a4-h"><div className="a4-org"><img src={settings?.logoUrl || DEFAULT_LOGO} alt="" /><div><b>{settings?.associationName}</b>{settings?.licenseNo && <span>ترخيص رقم ({settings.licenseNo})</span>}</div></div><div className="a4-title"><h1>كشف مسير المصروفات</h1><p>{b.title}</p><div className="a4-meta"><span className="a4-code">{b.number}</span></div></div></header>
         <div className="a4-body">
           <div className="a4-grid" style={{ marginBottom: 8 }}><div className="a4-f"><label>التاريخ</label><div className="a4-v">{fmtDate(b.date)}</div></div><div className="a4-f"><label>نوع الصرف</label><div className="a4-v">{KIND[b.kind]}</div></div><div className="a4-f"><label>المشروع</label><div className="a4-v">{b.projectName || "—"}</div></div></div>
           <table className="tbl compact" style={{ width: "100%", border: "1px solid #ccc" }}><thead><tr><th>#</th><th>الاسم</th><th>الهوية</th><th>الآيبان</th><th className="n">المبلغ</th><th>توقيع المستلم</th></tr></thead>
@@ -768,7 +768,7 @@ function HistoryModal({ role, p, onClose }: { role: "DONOR" | "BENEFICIARY"; p: 
   return (
     <Modal title={`${role === "DONOR" ? "سجل تبرعات" : "سجل مساعدات"}: ${p.name}`} wide onClose={onClose} footer={<>{role === "DONOR" && data && <><select className="input" style={{ width: 150 }} value={certYear} onChange={(e) => setCertYear(e.target.value)}><option value="">كل السنوات</option>{data.byYear.map((y: any) => <option key={y.year} value={y.year}>{y.year}</option>)}</select><button className="btn primary" onClick={() => { const list = ok.filter((x: any) => !certYear || String(x.date).startsWith(certYear)); const amt = list.reduce((a: number, x: any) => a + Number(x.amount), 0); setCert(donorCertData(p.name, amt, certYear ? `عام ${certYear}م` : list.length ? `من ${fmtDate(list[list.length - 1].date)} إلى ${fmtDate(list[0].date)}` : "")); }}>🎖 شهادة شكر وتقدير</button></>}<button className="btn" onClick={() => window.print()}>🖨 طباعة الكشف</button><PdfBtn className="btn" name={`كشف ${p.name}`} /><button className="btn" onClick={onClose}>إغلاق</button></>}>
       {!data ? <Loading /> : <div className="print-doc stmt">
-        <div className="head"><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo ? `ترخيص رقم ${settings.licenseNo}` : ""}</div></div><div style={{ textAlign: "left" }}><h3>{role === "DONOR" ? "كشف تبرعات" : "كشف مساعدات"}</h3><div>{p.name} — {p.code}</div><div className="small">تاريخ الطباعة {today()}</div></div></div>
+        <div className="head"><div className="row"><img className="ch-print-logo" src={settings?.logoUrl || DEFAULT_LOGO} alt="" /><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo ? `ترخيص رقم ${settings.licenseNo}` : ""}</div></div></div><div style={{ textAlign: "left" }}><h3>{role === "DONOR" ? "كشف تبرعات" : "كشف مساعدات"}</h3><div>{p.name} — {p.code}</div><div className="small">تاريخ الطباعة {today()}</div></div></div>
         {role === "DONOR" && data.byYear.length > 0 && <div className="row mb">{data.byYear.map((y: any) => <div key={y.year} className="badge teal" style={{ fontSize: 13 }}>{y.year}: {money(y.total)} ({y.count})</div>)}</div>}
         <table><thead><tr><th>الرقم</th><th>التاريخ</th><th>{role === "DONOR" ? "المصدر" : "السبب"}</th><th>المشروع</th><th>الطريقة</th><th>المبلغ</th><th>الحالة</th><th className="no-print" /></tr></thead>
           <tbody>{(list || []).map((x: any) => <tr key={x.id}><td>{x.number}</td><td>{fmtDate(x.date)}</td><td>{role === "DONOR" ? SOURCE[x.source] : x.reason}</td><td>{x.projectName || "—"}</td><td>{role === "DONOR" ? METHOD[x.method] : KIND[x.kind]}</td><td className="num"><Money v={x.amount} /></td><td>{DOC_ST[x.status]}</td><td className="no-print"><button className="btn sm" onClick={() => setPr(x)}>🖨</button></td></tr>)}</tbody>
@@ -869,7 +869,7 @@ export function ActivitiesPage() {
         </div>
         <div className="grid c2 mt">
           <div className="card"><div className="print-doc stmt">
-            <div className="head"><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo && `ترخيص رقم ${settings.licenseNo}`}</div></div><div style={{ textAlign: "left" }}><h3>قائمة الأنشطة</h3><div className="small">للفترة من {data.from} إلى {data.to}</div></div></div>
+            <div className="head"><div className="row"><img className="ch-print-logo" src={settings?.logoUrl || DEFAULT_LOGO} alt="" /><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo && `ترخيص رقم ${settings.licenseNo}`}</div></div></div><div style={{ textAlign: "left" }}><h3>قائمة الأنشطة</h3><div className="small">للفترة من {data.from} إلى {data.to}</div></div></div>
             <table><tbody>
               <tr><th colSpan={2} style={{ textAlign: "start" }}>الإيرادات والتبرعات</th></tr>
               {data.revenues.map((r: any) => <tr key={r.code}><td>{r.nameAr} <span className="small muted">{r.code}</span></td><td className="num"><Money v={r.amount} /></td></tr>)}

@@ -1,5 +1,6 @@
 /** Round 20 screens: product profile, treasury (cash & bank accounts), journal entry page, inventory count sheet & operations summary. */
-import React, { useMemo, useState } from "react";
+import React, { useContext, useMemo, useState } from "react";
+import { ChCtx } from "../charity/CharityApp";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, useAction, useCompanyContext, today, fmtDate, fmtDT, SearchBox, matches, useSorted, Th, exportExcel, PdfBtn, PrintBtn, useBase, confirmDlg, JTYPE_AR, sourceLink, TAX_AR, PeriodFilter, monthStart } from "../lib";
 import { ProductEditor, AdjustmentModal, StockCardModal } from "./Master";
@@ -191,6 +192,7 @@ export function JournalView() {
   const { id } = useParams();
   const nav = useNavigate(); const base = useBase();
   const { me } = useCompanyContext();
+  const ch = useContext(ChCtx).settings;
   const { data: e, loading } = useFetch(`/journals/${id}`);
   if (loading && !e) return <Loading />;
   if (!e) return <Empty text="القيد غير موجود" />;
@@ -200,7 +202,7 @@ export function JournalView() {
     <div className="grid">
       <div className="row no-print"><button className="btn sm" onClick={() => nav(-1)}>← رجوع</button><h2>قيد يومية {e.number}</h2><Badge s={e.status} /><div className="grow" />{src && <Link className="btn sm" to={`${base}${src}`}>المستند المصدر</Link>}{e.reversalOf && <Link className="btn sm" to={`${base}/journals/${e.reversalOf}`}>القيد الأصلي</Link>}{e.reversedBy && <Link className="btn sm" to={`${base}/journals/${e.reversedBy}`}>القيد العكسي</Link>}<PrintBtn pdfName={`قيد ${e.number}`} /></div>
       <div className="card print-doc jv-doc">
-        <div className="head"><div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && `الرقم الضريبي ${me.company.vatNumber}`}</div></div><div style={{ textAlign: "left" }}><h2>قيد يومية</h2><div className="num">{e.number}</div><div className="small">{fmtDate(e.date)}</div></div></div>
+        <div className="head">{ch && base === "/charity" ? <div className="row"><img className="ch-print-logo" src={ch.logoUrl} alt="" /><div><h2>{ch.associationName}</h2><div className="small">{ch.licenseNo && `ترخيص رقم ${ch.licenseNo}`}</div></div></div> : <div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && `الرقم الضريبي ${me.company.vatNumber}`}</div></div>}<div style={{ textAlign: "left" }}><h2>قيد يومية</h2><div className="num">{e.number}</div><div className="small">{fmtDate(e.date)}</div></div></div>
         <div className="grid c3 mb small">
           <div>النوع: <b>{JTYPE_AR[e.type] || e.type}</b></div><div>المرجع: <b className="num">{e.reference || "—"}</b></div><div>الحالة: <b>{e.status === "POSTED" ? "مرحّل" : e.status}</b>{e.reversedBy ? " (معكوس)" : ""}</div>
           <div style={{ gridColumn: "1 / -1" }}>البيان: <b>{e.memo}</b></div>

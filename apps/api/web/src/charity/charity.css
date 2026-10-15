@@ -1,18 +1,18 @@
 /* ── Round 16: charity interface (own identity on top of the base design system) ── */
-.charity-app { --primary: #1f6f4a; --primary-2: #17573a; --primary-soft: #e7f3ec; --accent: #b7862b; --accent-soft: #fbf3e2; --bg: #f4f6f1; }
-.charity-app .sidebar { background: linear-gradient(180deg, #0f2b1f 0%, #133626 100%); }
+.charity-app { --primary: #1f4594; --primary-2: #173670; --primary-soft: #e8eef9; --accent: #3f86d8; --accent-soft: #e6f0fb; --bg: #f3f5fa; }
+.charity-app .sidebar { background: linear-gradient(180deg, #0c1838 0%, #13285a 100%); }
 .charity-app .sidebar .brand { flex-direction: column; align-items: flex-start; gap: 4px; padding-bottom: 8px; }
 .charity-app .sidebar .brand .ch-logo { display: flex; align-items: center; gap: 10px; }
 .charity-app .sidebar .brand .ch-logo img, .charity-app .sidebar .brand .ch-logo .ph { width: 40px; height: 40px; border-radius: 10px; background: #fff; object-fit: contain; display: grid; place-items: center; color: var(--primary); font-weight: 800; }
 .charity-app .sidebar .brand .ch-name { font-size: 14.5px; line-height: 1.35; }
-.charity-app .sidebar .brand small { color: #c9b27a; font-weight: 500; font-size: 11.5px; }
+.charity-app .sidebar .brand small { color: #9fc0ec; font-weight: 500; font-size: 11.5px; }
 .charity-app .sidebar a.active { background: var(--primary); box-shadow: inset -3px 0 0 var(--accent); }
-.charity-app .sidebar .group { color: #b9a573; }
-.charity-app .topbar { background: rgba(244,246,241,.88); }
-.ch-switch { display: flex; align-items: center; gap: 8px; margin: 6px 0; padding: 8px 10px; border-radius: 9px; color: #e7dcc0 !important; background: rgba(183,134,43,.15); font-size: 12.5px; }
-.ch-hero { background: linear-gradient(120deg, #1f6f4a, #15523a 60%, #0f3d2b); color: #fff; border-radius: var(--radius); padding: 18px 22px; display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+.charity-app .sidebar .group { color: #8fb0e0; }
+.charity-app .topbar { background: rgba(243,245,250,.88); }
+.ch-switch { display: flex; align-items: center; gap: 8px; margin: 6px 0; padding: 8px 10px; border-radius: 9px; color: #dbe7fa !important; background: rgba(63,134,216,.18); font-size: 12.5px; }
+.ch-hero { background: linear-gradient(120deg, #1f4594, #173670 60%, #0e1f47); color: #fff; border-radius: var(--radius); padding: 18px 22px; display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
 .ch-hero h2 { font-size: 20px; }
-.ch-hero .muted { color: #cfe3d7; }
+.ch-hero .muted { color: #d3def3; }
 .ch-hero .btn { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.25); }
 .ch-hero .btn.gold { background: var(--accent); border-color: var(--accent); }
 .ch-quick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
@@ -27,7 +27,7 @@
 .ch-bar .trk div.gold { background: var(--accent); }
 .ch-bar .v { width: 110px; text-align: left; font-size: 12.5px; }
 .ch-steps { display: flex; gap: 4px; flex-wrap: wrap; }
-.ch-steps span { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2ee; color: #667; }
+.ch-steps span { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #edf1f8; color: #667; }
 .ch-steps span.on { background: var(--primary-soft); color: var(--primary-2); font-weight: 700; }
 .ch-steps span.no { background: var(--danger-soft); color: #991b1b; }
 .ch-tpl { display: grid; grid-template-columns: 210px 300px minmax(0, 1fr); gap: 14px; align-items: start; }
@@ -45,7 +45,7 @@
 @media (max-width: 1250px) { .a4-stage.scaled .a4-wrap { zoom: .8; } }
 @media (max-width: 700px) { .a4-stage .a4-wrap, .a4-stage.scaled .a4-wrap { zoom: .42; } .ch-tpl .ed { padding: 0; } }
 .charity-app .main { overflow-x: clip; }
-.a4 { --a4c: #1f6f4a; --a4a: #b7862b; width: 210mm; min-height: 297mm; background: #fff; color: #111; box-shadow: 0 4px 20px rgba(0,0,0,.12); padding: 10mm 12mm 8mm; display: flex; flex-direction: column; font-family: var(--font); line-height: 1.5; position: relative; }
+.a4 { --a4c: #1c3f8a; --a4a: #3f86d8; width: 210mm; min-height: 297mm; background: #fff; color: #111; box-shadow: 0 4px 20px rgba(0,0,0,.12); padding: 10mm 12mm 8mm; display: flex; flex-direction: column; font-family: var(--font); line-height: 1.5; position: relative; }
 .a4::before { content: ""; position: absolute; inset-inline: 0; top: 0; height: 6px; background: linear-gradient(90deg, var(--a4c) 70%, var(--a4a) 70%); }
 .a4-h { display: flex; justify-content: space-between; gap: 14px; align-items: center; border-bottom: 2px solid var(--a4c); padding-bottom: 10px; margin-bottom: 10px; }
 .a4-org { display: flex; gap: 12px; align-items: center; max-width: 58%; }
@@ -61,8 +61,8 @@
 .a4-code { display: inline-block; background: var(--a4c); color: #fff; border-radius: 4px; padding: 1px 10px; font-weight: 700; letter-spacing: .5px; direction: ltr; }
 .a4-copy { display: inline-block; border: 1px solid var(--a4a); color: var(--a4a); border-radius: 4px; padding: 0 8px; }
 .a4-body { flex: 1; }
-.a4-sec { border: 1px solid #d5ddd8; border-radius: 6px; padding: 6px 10px 6px; margin-bottom: 6px; break-inside: avoid; }
-.a4-sec h4 { margin: -6px -10px 5px; padding: 4px 10px; background: color-mix(in srgb, var(--a4c) 9%, #fff); border-bottom: 1px solid #d5ddd8; border-radius: 6px 6px 0 0; color: var(--a4c); font-size: 1em; }
+.a4-sec { border: 1px solid #d3dbea; border-radius: 6px; padding: 6px 10px 6px; margin-bottom: 6px; break-inside: avoid; }
+.a4-sec h4 { margin: -6px -10px 5px; padding: 4px 10px; background: color-mix(in srgb, var(--a4c) 9%, #fff); border-bottom: 1px solid #d3dbea; border-radius: 6px 6px 0 0; color: var(--a4c); font-size: 1em; }
 .a4-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 14px; }
 .a4-f { display: flex; flex-direction: column; min-width: 0; }
 .a4-f.s2 { grid-column: span 2; } .a4-f.s3 { grid-column: span 3; }
@@ -86,7 +86,7 @@
 .a4-sign-inline .a4-thumb { flex: 0 0 64px; height: 64px; border: 1px dashed #888; border-radius: 6px; display: grid; place-items: center; color: #888; font-size: .8em; }
 .a4-f-sign { margin-top: 6px; }
 .a4-sigs { display: flex; gap: 10px; align-items: stretch; }
-.a4-sig { flex: 1; border: 1px solid #d5ddd8; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; text-align: center; }
+.a4-sig { flex: 1; border: 1px solid #d3dbea; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; text-align: center; }
 .a4-sig b { color: var(--a4c); font-size: .92em; }
 .a4-sig .nm { min-height: 1.5em; font-weight: 600; }
 .a4-sig .ln { border-top: 1px dotted #888; margin-top: 14px; padding-top: 2px; font-size: .78em; color: #666; }
@@ -156,3 +156,28 @@
 .ch-alert.danger { background: var(--danger-soft); border-color: #fca5a5; }
 .ch-alert.warn { background: var(--accent-soft); border-color: #fcd34d; }
 .ch-alert:hover { border-color: var(--primary); }
+/* Round 21: association logo — header, continuation pages and a faint watermark */
+
+.a4 .a4-org img { width: 6.2em; height: 6.2em; flex: none; }
+.a4.letter .a4-org img { width: 8em; height: 8em; }
+.a4-h.mini .a4-mini-logo { width: 2.6em; height: 2.6em; object-fit: contain; flex: none; }
+.a4-wm { position: absolute; inset: 0; margin: auto; width: 62%; max-width: 130mm; aspect-ratio: 1; opacity: .045; pointer-events: none; z-index: 0; object-fit: contain; }
+.a4 > :not(.a4-wm) { position: relative; z-index: 1; }
+.charity-app .sidebar .brand { align-items: center; text-align: center; gap: 6px; padding: 16px 12px 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.charity-app .sidebar .brand .ch-logo { justify-content: center; }
+.charity-app .sidebar .brand .ch-logo img { width: 88px; height: 88px; border-radius: 50%; background: #fff; padding: 3px; object-fit: contain; box-shadow: 0 0 0 3px rgba(255,255,255,.12), 0 6px 18px rgba(0,0,0,.35); }
+.charity-app .sidebar .brand .ch-name { font-size: 14px; font-weight: 700; line-height: 1.45; color: #fff; }
+.ch-hero .ch-hero-id { display: flex; align-items: center; gap: 14px; }
+.ch-hero .ch-hero-id img { width: 68px; height: 68px; border-radius: 50%; background: #fff; padding: 2px; object-fit: contain; flex: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+@media (max-width: 600px) { .ch-hero .ch-hero-id img { width: 52px; height: 52px; } .ch-hero h2 { font-size: 17px; } }
+.auth.ch-auth .art { background: linear-gradient(150deg, #1f4594, #13285a 65%, #0c1838); }
+.auth.ch-auth .ch-auth-id { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; margin-bottom: 18px; }
+.auth.ch-auth .ch-auth-id img { width: 150px; height: 150px; border-radius: 50%; background: #fff; padding: 4px; object-fit: contain; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.auth.ch-auth .ch-auth-id h1 { font-size: 24px; line-height: 1.5; }
+.ch-print-logo { width: 64px; height: 64px; object-fit: contain; flex: none; }
+.a4 .a4-org { max-width: 66%; }
+.a4 .a4-org b { font-size: 1.2em; text-wrap: balance; }
+.a4 .a4-title { min-width: 0; }
+.auth.ch-auth { --primary: #1f4594; --primary-2: #173670; --primary-soft: #e8eef9; }
+.auth.ch-auth .ch-auth-m { display: none; }
+@media (max-width: 860px) { .auth.ch-auth .ch-auth-m { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; margin-bottom: 14px; color: var(--primary); } .auth.ch-auth .ch-auth-m img { width: 96px; height: 96px; object-fit: contain; } }

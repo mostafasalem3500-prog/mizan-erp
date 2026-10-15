@@ -8,7 +8,8 @@ export type Col = { k: string; label: string; w?: string; n?: boolean };
 export type Section = { id: string; title: string; fields?: Field[]; checks?: { k: string; options: string[]; multi?: boolean; label?: string }[]; text?: string; big?: boolean; sign?: boolean; thumb?: boolean; noteLines?: number; table?: { k: string; cols: Col[]; rows: number }; after?: boolean };
 export type Tpl = { key: string; code: string; title: string; subtitle?: string; sections: Section[]; signatures: string[]; note: string; seal?: boolean; pageBreak?: string; letter?: boolean };
 
-export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة الأهلية";
+export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة";
+export const DEFAULT_LOGO = "/charity/logo.png";
 export const DEFAULT_LICENSE = "1000888600";
 export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة", storekeeper: "أمين المستودع", chairman: "رئيس مجلس الإدارة" };
 
@@ -309,11 +310,12 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
   const ov: Ov = settings?.templates?.[tplKey] || {};
   const t = resolveTpl(tplKey, ov);
   const theme = settings?.theme || {};
-  const color = theme.color || "#1f6f4a";
-  const accent = theme.accent || "#b7862b";
+  const color = theme.color || "#1c3f8a";
+  const accent = theme.accent || "#3f86d8";
   const d = blank ? {} : data || {};
   const name = settings?.associationName || DEFAULT_NAME;
-  const logo = theme.hideLogo ? null : settings?.company?.logo;
+  const logo = theme.hideLogo ? null : settings?.logoUrl || DEFAULT_LOGO;
+  const lic = settings?.licenseNo || DEFAULT_LICENSE;
   const sig = settings?.signatories || {};
   const val = (f: Field) => {
     if (f.kind === "words") { const a = Number(d.amount || 0); return a ? amountToArabicWords(a) : ""; }
@@ -363,13 +365,14 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
     const last = pi === pn - 1;
     return (
       <div key={(copy || "") + pi} className={"a4" + (pi > 0 ? " cont" : "") + (t.onePage ? " one" : "") + (t.letter ? " letter" : "")} style={{ ["--a4c" as any]: color, ["--a4a" as any]: accent, fontSize: `${12.5 * t.scale}px` }}>
+        {logo && !theme.hideWatermark && <img className="a4-wm" src={logo} alt="" aria-hidden />}
         {pi === 0 ? (
           <header className="a4-h">
             <div className="a4-org">
               {logo ? <img src={logo} alt="" /> : <div className="a4-logo-ph">{name.slice(0, 1)}</div>}
               <div>
                 <b>{name}</b>
-                {(settings?.licenseNo || DEFAULT_LICENSE) && <span>مسجلة لدى {settings?.authority || "المركز الوطني لتنمية القطاع غير الربحي"} برقم ترخيص ({settings.licenseNo})</span>}
+                {lic && <span>مسجلة لدى {settings?.authority || "المركز الوطني لتنمية القطاع غير الربحي"} برقم ترخيص ({lic})</span>}
                 {(settings?.address || settings?.phone) && <span className="a4-contact">{[settings?.address, settings?.phone && "هاتف: " + settings.phone, settings?.email].filter(Boolean).join(" · ")}</span>}
               </div>
             </div>
@@ -380,7 +383,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
             </div>
           </header>
         ) : (
-          <header className="a4-h mini"><b>{name}</b><span>{t.title}{d.number ? ` — ${d.number}` : ""}</span><div className="a4-meta">{t.code && <span className="a4-code">{t.code}</span>}{copy && <span className="a4-copy">{copy}</span>}<span className="a4-copy">صفحة {pi + 1} من {pn}</span></div></header>
+          <header className="a4-h mini">{logo && <img className="a4-mini-logo" src={logo} alt="" />}<b>{name}</b><span>{t.title}{d.number ? ` — ${d.number}` : ""}</span><div className="a4-meta">{t.code && <span className="a4-code">{t.code}</span>}{copy && <span className="a4-copy">{copy}</span>}<span className="a4-copy">صفحة {pi + 1} من {pn}</span></div></header>
         )}
         <div className="a4-body">
           {secs.map(sec)}
@@ -400,9 +403,9 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
               {t.seal && <div className="a4-seal">ختم الجمعية</div>}
             </div>
             {t.note && <p className="a4-note">{t.note}</p>}
-            <div className="a4-foot">{name}{(settings?.licenseNo || DEFAULT_LICENSE) ? ` — ترخيص رقم ${settings.licenseNo}` : ""}{theme.footer ? ` — ${theme.footer}` : ""}</div>
+            <div className="a4-foot">{name}{lic ? ` — ترخيص رقم ${lic}` : ""}{theme.footer ? ` — ${theme.footer}` : ""}</div>
           </footer>
-        ) : <div className="a4-foot">{name}{(settings?.licenseNo || DEFAULT_LICENSE) ? ` — ترخيص رقم ${settings.licenseNo}` : ""}</div>}
+        ) : <div className="a4-foot">{name}{lic ? ` — ترخيص رقم ${lic}` : ""}</div>}
       </div>
     );
   };
