@@ -221,14 +221,14 @@ export async function getInvoice(t: Db, companyId: string, id: string) {
 }
 
 /** Posts an INVOICE / CREDIT_NOTE / DEBIT_NOTE: numbering, stock, journal, ZATCA stamp. */
-export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean; issuedAt?: Date } = {}) {
+export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean; issuedAt?: Date; keepNumber?: string } = {}) {
   const companyId = company.id;
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المستند غير موجود");
   if (inv.status !== "DRAFT") throw conflict("المستند مرحل مسبقاً");
   if (!["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"].includes(inv.kind)) throw bad("عروض الأسعار والأوامر لا تُرحّل محاسبياً — حوّلها إلى فاتورة");
   await assertOpenDate(t, companyId, inv.date);
   const lines = await t.rows(`SELECT l.*, p.type AS ptype, p.name AS pname, p.purchase_price FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id WHERE invoice_id=$1 ORDER BY sort`, [id]);
-  const number = await nextNumber(t, companyId, inv.channel === "POS" ? (inv.kind === "INVOICE" ? "POS" : "PRT") : PREFIX[inv.direction][inv.kind], inv.date);
+  const number = opts.keepNumber || await nextNumber(t, companyId, inv.channel === "POS" ? (inv.kind === "INVOICE" ? "POS" : "PRT") : PREFIX[inv.direction][inv.kind], inv.date);
   const isSale = inv.direction === "SALE";
   const isReturn = inv.kind === "CREDIT_NOTE";
   const ref = number;
@@ -294,6 +294,14 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   // ── journal ──
   const partnerId = inv.partnerId;
   const desc = `${inv.partnerName || ""}`;
+  // A cash/card sale to a NAMED customer still runs through the customer's account (invoice debit + receipt credit)
+  // so it appears on the customer statement; the walk-in POS customer is settled directly to keep the ledger lean.
+  const named = !!(opts.tenders?.length && partnerId && (await t.maybe(`SELECT 1 FROM partners WHERE id=$1 AND COALESCE(code,'')<>'WALKIN'`, [partnerId])));
+  if (isSale && named) {
+    const paidTotal = Number(inv.total); // tenders always settle the full document (journal balances only then)
+    if (!isReturn) jl.push({ key: "AR", debit: Number(inv.total), partnerId, description: `${desc} — فاتورة ${ref}` }, { key: "AR", credit: paidTotal, partnerId, description: `${desc} — سداد فوري ${ref}` });
+    else jl.push({ key: "AR", credit: Number(inv.total), partnerId, description: `${desc} — مرتجع ${ref}` }, { key: "AR", debit: paidTotal, partnerId, description: `${desc} — رد مبلغ ${ref}` });
+  }
   if (isSale) {
     const revenue = (l: any) => (l.accountId ? { account: l.accountId } : { key: l.ptype === "SERVICE" || !l.productId ? "SERVICE_REVENUE" : "SALES" });
     const s = isReturn ? -1 : 1; // credit note mirrors

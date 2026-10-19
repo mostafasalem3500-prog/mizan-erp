@@ -97,7 +97,7 @@ function calc(l: Line, incl: boolean) {
   return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, rcVat: l.taxCode === "RC" ? Math.round(gross * 15) / 100 : 0 };
 }
 
-export function DocEditor({ direction, kind, id, onClose, originId, prefill }: { direction: "SALE" | "PURCHASE"; kind: string; id?: string; onClose: (saved?: boolean) => void; originId?: string; prefill?: any }) {
+export function DocEditor({ direction, kind, id, onClose, originId, prefill, revise }: { direction: "SALE" | "PURCHASE"; kind: string; id?: string; onClose: (saved?: boolean) => void; originId?: string; prefill?: any; revise?: { amountPaid: number; revision: number } }) {
   const { me } = useCompanyContext();
   const toast = useToast();
   const nav = useNavigate(); const base = useBase();
@@ -108,6 +108,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   const [notes, setNotes] = useState("");
   const [supplierRef, setSupplierRef] = useState("");
   const [reason, setReason] = useState("");
+  const [revReason, setRevReason] = useState("");
   const [incl, setIncl] = useState(direction === "SALE" && !!me.company.pricesIncludeVat);
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [loaded, setLoaded] = useState(!id);
@@ -166,6 +167,14 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   };
   const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
     lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null })) });
+  const saveRevision = () => run(async () => {
+    if (!partner) throw new Error("اختر المورد");
+    if (revReason.trim().length < 5) throw new Error("اكتب سبب التعديل (5 أحرف على الأقل) — يُحفظ في سجل المراجعة");
+    if (!confirmDlg(`سيُعكس القيد الأصلي ويُعاد ترحيل الفاتورة بنفس الرقم بإجمالي ${money(totals.total)} ر.س، مع تعديل المخزون. متابعة؟`)) return;
+    const r = await api(`/invoices/${id}/revise`, { body: { ...body(), revisionReason: revReason.trim() } });
+    toast(`تم تعديل الفاتورة (تعديل رقم ${r.revision})${r.cogsAdjustment ? ` — فرق سعر الكميات المباعة ${money(r.cogsAdjustment)} حُمّل على تكلفة المبيعات` : ""}`, "ok");
+    onClose(true);
+  });
   const save = (post: boolean) => run(async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
     const d = id ? await api(`/invoices/${id}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
@@ -187,13 +196,16 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill }: {
   };
   if (!loaded) return <Modal title="..." onClose={onClose}><Loading /></Modal>;
   return (
-    <Modal wide title={`${id ? "تعديل" : "إنشاء"} ${KIND_TITLE[direction][kind]}`} onClose={() => onClose()} footer={<>
+    <Modal wide title={revise ? `تعديل ${KIND_TITLE[direction][kind]} مرحّلة` : `${id ? "تعديل" : "إنشاء"} ${KIND_TITLE[direction][kind]}`} onClose={() => onClose()} footer={<>
       <div className="grow row"><span className="muted">قبل الضريبة</span><b><Money v={totals.net} /></b><span className="muted">الضريبة</span><b><Money v={totals.vat} /></b>{totals.rc > 0 && <span className="muted small">احتساب عكسي: {money(totals.rc * (fc ? rate : 1))} ر.س</span>}{totals.customs > 0 && <span className="muted small">منها ضريبة استيراد تُسدد للجمارك: {money(totals.customs * (fc ? rate : 1))} ر.س</span>}<span className="muted">{totals.customs > 0 ? "المستحق للمورد" : "الإجمالي"}</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={totals.total} /> {fc ? sym : ""}</b>{fc && <span className="muted small">= {money(totals.total * rate)} ر.س @ {rate}</span>}</div>
       <button className="btn" onClick={() => onClose()}>إلغاء</button>
+      {revise ? <button className="btn primary" disabled={busy} onClick={saveRevision}>حفظ التعديل وإعادة الترحيل ✓</button> : <>
       <button className="btn" disabled={busy} onClick={() => save(false)}>حفظ مسودة</button>
       {(kind === "INVOICE" || isNote) && <button className="btn primary" disabled={busy} onClick={() => save(true)}>حفظ وترحيل ✓</button>}
-      {(kind === "QUOTATION" || kind === "ORDER") && <button className="btn primary" disabled={busy} onClick={() => save(false)}>حفظ</button>}
+      {(kind === "QUOTATION" || kind === "ORDER") && <button className="btn primary" disabled={busy} onClick={() => save(false)}>حفظ</button>}</>}
     </>}>
+      {revise && <div className="alert info small mb">تعديل فاتورة مشتريات مرحّلة: يُعكس القيد الأصلي ويُعاد الترحيل <b>بنفس رقم الفاتورة</b>، وتُعكس كميات المخزون وتُستلم من جديد. فرق السعر على الكميات المباعة يُحمّل على تكلفة المبيعات. يُحفظ التعديل في سجل المراجعة مع سببه وصورة قبل/بعد.{revise.amountPaid > 0 && <> المسدد على الفاتورة {money(revise.amountPaid)} ر.س يبقى مخصصاً لها — لا يمكن تغيير المورد أو تخفيض الإجمالي عنه.</>}</div>}
+      {revise && <Field label="سبب التعديل (إلزامي — سجل المراجعة)"><Input autoFocus value={revReason} onChange={(e) => setRevReason(e.target.value)} placeholder="مثال: خطأ في سعر الوحدة مقارنة بفاتورة المورد رقم ..." /></Field>}
       <div className="form-grid">
         <Field label={isSale ? "العميل" : "المورد"} span2>
           <Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(isSale ? "CUSTOMER" : "SUPPLIER")} label={(p: any) => `${p.name}${p.vatNumber ? " · " + p.vatNumber : ""}`} placeholder="ابحث بالاسم أو الجوال أو الرقم الضريبي" autoFocus={!id} allowClear={!isNote} onCreate={() => setNewPartner(true)} />
@@ -267,8 +279,11 @@ export function DocumentView() {
   const [pstmt, setPstmt] = useState(false);
   const [edit, setEdit] = useState(false);
   const [fix, setFix] = useState(false);
+  const [rev, setRev] = useState<any>(null);
+  const [revOpen, setRevOpen] = useState(false);
   const [voucher, setVoucher] = useState(false);
-  const extras = useFetch(id ? `/invoices/${id}/extras` : null, [d?.status]);
+  const extras = useFetch(id ? `/invoices/${id}/extras` : null, [d?.status, d?.revision]);
+  const revs = useFetch<any[]>(id && d?.direction === "PURCHASE" && Number(d?.revision) > 0 ? `/invoices/${id}/revisions` : null, [d?.revision]);
   const mail = useFetch("/mail/status");
   const { run, busy } = useAction();
   useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
@@ -288,9 +303,9 @@ export function DocumentView() {
       <div className="row no-print">
         <button className="btn sm" onClick={() => nav(-1)}>← رجوع</button>
         <h2>{title} {d.number}</h2>
-        <Badge s={d.status} />{d.kind === "INVOICE" && d.status === "POSTED" && <Badge s={d.paymentStatus} />}{d.zatcaStatus && <Badge s={d.zatcaStatus} map={ZATCA_AR} />}
+        <Badge s={d.status} />{d.kind === "INVOICE" && d.status === "POSTED" && <Badge s={d.paymentStatus} />}{Number(d.revision) > 0 && <span className="badge" style={{ background: "#fff4e0", color: "#9a5b00" }} title="عُدّلت بعد الترحيل — راجع سجل التعديلات">معدّلة ×{d.revision}</span>}{d.zatcaStatus && <Badge s={d.zatcaStatus} map={ZATCA_AR} />}
         <div className="grow" />
-        {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" onClick={() => (d.status === "DRAFT" ? setEdit(true) : setFix(true))}>✏ تعديل</button>}
+        {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" onClick={() => { if (d.status === "DRAFT") return setEdit(true); if (!isSale && d.kind === "INVOICE") api(`/invoices/${d.id}/revision-check`).then(setRev).catch(() => setRev(null)); else setRev(null); setFix(true); }}>✏ تعديل</button>}
         {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" disabled={busy} onClick={() => copy()}>⧉ نسخ</button>}
         {d.kind === "QUOTATION" && d.status === "DRAFT" && can(isSale ? "sales.write" : "purchases.write") && <button className="btn primary sm" disabled={busy} onClick={() => convert("INVOICE")}>تحويل لفاتورة ←</button>}
         {d.status === "DRAFT" && (d.kind === "QUOTATION" || d.kind === "ORDER") && can(isSale ? "sales.write" : "purchases.write") && <><button className="btn primary sm" onClick={() => convert(d.kind === "QUOTATION" ? "ORDER" : "INVOICE")}>تحويل إلى {d.kind === "QUOTATION" ? "أمر" : "فاتورة"} →</button>{d.kind === "QUOTATION" && <button className="btn sm" onClick={() => convert("INVOICE")}>تحويل إلى فاتورة مباشرة</button>}</>}
@@ -324,6 +339,7 @@ export function DocumentView() {
         {d.journal?.length > 0 && <div className="card"><div className="card-h"><h3>القيد المحاسبي</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{d.journal.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table></div></div>}
         <div className="grid">
           {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td className="dt">{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
+          {revs.data && revs.data.length > 0 && <div className="card"><div className="card-h"><h3>📝 سجل تعديلات الفاتورة ({revs.data.length})</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>#</th><th>التاريخ / المستخدم</th><th>السبب</th><th className="n">الإجمالي قبل → بعد</th><th>القيود</th></tr></thead><tbody>{revs.data.map((r: any) => <tr key={r.id}><td className="num">{r.revNo}</td><td className="small">{fmtDate(String(r.createdAt).slice(0, 10))}<div className="muted">{r.createdBy}</div></td><td className="small">{r.reason}</td><td className="n small"><Money v={r.before.total} /> → <b><Money v={r.after.total} /></b>{Number(r.cogsAdjustment) ? <div className="muted">فرق تكلفة مبيعات <Money v={r.cogsAdjustment} /></div> : null}</td><td className="small">{[["أصلي", r.oldJournalId, r.oldJournal], ["عكسي", r.reversalJournalId, r.reversalJournal], ["جديد", r.newJournalId, r.newJournal], ["تكلفة", r.cogsJournalId, r.cogsJournal]].filter((x) => x[1]).map((x) => <div key={x[0]}>{x[0]}: <Link to={`${base}/journals/${x[1]}`}>{x[2]}</Link></div>)}</td></tr>)}</tbody></table></div></div>}
           {d.landedCosts?.length > 0 && <div className="card"><div className="card-h"><h3>تكاليف الاستيراد المحمّلة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.landedCosts.map((l: any) => <tr key={l.id}><td>{l.number}</td><td className="dt">{fmtDate(l.date)}</td><td><Badge s={l.status} /></td><td className="n"><Money v={l.total} /></td></tr>)}</tbody></table></div></div>}
           {d.related?.length > 0 && <div className="card"><div className="card-h"><h3>مستندات مرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.related.map((r: any) => <tr key={r.id}><td><Link to={`${base}/doc/${r.id}`}>{r.number}</Link></td><td>{KIND_AR[r.kind]}</td><td><Badge s={r.status} /></td><td className="n"><Money v={r.total} /></td></tr>)}</tbody></table></div></div>}
           {isSale && d.zatcaResponse && <div className="card"><div className="card-h"><h3>استجابة هيئة الزكاة والضريبة</h3></div><div className="card-b small" dir="ltr" style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{JSON.stringify(d.zatcaResponse, null, 1)}</div></div>}
@@ -336,13 +352,17 @@ export function DocumentView() {
       {pstmt && <PartnerStatement partner={{ id: d.partnerId, name: d.partnerName, ...(d.partner || {}) }} role={isSale ? "CUSTOMER" : "SUPPLIER"} onClose={() => setPstmt(false)} />}
       {edit && <DocEditor direction={d.direction} kind={d.kind} id={d.id} onClose={(s) => { setEdit(false); if (s) reload(); }} />}
       {fix && <Modal narrow title="تعديل مستند مرحّل" onClose={() => setFix(false)} footer={<><button className="btn" onClick={() => setFix(false)}>إغلاق</button></>}>
-        <p>المستند المرحّل لا يُعدَّل مباشرة حفاظاً على سلامة القيود وتسلسل الفواتير المُبلّغة لهيئة الزكاة والضريبة والجمارك. التصحيح الصحيح محاسبياً:</p>
+        {isSale ? <p>فاتورة المبيعات المرحّلة لا تُعدَّل مباشرة حفاظاً على سلامة القيود وتسلسل الفواتير المُبلّغة لهيئة الزكاة والضريبة والجمارك (لائحة الفوترة الإلكترونية: التصحيح بإشعار دائن/مدين). التصحيح الصحيح محاسبياً:</p>
+          : <p>فاتورة المشتريات مستند المورد المسجّل في دفاترك، ويجوز تصحيح خطأ الإدخال فيها مع بقاء أثر مراجعة كامل.</p>}
         <div className="stat-list">
+          {!isSale && d.kind === "INVOICE" && (rev ? (rev.allowed ? (can("accounting.write") ? <button className="item" style={{ border: 0, cursor: "pointer", font: "inherit", background: "var(--primary-soft)" }} onClick={() => { setFix(false); setRevOpen(true); }}><span><b>تعديل الفاتورة مباشرة</b> — عكس القيد وإعادة الترحيل بنفس الرقم مع تعديل المخزون (يتطلب صلاحية محاسب){rev.revision ? ` · عُدّلت ${rev.revision} مرة` : ""}</span><b>←</b></button> : <div className="item"><span className="muted">التعديل المباشر يتطلب صلاحية المحاسبة (محاسب / مدير)</span></div>)
+            : <div className="alert warn small" style={{ margin: 0 }}><b>لا يمكن التعديل المباشر:</b><ul style={{ margin: "4px 0 0", paddingInlineStart: 18 }}>{rev.reasons.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></div>) : <div className="item"><span className="muted">جارٍ التحقق من إمكانية التعديل…</span></div>)}
           {d.kind === "INVOICE" && <button className="item" style={{ border: 0, cursor: "pointer", font: "inherit" }} onClick={() => { setFix(false); creditNote(); }}><span>1) إصدار إشعار دائن {isSale ? "/ مرتجع" : "(مرتجع مشتريات)"} يُلغي الفاتورة كلياً أو جزئياً</span><b>←</b></button>}
           <button className="item" style={{ border: 0, cursor: "pointer", font: "inherit" }} onClick={() => { setFix(false); copy(); }}><span>{d.kind === "INVOICE" ? "2) " : ""}إنشاء نسخة جديدة مطابقة كمسودة لتعديلها ثم ترحيلها</span><b>←</b></button>
         </div>
         <div className="small muted mt">الملاحظات غير المالية يمكن تعديلها مباشرة من بطاقة «ملاحظات» أسفل المستند.</div>
       </Modal>}
+      {revOpen && <DocEditor direction="PURCHASE" kind="INVOICE" id={d.id} revise={{ amountPaid: Number(d.amountPaid), revision: Number(d.revision || 0) }} onClose={(s) => { setRevOpen(false); if (s) { reload(); revs.reload(); } }} />}
       {voucher && extras.data && <StockVoucher d={d} moves={extras.data.moves} onClose={() => setVoucher(false)} />}
     </div>
   );

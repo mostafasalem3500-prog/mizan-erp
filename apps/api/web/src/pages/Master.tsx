@@ -239,7 +239,7 @@ export function StockCardModal({ p, onClose }: { p: any; onClose: () => void }) 
   const [from, setFrom] = useState(today().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const { data } = useFetch(`/inventory/card/${p.id}${q({ from, to })}`);
-  const SRC: Record<string, string> = { SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "تسوية جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع" };
+  const SRC: Record<string, string> = { SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "تسوية جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع", PURCHASE_REVISION: "عكس شراء (تعديل فاتورة)", PURCHASE_REV_COST: "فرق سعر تعديل شراء" };
   return (
     <Modal wide title={`كرت الصنف: ${p.name} (${p.sku})`} onClose={onClose} footer={<><PrintBtn />{data && <ExportBtn name={`كرت صنف ${p.sku}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, الحركة: SRC[r.sourceType], المرجع: r.reference, المستودع: r.warehouse, الكمية: r.qty, "تكلفة الوحدة": r.unitCost, القيمة: r.value, "رصيد الكمية": r.balanceQty, "رصيد القيمة": r.balanceVal }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
       <div className="no-print mb"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>

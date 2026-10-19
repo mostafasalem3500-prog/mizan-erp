@@ -243,7 +243,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .card { box-shadow: none; border: none; }
   .print-only { display: block !important; }
   @page { margin: 12mm; }
-  body:has(.modal-bg) .app { display: none !important; }
   .modal-bg { position: static !important; padding: 0 !important; background: none !important; display: block !important; }
   .modal { box-shadow: none !important; max-width: none !important; border-radius: 0; animation: none; }
   .modal .m-h, .modal .m-f { display: none !important; }
@@ -398,3 +397,10 @@ tr.expand > td { background: var(--surface-2); padding: 0 !important; }
 .jv-doc { max-width: 900px; }
 .jv-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; text-align: center; font-size: 12px; }
 .jv-sign div { border-top: 1px dotted #999; padding-top: 6px; }
+/* Round 22: PDF capture shows the print header and full tables; printing from a dialog prints only the dialog */
+.pdf-capture .print-only { display: block !important; }
+.pdf-capture .print-doc .table-wrap { max-height: none !important; overflow: visible !important; }
+@media print {
+  body:not(.printing-a4):has(.modal-bg) *:not(:has(.modal-bg)):not(.modal-bg):not(.modal-bg *) { display: none !important; }
+  body:not(.printing-a4):has(.modal-bg) :is(.app, .main, .content) { display: block !important; margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
+}

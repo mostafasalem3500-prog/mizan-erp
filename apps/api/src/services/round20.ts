@@ -214,7 +214,7 @@ export async function accountLines(t: Db, companyId: string, id: string, limit =
 }
 
 // ─── inventory reports ─────────────────────────────────────────────────────
-const SRC_AR: Record<string, string> = { INVOICE: "مبيعات / مشتريات", PURCHASE: "مشتريات", SALE: "مبيعات", POS: "نقاط البيع", OPENING: "أرصدة افتتاحية", ADJUSTMENT: "جرد وتسويات وإتلاف", TRANSFER: "تحويلات بين المستودعات", LANDED: "تكاليف استيراد", RETURN: "مرتجعات" };
+const SRC_AR: Record<string, string> = { INVOICE: "مبيعات / مشتريات", PURCHASE: "مشتريات", SALE: "مبيعات", POS: "نقاط البيع", OPENING: "أرصدة افتتاحية", ADJUSTMENT: "جرد وتسويات وإتلاف", TRANSFER: "تحويلات بين المستودعات", LANDED: "تكاليف استيراد", RETURN: "مرتجعات" , PURCHASE_REVISION: "تعديل فواتير شراء (عكس)", PURCHASE_REV_COST: "فرق سعر تعديل شراء" };
 export async function countSheet(t: Db, companyId: string, q: any) {
   const params: any[] = [companyId];
   let w = "p.company_id=$1 AND p.type='STOCK' AND p.is_active";

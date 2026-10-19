@@ -199,12 +199,15 @@ export function PdfBtn({ name, target, label = "⬇ PDF", className = "btn sm" }
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   return <button className={className} disabled={busy} title="تنزيل PDF" onClick={async (e) => {
+    // React clears currentTarget once the handler awaits — resolve the button (and what it exports) first
+    const btn = e.currentTarget as HTMLElement;
+    const picked = target ? target() : null;
     setBusy(true);
     try {
       const { elementToPdf, pdfTarget } = await import("./shared/pdf");
-      const el = target ? target() : pdfTarget(e.currentTarget as HTMLElement);
+      const el = picked || pdfTarget(btn);
       if (!el) throw new Error("لا يوجد محتوى للتصدير");
-      const title = name || (document.querySelector(".modal .m-h h3")?.textContent || document.querySelector(".topbar .title")?.textContent || "ميزان").trim();
+      const title = name || (btn.closest(".modal")?.querySelector(".m-h h3")?.textContent || document.querySelector(".topbar .title")?.textContent || "ميزان").trim();
       await elementToPdf(el, `${title} ${today()}`);
     } catch (er: any) { toast(er.message || "تعذّر إنشاء PDF", "err"); } finally { setBusy(false); }
   }}>{busy ? "…" : label}</button>;

@@ -144,3 +144,24 @@ export async function openLotsForExisting(t: Db, companyId: string, productId: s
     if (Math.abs(diff) > 1e-9) await t.exec(`INSERT INTO stock_lots(company_id, product_id, warehouse_id, lot_no, qty, received_at) VALUES ($1,$2,$3,'OPENING',$4,$5) ON CONFLICT (company_id, product_id, warehouse_id, lot_no) DO UPDATE SET qty=stock_lots.qty+EXCLUDED.qty`, [companyId, productId, b.warehouseId, diff, date]);
   }
 }
+
+/**
+ * Exactly undoes earlier receipts of a document (same quantity, same value, same lots) — used when a posted
+ * purchase invoice is corrected, so Σ stock value keeps matching the inventory GL to the halala.
+ * May leave a transient negative balance inside the transaction; the caller validates the final balance.
+ */
+export async function stockReverseExact(t: Db, companyId: string, m: { productId: string; warehouseId: string; qty: number; value: number; date: string; sourceType: string; sourceId: string; reference?: string; lots?: LotAlloc[]; isDemo?: boolean }) {
+  const bal = await lockBalance(t, companyId, m.productId, m.warehouseId);
+  const newQty = r3(D(bal.qty).minus(m.qty));
+  const newVal = r2(D(bal.value).minus(m.value));
+  await t.exec(`UPDATE stock_balances SET qty=$4, value=$5 WHERE company_id=$1 AND product_id=$2 AND warehouse_id=$3`, [companyId, m.productId, m.warehouseId, newQty, newVal]);
+  for (const l of m.lots || []) {
+    await t.exec(`INSERT INTO stock_lots(company_id, product_id, warehouse_id, lot_no, expiry_date, qty, received_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (company_id, product_id, warehouse_id, lot_no) DO UPDATE SET qty=stock_lots.qty+EXCLUDED.qty`, [companyId, m.productId, m.warehouseId, l.lotNo, l.expiry, -Number(l.qty), m.date]);
+  }
+  await t.insert("stock_moves", {
+    companyId, date: m.date, productId: m.productId, warehouseId: m.warehouseId,
+    qty: -m.qty, unitCost: m.qty ? r4(D(m.value).div(m.qty)) : 0, value: -m.value, balanceQty: newQty, balanceVal: newVal,
+    sourceType: m.sourceType, sourceId: m.sourceId, reference: m.reference || null, isDemo: !!m.isDemo, lots: m.lots?.length ? m.lots.map((l) => ({ ...l, qty: -Number(l.qty) })) : null,
+  });
+}

@@ -10,6 +10,12 @@ function filter(node: HTMLElement) {
 
 async function canvasOf(el: HTMLElement, width?: number) {
   const { toCanvas } = await import("html-to-image");
+  // print-only headers (company, partner, period) belong in the PDF; scrolling tables are captured in full
+  document.body.classList.add("pdf-capture");
+  try { return await rawCanvas(toCanvas, el, width); } finally { document.body.classList.remove("pdf-capture"); }
+}
+
+async function rawCanvas(toCanvas: any, el: HTMLElement, width?: number) {
   return toCanvas(el, { pixelRatio: 2, backgroundColor: "#ffffff", filter: filter as any, cacheBust: true, skipFonts: true, ...(width ? { width } : {}), style: { margin: "0", boxShadow: "none" } as any });
 }
 
@@ -30,9 +36,14 @@ export async function pagesToPdf(pages: HTMLElement[], filename: string) {
 /** Long content (reports, invoices, statements): rendered once and sliced into A4 pages with margins. */
 export async function elementToPdf(el: HTMLElement, filename: string, opts: { landscape?: boolean; margin?: number } = {}) {
   const { jsPDF } = await import("jspdf");
-  const landscape = !!opts.landscape || el.scrollWidth > el.clientHeight * 1.6 && el.scrollWidth > 1100;
+  // wide on-screen layouts (dialogs on a large monitor) are re-flowed to a readable A4 width before capture
+  const prevW = el.style.width, prevMax = el.style.maxWidth;
+  const fit = !opts.landscape && el.clientWidth > 1000;
+  if (fit) { el.style.width = "960px"; el.style.maxWidth = "960px"; }
+  const landscape = !!opts.landscape || (!fit && el.scrollWidth > el.clientHeight * 1.6 && el.scrollWidth > 1100);
   const pw = landscape ? A4H : A4W, ph = landscape ? A4W : A4H, m = opts.margin ?? 8;
-  const c = await canvasOf(el);
+  let c: HTMLCanvasElement;
+  try { c = await canvasOf(el); } finally { if (fit) { el.style.width = prevW; el.style.maxWidth = prevMax; } }
   const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: landscape ? "landscape" : "portrait" });
   const w = pw - 2 * m;
   const pxPerMm = c.width / w;
@@ -58,9 +69,12 @@ const safe = (n: string) => (n || "document").replace(/[\\/:*?"<>|]+/g, "-").sli
 
 /** Finds what to export for a button: an explicit target, the open modal body, a print document, or the page content. */
 export function pdfTarget(from?: HTMLElement | null): HTMLElement | null {
-  const modal = from?.closest(".modal");
+  // a button inside a dialog exports that dialog only (e.g. a statement opened from an invoice page)
+  const modal = from?.closest(".modal") || (!from ? Array.from(document.querySelectorAll(".modal")).pop() : null);
   if (modal) return (modal.querySelector(".print-doc") as HTMLElement) || (modal.querySelector(".m-b") as HTMLElement);
   const card = from?.closest(".card");
+  if (card?.classList.contains("print-doc")) return card as HTMLElement;
+  const own = card?.querySelector(".print-doc") as HTMLElement | null;
   const doc = document.querySelector(".content .print-doc") as HTMLElement | null;
-  return doc || (card as HTMLElement) || (document.querySelector(".content") as HTMLElement);
+  return own || doc || (card as HTMLElement) || (document.querySelector(".content") as HTMLElement);
 }

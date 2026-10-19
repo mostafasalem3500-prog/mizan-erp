@@ -83,7 +83,7 @@ function StockMoves({ p }: { p: any }) {
   const [from, setFrom] = useState(today().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const { data } = useFetch(`/inventory/card/${p.id}${q({ from, to })}`);
-  const SRC: Record<string, string> = { SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "جرد / تسوية / إتلاف", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع", INVOICE: "فاتورة", LANDED: "تكاليف استيراد" };
+  const SRC: Record<string, string> = { SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "جرد / تسوية / إتلاف", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع", INVOICE: "فاتورة", LANDED: "تكاليف استيراد", PURCHASE_REVISION: "عكس شراء (تعديل فاتورة)", PURCHASE_REV_COST: "فرق سعر تعديل شراء" };
   return <>
     <div className="toolbar"><PeriodFilter from={from} to={to} onChange={(f, t) => { setFrom(f || "2000-01-01"); setTo(t || today()); }} /><div className="grow" />{data && <button className="btn sm" onClick={() => exportExcel(data.rows.map((r: any) => ({ التاريخ: fmtDate(r.date), الحركة: SRC[r.sourceType] || r.sourceType, المرجع: r.reference, المستودع: r.warehouse, الكمية: Number(r.qty), "تكلفة الوحدة": Number(r.unitCost), القيمة: Number(r.value), "الرصيد": Number(r.balanceQty) })), `حركة ${p.sku}`)}>⬇ Excel</button>}</div>
     {!data ? <Loading /> : !data.rows.length ? <Empty text="لا توجد حركات في الفترة" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>التاريخ</th><th>الحركة</th><th>المرجع</th><th>المستودع</th><th className="n">وارد</th><th className="n">صادر</th><th className="n">تكلفة الوحدة</th><th className="n">الرصيد</th></tr></thead>

@@ -305,9 +305,11 @@ export async function partnerStatement(t: Db, companyId: string, partnerId: stri
      WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key=$3 AND e.status='POSTED' AND e.date BETWEEN $4 AND $5${bLit(q)} ORDER BY e.date, e.created_at`, [companyId, partnerId, key, from, to]);
   let bal = D(ob.b).times(sign);
   let td = D(0), tc = D(0);
+  // debit/credit keep their real ledger side (supplier invoice = credit, payment/return = debit);
+  // only the running balance is expressed as "owed": debit−credit for customers, credit−debit for suppliers
   const rows = lines.map((l) => {
-    const dr = sign === 1 ? Number(l.debit) : Number(l.credit), cr = sign === 1 ? Number(l.credit) : Number(l.debit);
-    bal = bal.plus(dr).minus(cr); td = td.plus(dr); tc = tc.plus(cr);
+    const dr = Number(l.debit), cr = Number(l.credit);
+    bal = bal.plus(D(dr).minus(cr).times(sign)); td = td.plus(dr); tc = tc.plus(cr);
     return { ...l, debit: dr, credit: cr, balance: r2(bal) };
   });
   // optional item detail for document rows (detailed statement)

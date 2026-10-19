@@ -1,4 +1,5 @@
 import { r20 } from "./routes/round20";
+import { r22 } from "./routes/round22";
 import { r16 } from "./routes/round16";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -77,6 +78,7 @@ app.use("/api", r12);
 app.use("/api", r15);
 app.use("/api", r16);
 app.use("/api", r20);
+app.use("/api", r22);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 
