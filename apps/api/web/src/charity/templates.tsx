@@ -11,7 +11,7 @@ export type Tpl = { key: string; code: string; title: string; subtitle?: string;
 export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة";
 export const DEFAULT_LOGO = "/charity/logo.png";
 export const DEFAULT_LICENSE = "1000888600";
-export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة", storekeeper: "أمين المستودع", chairman: "رئيس مجلس الإدارة" };
+export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة", storekeeper: "أمين المستودع", chairman: "رئيس مجلس الإدارة", researcher: "الباحث الاجتماعي", aidCommittee: "لجنة المساعدات" };
 
 const amount = (k = "amount"): Field[] => [{ k, label: "المبلغ رقماً (ريال)", kind: "amount" }, { k: k + "Words", label: "المبلغ كتابةً", span: 2, kind: "words" }];
 
@@ -212,6 +212,21 @@ export const TEMPLATES: Tpl[] = [
     ],
     signatures: ["storekeeper", "programLead", "authority"],
     note: "يُرفق بالمحضر ما يثبت أهلية المستفيد (دراسة الحالة) وصورة الهوية عند الاقتضاء وبما يتوافق مع ضوابط حماية البيانات.",
+    seal: true,
+  },
+  {
+    key: "caseStudy", code: "FIN-015", title: "نموذج دراسة حالة اجتماعية", subtitle: "تُعبأ من الباحث الاجتماعي ميدانياً قبل اعتماد المساعدة أو الصرف من الزكاة",
+    sections: [
+      { id: "info", title: "", fields: [{ k: "number", label: "رقم الدراسة", kind: "ltr" }, { k: "date", label: "تاريخ الزيارة", kind: "date" }, { k: "fileNo", label: "رقم ملف المستفيد", kind: "ltr" }] },
+      { id: "head", title: "أولًا: بيانات رب الأسرة", fields: [{ k: "party", label: "الاسم رباعيًا", span: 2 }, { k: "idNo", label: "رقم الهوية", kind: "ltr" }, { k: "phone", label: "رقم الجوال", kind: "ltr" }, { k: "address", label: "الحي / العنوان", span: 2 }], checks: [{ k: "status", label: "الحالة الاجتماعية", options: ["متزوج", "أرملة", "مطلقة", "أعزب", "مهجورة"] }] },
+      { id: "family", title: "ثانيًا: أفراد الأسرة", table: { k: "members", rows: 6, cols: [{ k: "#", label: "م", w: "5%" }, { k: "name", label: "الاسم", w: "30%" }, { k: "rel", label: "صلة القرابة", w: "15%" }, { k: "age", label: "العمر", w: "10%", n: true }, { k: "study", label: "الدراسة / العمل", w: "20%" }, { k: "health", label: "الحالة الصحية", w: "20%" }] } },
+      { id: "income", title: "ثالثًا: الدخل والالتزامات الشهرية", fields: [{ k: "salary", label: "راتب / أجر", kind: "money" }, { k: "social", label: "الضمان الاجتماعي", kind: "money" }, { k: "citizen", label: "حساب المواطن", kind: "money" }, { k: "otherIncome", label: "دخل آخر", kind: "money" }, { k: "totalIncome", label: "إجمالي الدخل", kind: "money" }, { k: "rent", label: "الإيجار الشهري", kind: "money" }, { k: "debts", label: "أقساط وديون", kind: "money" }, { k: "perCapita", label: "نصيب الفرد = (الدخل − الإيجار − الأقساط) ÷ الأفراد", span: 2, kind: "money" }] },
+      { id: "housing", title: "رابعًا: السكن والظروف الخاصة", checks: [{ k: "housing", label: "السكن", options: ["إيجار", "ملك", "مع الأقارب", "أخرى"] }, { k: "flags", label: "ظروف خاصة", multi: true, options: ["أيتام", "إعاقة", "مرض مزمن", "كبير سن", "عائل بلا عمل", "طلاب"] }], fields: [{ k: "housingNotes", label: "وصف حالة المسكن", span: 3 }] },
+      { id: "needs", title: "خامسًا: الاحتياجات ورأي الباحث", fields: [{ k: "needs", label: "الاحتياجات", span: 3, kind: "para" }], checks: [{ k: "verdict", label: "التصنيف", options: ["فقير — مستحق للزكاة", "مسكين — مستحق للزكاة", "غير مستحق للزكاة (مساعدة عامة)"] }, { k: "priority", label: "الأولوية", options: ["عالية", "متوسطة", "منخفضة"] }] },
+      { id: "decl", title: "سادسًا: إقرار المستفيد", text: "أقر بأن جميع البيانات المذكورة أعلاه صحيحة، وأتعهد بإبلاغ {association} بأي تغيير يطرأ على وضعي المالي أو الأسري، وأوافق على التحقق منها لدى الجهات ذات العلاقة، وأعلم أن تقديم بيانات غير صحيحة يوجب إيقاف المساعدة واسترداد ما صُرف.", sign: true, thumb: true },
+    ],
+    signatures: ["researcher", "aidCommittee", "executive"],
+    note: "تُجدَّد الدراسة سنويًا أو عند تغيّر الظروف، ولا يُصرف من أموال الزكاة إلا لمن تثبت أهليته وفق مصارفها الثمانية.",
     seal: true,
   },
   {

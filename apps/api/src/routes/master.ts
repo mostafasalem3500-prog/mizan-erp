@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { WHT_TYPES } from "../services/round23";
 import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
 import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppError, today } from "../lib/core";
@@ -54,6 +55,7 @@ master.post(
       vatNumber: b.vatNumber || null, crNumber: b.crNumber || null, phone: b.phone || null, email: b.email || null, street: b.street || null, buildingNo: b.buildingNo || null,
       district: b.district || null, city: b.city || null, postalCode: b.postalCode || null, country: b.country || "SA", creditLimit: num(b.creditLimit), paymentTerms: Math.max(0, Math.round(num(b.paymentTerms))), notes: b.notes || null,
       currency: /^[A-Z]{3}$/.test(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId || null,
+      isNonResident: !!b.isNonResident, whtType: b.isNonResident && WHT_TYPES[b.whtType] ? b.whtType : null,
     }).catch((e) => { if (e.code === "23505") throw conflict("كود العميل/المورد مستخدم مسبقاً"); throw e; });
     await audit(req, "CREATE", "partner", row.id, { name });
     return row;
@@ -71,6 +73,7 @@ master.put(
       street: b.street ?? null, buildingNo: b.buildingNo ?? null, district: b.district ?? null, city: b.city ?? null, postalCode: b.postalCode ?? null, country: b.country, creditLimit: b.creditLimit === undefined ? undefined : num(b.creditLimit),
       paymentTerms: b.paymentTerms === undefined ? undefined : Math.round(num(b.paymentTerms)), notes: b.notes ?? null, isActive: b.isActive,
       currency: b.currency === undefined ? undefined : /^[A-Z]{3}$/.test(String(b.currency).toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId === undefined ? undefined : b.priceListId || null,
+      isNonResident: b.isNonResident === undefined ? undefined : !!b.isNonResident, whtType: b.whtType === undefined ? undefined : b.isNonResident !== false && WHT_TYPES[b.whtType] ? b.whtType : null,
     });
     if (!row) throw notFound();
     await audit(req, "UPDATE", "partner", row.id, { name: row.name });

@@ -5,6 +5,7 @@ import { post, nextNumber, reverse, Line } from "../accounting/engine";
 import { applySettlement } from "./invoices";
 import { BASE, toBase, toFc } from "./currency";
 import { currentCtx } from "../lib/context";
+import { whtLines } from "./round23";
 
 export interface PaymentInput {
   direction: "IN" | "OUT";
@@ -20,6 +21,8 @@ export interface PaymentInput {
   currency?: string; // payment currency (default SAR). When foreign: fcAmount = foreign amount, amount = SAR actually paid/received
   fcAmount?: number;
   branchId?: string | null;
+  /** withholding tax on a payment to a non-resident supplier (defaults to the supplier's WHT type); null = none */
+  wht?: { type: string; borne?: boolean; rate?: number } | null;
 }
 
 /** When every settled document belongs to one branch, the voucher follows it (collections stay on the selling branch's books). */
@@ -110,6 +113,17 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
   const lines: Line[] = p.direction === "IN"
     ? [{ account: account.id, debit: amount, description: memo }, { key: "AR", credit: partnerLine, partnerId: partner.id, description: memo }]
     : [{ key: "AP", debit: partnerLine, partnerId: partner.id, description: memo }, { account: account.id, credit: amount, description: memo }];
+  // withholding tax (non-resident suppliers): the bank pays the net, the tax is owed to ZATCA
+  let wht: ReturnType<typeof whtLines> | null = null;
+  const whtIn: { type: string; borne?: boolean; rate?: number } | null = p.wht === undefined ? (p.direction === "OUT" && partner.isNonResident && partner.whtType ? { type: partner.whtType } : null) : p.wht;
+  if (whtIn && whtIn.type) {
+    if (p.direction !== "OUT") throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات للموردين فقط");
+    if (!partner.isNonResident) throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات لغير المقيمين — فعّل «مورد غير مقيم» في بيانات المورد");
+    if (currency !== BASE) throw bad("سند الصرف مع ضريبة الاستقطاع يكون بالريال");
+    wht = whtLines({ amount, type: whtIn.type, borne: !!whtIn.borne, rate: whtIn.rate, memo });
+    if (!wht.borne) { const bankLine = lines.find((l) => l.account === account.id)!; bankLine.credit = wht.net; }
+    lines.push(...(wht.extra as Line[]));
+  }
   if (fxDiff !== 0) {
     const gain = p.direction === "IN" ? fxDiff > 0 : fxDiff < 0;
     lines.push(gain ? { key: "FX_GAIN", credit: Math.abs(fxDiff), description: `فرق سعر صرف ${number}` } : { key: "FX_LOSS", debit: Math.abs(fxDiff), description: `فرق سعر صرف ${number}` });
@@ -120,6 +134,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
     method: p.method || (account.subtype === "CASH" ? "CASH" : "BANK"), accountId: account.id, reference: p.reference || null,
     notes: p.notes || null, allocations, journalId: entry!.id, isDemo: !!p.isDemo, createdBy: user,
     currency, exchangeRate: rate, fcAmount: currency !== BASE ? fcAmount : null, fxDiff,
+    whtType: wht ? whtIn!.type : null, whtRate: wht ? wht.rate : null, whtAmount: wht ? wht.tax : 0, whtBorne: !!(wht && whtIn!.borne), netPaid: wht ? wht.net : amount,
   });
   await t.exec(`UPDATE journal_entries SET source_id=$2 WHERE id=$1`, [entry!.id, pay.id]);
   for (const a of allocations) await applySettlement(t, a.invoiceId, a.amount, a.fcAmount ?? undefined);
@@ -129,6 +144,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
 export async function cancelPayment(t: Db, companyId: string, user: string, id: string, date?: string) {
   const pay = await t.one(`SELECT * FROM payments WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "السند غير موجود");
   if (pay.status !== "POSTED") throw conflict("السند ملغى مسبقاً");
+  if (pay.whtReturnId) throw conflict("ضريبة الاستقطاع على هذا السند سُدّدت ضمن إقرار الشهر — ألغِ إقرار الاستقطاع أولاً");
   for (const a of pay.allocations || []) await applySettlement(t, a.invoiceId, -a.amount, a.fcAmount ? -a.fcAmount : undefined);
   const rev = await reverse(t, companyId, pay.journalId, date || today(), `إلغاء السند ${pay.number}`, user);
   await t.exec(`UPDATE payments SET status='CANCELLED', allocated=0, allocations='[]' WHERE id=$1`, [id]);

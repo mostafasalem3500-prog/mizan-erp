@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useToast, useCompanyContext, today, fmtDate, monthStart, yearStart, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, BarChart, useUrlSearch, confirmDlg, PdfBtn } from "../lib";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useCharity } from "./CharityApp";
+import { CaseStudyModal, VerdictBadge } from "./pages4";
 import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData, DEFAULT_LOGO } from "./templates";
 import { AlertsCard, waLink } from "./pages3";
 
@@ -225,6 +226,7 @@ function ReceiptModal({ onClose }: { onClose: (saved?: any) => void }) {
 }
 
 // ─── disbursements (المصروفات / سندات الصرف) ────────────────────────────────
+const ZK_CAT: Record<string, string> = { FUQARA: "الفقراء", MASAKIN: "المساكين", AMILIN: "العاملين عليها", MUALLAFA: "المؤلفة قلوبهم", RIQAB: "في الرقاب", GHARIMIN: "الغارمين", FISABILILLAH: "في سبيل الله", IBN_SABIL: "ابن السبيل" };
 export function DisbursementsPage() {
   const { can } = useCompanyContext();
   const { settings } = useCharity();
@@ -269,7 +271,7 @@ export function DisbursementsPage() {
           <tbody>{s.sorted.map((r: any) => (
             <tr key={r.id} style={r.status === "CANCELLED" ? { opacity: .55 } : undefined}>
               <td className="num">{r.number}{(r.requestNumber || r.batchNumber) && <div className="small muted num">{r.requestNumber || r.batchNumber}</div>}</td><td className="dt">{fmtDate(r.date)}</td>
-              <td><b>{r.beneficiaryName}</b><div className="small muted">{CAPACITY[r.capacity]}{r.beneficiaryIdNo ? " · " + r.beneficiaryIdNo : ""}</div></td>
+              <td><b>{r.beneficiaryName}</b><div className="small muted">{CAPACITY[r.capacity]}{r.beneficiaryIdNo ? " · " + r.beneficiaryIdNo : ""}</div>{r.fund === "ZAKAT" && <span className="badge" style={{ background: "#e8eef9", color: "#1c3f8a" }}>زكاة: {ZK_CAT[r.zakatCategory] || "—"}</span>}</td>
               <td>{r.reason}<div className="small muted">{r.expenseAccountName}</div></td>
               <td>{r.projectName || <span className="muted">—</span>}</td>
               <td>{KIND[r.kind]}<div className="small muted">{r.payAccountName}{r.refNo ? " · " + r.refNo : ""}</div></td>
@@ -309,6 +311,11 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
   };
   useEffect(() => { if (init?.requestId && reqs.data) applyReq(init.requestId, reqs.data); }, [reqs.data]);
   const proj = projects.find((p: any) => p.id === f.projectId);
+  // zakat fund (Round 23): the eight Sharia categories, available balance, beneficiary eligibility & aid history
+  const zmeta = useFetch<any>("/charity/zakat/meta");
+  const hist = useFetch<any>(benef?.id ? `/charity/beneficiaries/${benef.id}/aid-history` : null);
+  const cs = hist.data?.caseStudy;
+  const needOverride = f.fund === "ZAKAT" && ["FUQARA", "MASAKIN"].includes(f.zakatCategory) && benef && zmeta.data?.policy?.requireCaseForZakat && (!cs || !cs.zakatEligible || (cs.validUntil && String(cs.validUntil).slice(0, 10) < f.date));
   const save = () => run(async () => { const r = await api("/charity/disbursements", { body: { ...f, requestId: f.requestId || undefined, partnerId: benef?.id, expenseAccountId: exp?.id, payAccountId: pay?.id } }); const req = reqs.data?.find((x: any) => x.id === f.requestId); onClose({ ...r, projectName: proj?.name, expenseAccountName: exp?.nameAr, payAccountName: pay?.nameAr, requestNumber: req?.number }); }, "تم حفظ سند الصرف وترحيل القيد");
   return (
     <Modal title="سند صرف — نقدي / شيك / تحويل بنكي" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
@@ -327,6 +334,11 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
           <Field label="إلى"><Input type="date" value={f.periodTo} onChange={set("periodTo")} /></Field>
           <div className="alert warn small" style={{ gridColumn: "1 / -1", margin: 0 }}>الأصل في التطوع أنه دون مقابل؛ وضّح في السبب طبيعة المبلغ (بدل مصروفات فعلية / تعويض معتمد / مكافأة مصرح بها). يُطبع له «إقرار استلام مستحقات متطوع».</div>
         </>}
+        <Field label="يُصرف من صندوق"><Select value={f.fund || "GENERAL"} onChange={(e) => setF({ ...f, fund: e.target.value, zakatCategory: e.target.value === "ZAKAT" ? f.zakatCategory || "FUQARA" : "" })}><option value="GENERAL">الصندوق العام (التبرعات)</option><option value="ZAKAT">صندوق الزكاة — المتاح {money(zmeta.data?.fund?.available || 0)}</option></Select></Field>
+        {f.fund === "ZAKAT" && <Field label="مصرف الزكاة (الأصناف الثمانية)"><Select value={f.zakatCategory || ""} onChange={set("zakatCategory")}>{Object.entries(zmeta.data?.categories || {}).map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</Select></Field>}
+        {f.fund === "ZAKAT" && <div className="alert info small" style={{ gridColumn: "1 / -1", margin: 0 }}>الزكاة تُصرف في مصارفها الثمانية فقط ولا تتجاوز المحصّل منها{f.zakatCategory === "AMILIN" ? ` — حصة «العاملين عليها» بحد أقصى ${zmeta.data?.policy?.amilinCapPct ?? 12.5}% من زكاة السنة` : " — للمستفيدين فقط"}.{cs ? ` دراسة الحالة ${cs.number}: ${cs.verdict === "FAQIR" ? "فقير" : cs.verdict === "MISKEEN" ? "مسكين" : "غير مستحق للزكاة"} (نصيب الفرد ${money(cs.perCapita)}، الأولوية ${cs.score}/100)${cs.validUntil ? ` — سارية حتى ${fmtDate(cs.validUntil)}` : ""}.` : ""}</div>}
+        {needOverride && <Field label="مبرر الاستثناء المعتمد من اللجنة (إلزامي)" span3 hint={!cs ? "لا توجد دراسة حالة للمستفيد — سجّلها من سجل المستفيدين أو اكتب مبرر الاستثناء" : "دراسة الحالة لا تؤهله للزكاة أو منتهية"}><Input value={f.eligibilityOverride || ""} onChange={set("eligibilityOverride")} placeholder="مثال: قرار لجنة المساعدات رقم ... لظرف طارئ" /></Field>}
+        {hist.data?.warning && <div className="alert warn small" style={{ gridColumn: "1 / -1", margin: 0 }}>⚠ {hist.data.warning}. إجمالي ما صُرف له هذا العام {money(hist.data.yearTotal)} ({hist.data.yearCount} سند).</div>}
         <Field label="المبلغ (ريال)"><NumInput value={f.amount} onChange={set("amount")} /></Field>
         <Field label="المبلغ كتابةً" span2><div className="input" style={{ background: "var(--surface-2)", minHeight: 36 }}>{words(f.amount)}</div></Field>
         <Field label="سبب الصرف" span2><Input value={f.reason} onChange={set("reason")} /></Field>
@@ -692,6 +704,7 @@ export function PeoplePage({ role }: { role: "DONOR" | "BENEFICIARY" }) {
   const [type, setType] = useState("");
   const [edit, setEdit] = useState<any>(null);
   const [hist, setHist] = useState<any>(null);
+  const [caseP, setCase] = useState<any>(null);
   const rows = useMemo(() => (data || []).filter((r) => matches(r, text, ["code", "name", "phone", "idNumber", "city", (x) => x.beneficiaryInfo?.category]) && (!type || (role === "DONOR" ? r.donorType === type : (r.beneficiaryInfo?.category || "") === type))), [data, text, type]);
   const s = useSorted(rows);
   const total = rows.reduce((a, r) => a + Number(r.total || 0), 0);
@@ -714,14 +727,15 @@ export function PeoplePage({ role }: { role: "DONOR" | "BENEFICIARY" }) {
           <thead><tr><Th k="code" s={s}>الرمز</Th><Th k="name" s={s}>الاسم</Th><Th k="phone" s={s}>الجوال</Th><Th k="idNumber" s={s}>الهوية / السجل</Th><th>{role === "DONOR" ? "الصفة" : "الفئة / الأسرة"}</th><Th k="count" s={s} n>{role === "DONOR" ? "السندات" : "الدفعات"}</Th>{role === "DONOR" && <Th k="ytd" s={s} n>هذه السنة</Th>}<Th k="total" s={s} n>الإجمالي</Th><Th k="lastDate" s={s}>آخر حركة</Th><th /></tr></thead>
           <tbody>{s.sorted.map((r: any) => <tr key={r.id}>
             <td className="num">{r.code}</td><td><b>{r.name}</b>{r.city && <div className="small muted">{r.city}</div>}</td><td className="num">{r.phone}</td><td className="num">{r.idNumber || r.crNumber}</td>
-            <td>{role === "DONOR" ? PAYER[r.donorType] || "—" : <>{r.beneficiaryInfo?.category || "—"}{r.beneficiaryInfo?.familySize ? <span className="small muted"> · {r.beneficiaryInfo.familySize} أفراد</span> : null}{r.beneficiaryInfo?.status === "INACTIVE" && <span className="badge gray" style={{ marginInlineStart: 4 }}>موقوف</span>}</>}</td>
+            <td>{role === "DONOR" ? PAYER[r.donorType] || "—" : <>{r.beneficiaryInfo?.category || "—"}{r.beneficiaryInfo?.familySize ? <span className="small muted"> · {r.beneficiaryInfo.familySize} أفراد</span> : null}{r.beneficiaryInfo?.status === "INACTIVE" && <span className="badge gray" style={{ marginInlineStart: 4 }}>موقوف</span>}<div><VerdictBadge a={r.beneficiaryInfo?.assessment} /></div></>}</td>
             <td className="n">{r.count}</td>{role === "DONOR" && <td className="n"><Money v={r.ytd} /></td>}<td className="n"><b><Money v={r.total} /></b></td><td className="dt">{fmtDate(r.lastDate)}</td>
-            <td className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => setHist(r)}>السجل والكشف</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(r)}>تعديل</button>}</td>
+            <td className="row" style={{ gap: 4 }}>{role === "BENEFICIARY" && can("partners.write") && <button className="btn sm" onClick={() => setCase(r)}>دراسة الحالة</button>}<button className="btn sm" onClick={() => setHist(r)}>السجل والكشف</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(r)}>تعديل</button>}</td>
           </tr>)}</tbody>
         </table></div>
       )}
       {edit && <PersonModal role={role} init={edit} onClose={(p) => { setEdit(null); if (p) reload(); }} />}
       {hist && <HistoryModal role={role} p={hist} onClose={() => setHist(null)} />}
+      {caseP && <CaseStudyModal p={caseP} onClose={(sv) => { setCase(null); if (sv) reload(); }} />}
     </div>
   );
 }

@@ -9,6 +9,7 @@
 import { Db } from "../db/pool";
 import { bad, conflict, notFound, r2, D, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
+import { checkZakatDisbursement, ZAKAT_CATEGORIES } from "./charity4";
 
 // ─── chart of accounts additions (idempotent; created on first use) ─────────
 const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE" | "ASSET", string, string | null][] = [
@@ -313,14 +314,22 @@ export async function createDisbursement(t: Db, companyId: string, user: string,
   const pay = await acct(t, companyId, b.payAccountId, kind === "CASH" ? "CASH" : "BANK", "حساب الصرف (الصندوق / البنك)", { cash: true });
   if (kind !== "CASH" && !b.refNo && !b.batchId) throw bad("رقم الشيك / مرجع التحويل مطلوب");
   if (b.iban && !/^SA\d{22}$/.test(String(b.iban).replace(/\s/g, "").toUpperCase())) throw bad("رقم الآيبان يجب أن يبدأ بـ SA ويتكون من 24 خانة");
+  // zakat fund: only the eight Sharia categories, never beyond what was collected (Round 23)
+  const fund = b.fund === "ZAKAT" ? "ZAKAT" : "GENERAL";
+  let zakatNote = "";
+  if (fund === "ZAKAT") {
+    const z = await checkZakatDisbursement(t, companyId, { amount, date: d, category: String(b.zakatCategory || ""), capacity, partnerId: p?.id || null, override: b.eligibilityOverride || null });
+    if (z.override) zakatNote = ` [استثناء أهلية الزكاة: ${z.override}]`;
+  }
   const number = await nextNumber(t, companyId, "DSB", d);
-  const memo = `صرف ${kind === "CASH" ? "نقدي" : kind === "CHEQUE" ? "بشيك" : "بتحويل"} — ${name} — ${reason}`;
+  const memo = `صرف ${kind === "CASH" ? "نقدي" : kind === "CHEQUE" ? "بشيك" : "بتحويل"}${fund === "ZAKAT" ? ` من الزكاة (${ZAKAT_CATEGORIES[b.zakatCategory]})` : ""} — ${name} — ${reason}`;
   const row = await t.insert("charity_disbursements", {
     companyId, number, date: d, kind, partnerId: p?.id || null, beneficiaryName: name, beneficiaryIdNo: b.beneficiaryIdNo || p?.idNumber || p?.crNumber || null,
     beneficiaryPhone: b.beneficiaryPhone || p?.phone || null, capacity, department: b.department || null, amount, reason, projectId: pr?.id || null,
     budgetLine: b.budgetLine || rq?.budgetLine || null, expenseAccountId: exp.id, payAccountId: pay.id, requestId: rq?.id || null, batchId: b.batchId || null,
     bankName: b.bankName || null, accountHolder: b.accountHolder || null, iban: b.iban ? String(b.iban).replace(/\s/g, "").toUpperCase() : null, refNo: b.refNo || null,
-    execDate: isDate(b.execDate) ? b.execDate : null, docs: JSON.stringify(Array.isArray(b.docs) ? b.docs.slice(0, 20) : []), notes: b.notes || null, isDemo: !!b.isDemo, createdBy: user,
+    execDate: isDate(b.execDate) ? b.execDate : null, docs: JSON.stringify(Array.isArray(b.docs) ? b.docs.slice(0, 20) : []), notes: (b.notes || "") + zakatNote || null, isDemo: !!b.isDemo, createdBy: user,
+    fund, zakatCategory: fund === "ZAKAT" ? b.zakatCategory : null,
     programName: b.programName || null, periodFrom: isDate(b.periodFrom) ? b.periodFrom : null, periodTo: isDate(b.periodTo) ? b.periodTo : null, sourceType: b.sourceType || null, sourceId: b.sourceId || null,
   });
   const je = await post(t, companyId, {

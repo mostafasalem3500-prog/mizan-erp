@@ -81,8 +81,18 @@ export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: 
   const autoFill = () => { let rest = payAmt; const a: Record<string, number> = {}; for (const i of docs) { const d = Math.min(dueOf(i), rest); if (d <= 0) break; a[i.id] = Math.round(d * 100) / 100; rest -= d; } setAlloc(a); };
   useEffect(() => { if (auto) autoFill(); }, [amount, fcAmount, open, auto, currency]);
   const sym = (currencies || []).find((x: any) => x.code === currency)?.symbol || currency;
+  // withholding tax — payments to non-resident suppliers (Income Tax Law art. 68)
+  const nonRes = direction === "OUT" && !!partner?.isNonResident;
+  const whtTypes = useFetch<any>(nonRes ? "/tax/wht/types" : null);
+  const [whtOn, setWhtOn] = useState(true);
+  const [whtType, setWhtType] = useState("");
+  const [whtBorne, setWhtBorne] = useState(false);
+  useEffect(() => { setWhtOn(true); setWhtBorne(false); setWhtType(partner?.whtType || "OTHER"); }, [partner?.id]);
+  const whtRate = whtTypes.data?.[whtType]?.rate || 0;
+  const whtTax = nonRes && whtOn && !fc ? (whtBorne ? Math.round((amt / (1 - whtRate) - amt) * 100) / 100 : Math.round(amt * whtRate * 100) / 100) : 0;
+  const whtBody = nonRes ? (whtOn && !fc ? { type: whtType, borne: whtBorne } : null) : undefined;
   return (
-    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, branchId: branchId || undefined, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
+    <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, branchId: branchId || undefined, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, wht: whtBody, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label={direction === "IN" ? "العميل" : "المورد"} span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(direction === "IN" ? "CUSTOMER" : "SUPPLIER")} label={(p: any) => `${p.name} — الرصيد ${money(p.balance)}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
@@ -96,6 +106,14 @@ export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: 
         <Field label="بيان"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
         <BranchField value={branchId} onChange={setBranchId} />
       </div>
+      {nonRes && <div className="card mt" style={{ borderColor: "var(--accent)" }}><div className="card-b">
+        <div className="row between"><b>🌍 ضريبة الاستقطاع — مورد غير مقيم{partner.country ? ` (${partner.country})` : ""}</b><label className="check"><input type="checkbox" checked={whtOn} onChange={(e) => setWhtOn(e.target.checked)} /> تطبيق الاستقطاع</label></div>
+        {fc ? <div className="small muted mt">سند الصرف مع ضريبة الاستقطاع يكون بالريال.</div> : whtOn && <div className="form-grid mt">
+          <Field label="نوع الدفعة ونسبة الاستقطاع"><Select value={whtType} onChange={(e) => setWhtType(e.target.value)}>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>
+          <Field label="من يتحمل الضريبة"><Select value={whtBorne ? "1" : "0"} onChange={(e) => setWhtBorne(e.target.value === "1")}><option value="0">يُخصم من المورد (الأصل)</option><option value="1">تتحملها المنشأة (يستلم المورد كامل المبلغ)</option></Select></Field>
+          <div className="stat-list span2"><div className="item"><span>المبلغ المسدد للمورد من البنك</span><b><Money v={whtBorne ? amt : amt - whtTax} /></b></div><div className="item"><span>ضريبة الاستقطاع المستحقة للهيئة {whtBorne ? "(على المبلغ الإجمالي بعد التعلية)" : ""}</span><b className="neg-val"><Money v={whtTax} /></b></div><div className="item"><span>تُورَّد خلال العشرة أيام الأولى من الشهر التالي</span><b className="small">ح/ ضريبة الاستقطاع المستحقة</b></div></div>
+        </div>}
+      </div></div>}
       {partner && (
         <div className="mt">
           <div className="row between"><h3>تخصيص المبلغ على الفواتير المفتوحة{fc && <span className="muted small"> — بالـ{sym}</span>}</h3><label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> تخصيص تلقائي (الأقدم أولاً)</label></div>

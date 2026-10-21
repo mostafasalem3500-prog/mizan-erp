@@ -75,6 +75,7 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
   const toast = useToast();
   const { data: currencies } = useFetch("/currencies");
   const { data: priceLists } = useFetch("/price-lists");
+  const whtTypes = useFetch<any>(role === "SUPPLIER" || p.isSupplier ? "/tax/wht/types" : null);
   const [f, setF] = useState<any>({ kind: "COMPANY", country: "SA", paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, ...p });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
@@ -100,6 +101,8 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || "SAR"} onChange={s("currency")}>{(currencies || [{ code: "SAR", nameAr: "ريال سعودي" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
         <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
         <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>
+        {!!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country })} /> مورد غير مقيم في المملكة</label></Field>}
+        {!!f.isSupplier && !!f.isNonResident && <Field label="نوع الدفعات الافتراضي (نسبة الاستقطاع)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— يُحدد في كل سند —</option>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>}
         <Field label="ملاحظات" span3><textarea className="input" value={f.notes || ""} onChange={s("notes")} /></Field>
       </div>
     </Modal>

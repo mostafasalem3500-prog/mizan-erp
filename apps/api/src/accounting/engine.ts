@@ -99,7 +99,7 @@ export async function accountByKey(t: Db, companyId: string, key: string) {
 
 // ─── branches ──────────────────────────────────────────────────────────────
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEAD_OFFICE_TYPES = new Set(["CLOSING", "VAT_SETTLEMENT"]);
+const HEAD_OFFICE_TYPES = new Set(["CLOSING", "VAT_SETTLEMENT", "ZAKAT", "WHT"]);
 
 export async function mainBranchId(t: Db, companyId: string): Promise<string> {
   const b = await t.maybe(`SELECT id FROM branches WHERE company_id=$1 ORDER BY is_main DESC, code LIMIT 1`, [companyId]);
