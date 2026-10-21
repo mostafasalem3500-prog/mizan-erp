@@ -11,6 +11,7 @@ import { CustodyPage, PurchasesPage, RefundsPage } from "./pages2";
 import { SponsorshipsPage, InkindPage, VolunteersPage } from "./pages3";
 import { TreasuryPage, JournalView } from "../pages/Round20";
 import { ZakatFundPage } from "./pages4";
+import { CharityIndicatorsPage } from "../pages/Round25";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
 
@@ -42,6 +43,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/batches", ic: "🧾", label: "مسير المصروفات", perm: "payments.read" },
   { to: "/charity/beneficiaries", ic: "👪", label: "المستفيدون", perm: "partners.read" },
   { to: "/charity/zakat", ic: "🕌", label: "صندوق الزكاة ومصارفها", perm: "reports.read" },
+  { to: "/charity/indicators", ic: "📊", label: "مؤشرات الأداء والحوكمة", perm: "reports.read" },
   { to: "/charity/volunteers", ic: "🙋", label: "المتطوعون وساعات التطوع", perm: "payments.read" },
   { to: "/charity/payroll", ic: "👔", label: "الرواتب", perm: "accounting.read", companyOnly: true },
   { group: "المشتريات والعهد" },
@@ -124,6 +126,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/refunds" element={<RefundsPage />} />
                   <Route path="/charity/treasury" element={<TreasuryPage />} />
                   <Route path="/charity/zakat" element={<ZakatFundPage />} />
+                  <Route path="/charity/indicators" element={<CharityIndicatorsPage settings={s} />} />
                   <Route path="/charity/journals/:id" element={<JournalView />} />
                   <Route path="/charity/projects" element={<ProjectsPage />} />
                   <Route path="/charity/budget" element={<BudgetPage />} />

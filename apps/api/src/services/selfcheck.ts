@@ -22,6 +22,7 @@ import { fileWht, zakatCompute, zakatPost, zakatPay } from "./round23";
 import { revisePurchase } from "./round22";
 import { createReceipt, createDisbursement, cancelReceipt, savePerson } from "./charity";
 import { saveCase, zakatFund } from "./charity4";
+import { financialAnalysis } from "./round25";
 
 export interface Check { group: string; name: string; expected: any; actual: any; ok: boolean }
 export interface SelfCheckResult { ok: boolean; passed: number; failed: number; durationMs: number; scenario: string[]; checks: Check[]; error?: string }
@@ -281,6 +282,17 @@ export async function runAccountingSelfCheck(): Promise<SelfCheckResult> {
       await rejects(t, "صندوق الزكاة (الجمعية)", "صرف زكاة لمستفيد بلا دراسة حالة", async () => { const b2 = await savePerson(t, C, "BENEFICIARY", { name: "بلا دراسة" }); return createDisbursement(t, C, U, { kind: "CASH", capacity: "BENEFICIARY", partnerId: b2.id, amount: 50, reason: "مساعدة", date: "2026-08-03", fund: "ZAKAT", zakatCategory: "FUQARA" }); });
       await rejects(t, "صندوق الزكاة (الجمعية)", "إلغاء سند زكاة صُرف منه", () => cancelReceipt(t, C, U, zr.id, "فحص"));
       scenario.push("19) الجمعية: تحصيل زكاة 1,000 وصرف 600 لفقير بدراسة حالة، ومنع تجاوز الرصيد وصرفها دون دراسة");
+
+      // ── Round 25: financial analysis must agree with the statements ──
+      const fan = await financialAnalysis(t, C, { from: "2026-01-01", to: "2026-12-31" });
+      const bsA = await rep.balanceSheet(t, C, { to: "2026-12-31" });
+      const isA = await rep.incomeStatement(t, C, { from: "2026-01-01", to: "2026-12-31" });
+      const fr = (k: string) => fan.ratios.find((r: any) => r.key === k)?.value;
+      eq("التحليل المالي", "نسبة التداول = الأصول المتداولة ÷ الخصوم المتداولة من الميزانية", r2(bsA.currentAssets.total / bsA.currentLiab.total), fr("current"));
+      eq("التحليل المالي", "هامش مجمل الربح = قائمة الدخل", isA.grossMargin, fr("gm"));
+      const dp = fan.dupont;
+      eq("التحليل المالي", "ديبونت: الهامش × الدوران × المضاعف = العائد على حقوق الملكية", true, dp.roe === null || Math.abs((dp.netMargin! / 100) * dp.assetTurnover! * dp.equityMultiplier! * 100 - dp.roe) < 0.3);
+      scenario.push("20) التحليل المالي لسنة 2026 يطابق الميزانية وقائمة الدخل وتتسق مكونات ديبونت");
 
       const integ = await rep.integrity(t, C);
       for (const c of integ.checks) checks.push({ group: "فحوص التطابق الآلية", name: c.name, expected: c.b, actual: c.a, ok: c.ok });

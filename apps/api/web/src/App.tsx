@@ -24,6 +24,7 @@ import { PartnerProfilePage } from "./pages/PartnerProfile";
 import { ProductProfilePage, TreasuryPage, JournalView, CountSheetPage } from "./pages/Round20";
 import { CharityApp, charityDefault } from "./charity/CharityApp";
 import { ZakatPage, WhtPage } from "./pages/Round23";
+import { FinancialAnalysisPage } from "./pages/Round25";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/templates";
 
 const NAV = [
@@ -65,6 +66,7 @@ const NAV = [
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
   { to: "/tax/wht", ic: "🌍", label: "ضريبة الاستقطاع (غير المقيمين)", perm: "vat.read" },
   { to: "/zakat", ic: "🕌", label: "احتساب الزكاة الشرعية", perm: "accounting.read" },
+  { to: "/analysis", ic: "📈", label: "التحليل المالي والمؤشرات", perm: "reports.read" },
   { to: "/budgets", ic: "🎯", label: "الموازنات التقديرية", perm: "reports.read" },
   { to: "/reports", ic: "📊", label: "القوائم المالية", perm: "reports.read" },
   { to: "/reports-center", ic: "📈", label: "مركز التقارير", perm: "reports.read" },
@@ -75,7 +77,7 @@ const NAV = [
 ];
 
 // company-level screens hidden from members confined to one branch
-const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/tax/wht", "/zakat", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
+const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/tax/wht", "/zakat", "/analysis", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
 
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
@@ -175,6 +177,7 @@ export function App() {
                 <Route path="/vat" element={<VatPage />} />
                 <Route path="/tax/wht" element={<WhtPage />} />
                 <Route path="/zakat" element={<ZakatPage />} />
+                <Route path="/analysis" element={<FinancialAnalysisPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />

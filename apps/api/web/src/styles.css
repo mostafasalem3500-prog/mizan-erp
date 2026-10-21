@@ -404,3 +404,25 @@ tr.expand > td { background: var(--surface-2); padding: 0 !important; }
   body:not(.printing-a4):has(.modal-bg) *:not(:has(.modal-bg)):not(.modal-bg):not(.modal-bg *) { display: none !important; }
   body:not(.printing-a4):has(.modal-bg) :is(.app, .main, .content) { display: block !important; margin: 0 !important; padding: 0 !important; min-height: 0 !important; }
 }
+/* Round 25: financial analysis */
+.fa-head { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .fa-head { grid-template-columns: 1fr; } }
+.fa-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
+.fa-kpis small { display: block; font-size: 11.5px; }
+.fa-ins { margin: 0; padding-inline-start: 18px; display: grid; gap: 6px; font-size: 13.5px; }
+.fa-ratio { padding: 10px 14px; border-bottom: 1px solid var(--border); display: grid; gap: 2px; }
+.fa-ratio:last-child { border-bottom: 0; }
+.fa-top { display: flex; align-items: center; gap: 8px; }
+.fa-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.fa-val { font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.fa-dupont { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fa-dupont > div { background: var(--surface-2, #f6f8fa); border-radius: 10px; padding: 8px 10px; text-align: center; flex: 1; min-width: 90px; }
+.fa-dupont > div span { display: block; font-size: 11px; color: var(--muted); }
+.fa-dupont > div b { font-size: 15px; }
+.fa-dupont > div.eq { background: var(--primary-soft); }
+.fa-dupont i { font-style: normal; font-weight: 800; color: var(--muted); }
+.fa-bar { position: relative; height: 12px; background: var(--border); border-radius: 999px; }
+.fa-bar > div { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--accent); border-radius: 999px; opacity: .55; }
+.fa-bar > span { position: absolute; top: -4px; width: 3px; height: 20px; background: var(--primary); border-radius: 2px; transform: translateX(50%); }
+@media (max-width: 600px) { .fa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .fa .card { break-inside: avoid; } }
