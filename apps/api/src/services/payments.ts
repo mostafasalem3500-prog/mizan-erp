@@ -120,6 +120,8 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
     if (p.direction !== "OUT") throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات للموردين فقط");
     if (!partner.isNonResident) throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات لغير المقيمين — فعّل «مورد غير مقيم» في بيانات المورد");
     if (currency !== BASE) throw bad("سند الصرف مع ضريبة الاستقطاع يكون بالريال");
+    const filed = await t.maybe(`SELECT number FROM wht_returns WHERE company_id=$1 AND period=$2 AND status='POSTED'`, [companyId, date.slice(0, 7)]);
+    if (filed) throw conflict(`إقرار الاستقطاع لشهر ${date.slice(0, 7)} مقدَّم (${filed.number}) — سجّل السند بتاريخ الشهر الحالي أو ألغِ الإقرار وأعد تقديمه`);
     wht = whtLines({ amount, type: whtIn.type, borne: !!whtIn.borne, rate: whtIn.rate, memo });
     if (!wht.borne) { const bankLine = lines.find((l) => l.account === account.id)!; bankLine.credit = wht.net; }
     lines.push(...(wht.extra as Line[]));

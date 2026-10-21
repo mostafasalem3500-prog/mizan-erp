@@ -5,6 +5,7 @@
  *   • توزيع عيني      : Dr 5506 مساعدات عينية موزعة          Cr 110391                 (بالمتوسط المرجح)
  */
 import { Db } from "../db/pool";
+import { zakatFund } from "./charity4";
 import { bad, conflict, r2, r3, num, isDate, today, addMonths } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
 import { ensureCharity, acct, project, createReceipt, saveBatch, budget } from "./charity";
@@ -246,5 +247,18 @@ export async function alerts(t: Db, companyId: string) {
   if (lo.length) out.push({ level: "warn", title: `${lo.length} صنف عيني وصل لحد إعادة الطلب`, detail: lo.slice(0, 4).map((x: any) => `${x.name} (${Number(x.qty)} ${x.unit})`).join("، "), link: "/charity/inkind" });
   const nb = await t.one(`SELECT COUNT(*)::int n FROM partners WHERE company_id=$1 AND is_beneficiary AND COALESCE(beneficiary_info->>'status','ACTIVE')='ACTIVE' AND COALESCE(beneficiary_info->>'iban','')=''`, [companyId]);
   if (nb.n) out.push({ level: "info", title: `${nb.n} مستفيد نشط بدون آيبان`, detail: "أكمل بياناتهم البنكية لتسهيل الصرف بالتحويل", link: "/charity/beneficiaries" });
+  // zakat: studies expiring/expired for active beneficiaries, and zakat collected but not yet distributed
+  const cs = await t.one(
+    `SELECT COUNT(*) FILTER (WHERE (beneficiary_info->'assessment'->>'validUntil')::date < CURRENT_DATE)::int expired,
+            COUNT(*) FILTER (WHERE (beneficiary_info->'assessment'->>'validUntil')::date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30)::int soon,
+            COUNT(*) FILTER (WHERE beneficiary_info->'assessment' IS NULL)::int none
+       FROM partners WHERE company_id=$1 AND is_beneficiary AND COALESCE(beneficiary_info->>'status','ACTIVE')='ACTIVE'`, [companyId]);
+  if (cs.expired) out.push({ level: "warn", title: `${cs.expired} مستفيد انتهت صلاحية دراسة حالته`, detail: "لا يُصرف لهم من الزكاة حتى تُحدَّث الدراسة", link: "/charity/beneficiaries" });
+  if (cs.soon) out.push({ level: "info", title: `${cs.soon} دراسة حالة تنتهي خلال 30 يوماً`, detail: "جدول زيارات التحديث مبكراً", link: "/charity/beneficiaries" });
+  if (cs.none) out.push({ level: "info", title: `${cs.none} مستفيد نشط بلا دراسة حالة`, detail: "الدراسة شرط للصرف من الزكاة للفقراء والمساكين", link: "/charity/beneficiaries" });
+  const zf = await zakatFund(t, companyId);
+  const zOld = await t.one(`SELECT COALESCE(SUM(amount),0) s FROM charity_receipts WHERE company_id=$1 AND status='POSTED' AND source='ZAKAT' AND date < CURRENT_DATE - 90`, [companyId]);
+  const zSpent = zf.distributed;
+  if (zf.available > 0.009 && Number(zOld.s) - zSpent > 0.009) out.push({ level: "warn", title: `زكاة محصّلة منذ أكثر من 90 يوماً لم تُصرف (${r2(Number(zOld.s) - zSpent)} ريال)`, detail: `الرصيد المتاح في صندوق الزكاة ${zf.available} ريال — الأصل تعجيل إخراج الزكاة لمستحقيها`, link: "/charity/zakat" });
   return out;
 }

@@ -50,7 +50,7 @@ export async function zakatFund(t: Db, companyId: string, asOf?: string, exceptI
 }
 
 /** Validates a disbursement paid from the zakat fund (called inside createDisbursement, before posting). */
-export async function checkZakatDisbursement(t: Db, companyId: string, b: { amount: number; date: string; category: string; capacity: string; partnerId?: string | null; override?: string | null }) {
+export async function checkZakatDisbursement(t: Db, companyId: string, b: { amount: number; date: string; category: string; capacity: string; partnerId?: string | null; override?: string | null; name?: string }) {
   if (!ZAKAT_CATEGORIES[b.category]) throw bad("حدد مصرف الزكاة (أحد الأصناف الثمانية)");
   if (b.category !== "AMILIN" && b.capacity !== "BENEFICIARY") throw bad("الصرف من الزكاة لغير «العاملين عليها» يكون لمستفيد فقط");
   const pol = await policy(t, companyId);
@@ -66,7 +66,7 @@ export async function checkZakatDisbursement(t: Db, companyId: string, b: { amou
   if (["FUQARA", "MASAKIN"].includes(b.category) && b.partnerId && pol.requireCaseForZakat) {
     const cs = await latestCase(t, companyId, b.partnerId);
     const why = !cs ? "لا توجد دراسة حالة للمستفيد" : cs.validUntil && String(cs.validUntil).slice(0, 10) < b.date ? `دراسة الحالة ${cs.number} منتهية الصلاحية` : !cs.zakatEligible ? `دراسة الحالة ${cs.number} تصنّفه «غير مستحق للزكاة» (نصيب الفرد ${Number(cs.perCapita).toFixed(2)} ر.س)` : "";
-    if (why && !(b.override && String(b.override).trim().length >= 5)) throw conflict(`${why} — أرفق دراسة حالة سارية، أو اكتب مبرر الاستثناء المعتمد من اللجنة`);
+    if (why && !(b.override && String(b.override).trim().length >= 5)) throw conflict(`${b.name ? `«${b.name}»: ` : ""}${why} — أرفق دراسة حالة سارية، أو اكتب مبرر الاستثناء المعتمد من اللجنة`);
     return { override: why ? String(b.override).trim() : null };
   }
   return { override: null };
@@ -148,4 +148,28 @@ export async function saveCase(t: Db, companyId: string, user: string, partnerId
   const info = { ...(p.beneficiaryInfo || {}), familySize: a.members, assessment: { number, date, verdict: a.verdict, score: a.score, perCapita: a.perCapita, zakatEligible: a.zakatEligible, validUntil } };
   await t.exec(`UPDATE partners SET beneficiary_info=$2 WHERE id=$1`, [partnerId, JSON.stringify(info)]);
   return { ...row, priority: a.priority, policy: pol };
+}
+
+/** Pre-posting check of an expense run paid from zakat: eligibility per line and the total against the fund. */
+export async function batchZakatCheck(t: Db, companyId: string, id: string) {
+  const x = await t.one(`SELECT * FROM charity_batches WHERE id=$1 AND company_id=$2`, [id, companyId], "المسير غير موجود");
+  const pol = await policy(t, companyId);
+  const f = await zakatFund(t, companyId, String(x.date).slice(0, 10));
+  const lines: { name: string; partnerId: string | null; amount: number; status: string; note: string }[] = [];
+  for (const l of (x.lines || []) as any[]) {
+    let status = "OK", note = "";
+    if (x.fund === "ZAKAT" && x.zakatCategory !== "AMILIN" && (l.capacity || "BENEFICIARY") !== "BENEFICIARY") { status = "BLOCK"; note = "الصرف من الزكاة للمستفيدين فقط"; }
+    else if (x.fund === "ZAKAT" && ["FUQARA", "MASAKIN"].includes(x.zakatCategory) && pol.requireCaseForZakat) {
+      const cs = l.partnerId ? await latestCase(t, companyId, l.partnerId) : null;
+      if (!l.partnerId) { status = "BLOCK"; note = "غير مسجّل في سجل المستفيدين"; }
+      else if (!cs) { status = "BLOCK"; note = "لا توجد دراسة حالة"; }
+      else if (cs.validUntil && String(cs.validUntil).slice(0, 10) < String(x.date).slice(0, 10)) { status = "BLOCK"; note = `الدراسة ${cs.number} منتهية`; }
+      else if (!cs.zakatEligible) { status = "BLOCK"; note = `الدراسة ${cs.number}: غير مستحق للزكاة`; }
+      else note = `${cs.verdict === "FAQIR" ? "فقير" : "مسكين"} · أولوية ${cs.score}`;
+      if (status === "BLOCK" && l.override && String(l.override).trim().length >= 5) { status = "OVERRIDE"; note += ` — استثناء: ${l.override}`; }
+    }
+    lines.push({ name: l.name, partnerId: l.partnerId || null, amount: Number(l.amount), status, note });
+  }
+  const total = r2(lines.reduce((a, l) => D(a).plus(l.amount), D(0)));
+  return { fund: x.fund, category: x.zakatCategory ? ZAKAT_CATEGORIES[x.zakatCategory] : null, total, available: f.available, enough: x.fund !== "ZAKAT" || total <= f.available + 0.001, blocked: lines.filter((l) => l.status === "BLOCK").length, lines };
 }

@@ -562,5 +562,27 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
   if (co.plan === "TRIAL" && co.subscriptionEndsAt) { const dl = Math.round((new Date(co.subscriptionEndsAt).getTime() - Date.parse(td)) / 86400000); if (dl <= 7) items.push({ level: dl < 0 ? "err" : "warn", text: dl < 0 ? "انتهت الفترة التجريبية — فعّل الترخيص" : `تنتهي الفترة التجريبية خلال ${dl} يوم`, to: "/settings/license" }); }
+  // withholding tax: months with tax withheld but not yet remitted (due the 10th of the next month)
+  const wht = await t.rows(
+    `SELECT to_char(p.date,'YYYY-MM') m, SUM(p.wht_amount) v FROM payments p
+      WHERE p.company_id=$1 AND p.status='POSTED' AND p.wht_amount>0 AND p.wht_return_id IS NULL AND to_char(p.date,'YYYY-MM') < to_char($2::date,'YYYY-MM')
+      GROUP BY 1 ORDER BY 1`, [companyId, td]);
+  for (const w of wht) {
+    const [y, m] = w.m.split("-").map(Number); const due = new Date(Date.UTC(y, m, 10)).toISOString().slice(0, 10);
+    const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
+    items.push({ level: dl < 0 ? "err" : "warn", text: `ضريبة استقطاع شهر ${w.m} (${r2(w.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س) ${dl < 0 ? `متأخرة ${-dl} يوم — غرامة 1% عن كل 30 يوماً` : `تُورَّد خلال ${dl} يوم (${due})`}`, to: "/tax/wht" });
+  }
+  // zakat: unpaid provisions, and the return for the last closed financial year (due within 120 days of its end)
+  const zUnpaid = await t.one(`SELECT COUNT(*)::int c, COALESCE(SUM(zakat-paid),0) v FROM zakat_assessments WHERE company_id=$1 AND status='POSTED' AND zakat-paid > 0.009`, [companyId]);
+  if (zUnpaid.c) items.push({ level: "warn", text: `زكاة مستحقة غير مسددة ${r2(zUnpaid.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س (${zUnpaid.c} احتساب)`, to: "/zakat" });
+  const lastFy = await t.maybe(`SELECT name, start_date, end_date FROM fiscal_years WHERE company_id=$1 AND end_date < $2::date ORDER BY end_date DESC LIMIT 1`, [companyId, td]);
+  if (lastFy) {
+    const end = String(lastFy.endDate).slice(0, 10);
+    const due = new Date(Date.parse(end) + 120 * 86400000).toISOString().slice(0, 10);
+    const has = await t.maybe(`SELECT 1 FROM zakat_assessments WHERE company_id=$1 AND status='POSTED' AND period_to=$2`, [companyId, end]);
+    const active = await t.maybe(`SELECT 1 FROM journal_entries WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3 LIMIT 1`, [companyId, lastFy.startDate, end]);
+    const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
+    if (!has && active && dl >= -60) items.push({ level: dl < 0 ? "err" : dl <= 30 ? "warn" : "info", text: `إقرار الزكاة للسنة المالية ${lastFy.name} ${dl < 0 ? `متأخر ${-dl} يوم` : `مستحق خلال ${dl} يوم (${due})`} — احسب الوعاء ورحّل المخصص`, to: "/zakat" });
+  }
   return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed } };
 }

@@ -29,3 +29,4 @@ r23.get("/charity/beneficiaries/:id/aid-history", perm("payments.read"), h(async
 r23.get("/charity/beneficiaries/:id/cases", perm("partners.read"), h(async (req) => c4.listCases(db, cid(req), p(req).id)));
 r23.post("/charity/beneficiaries/:id/cases", perm("partners.write"), h(async (req) => { const r = await tx((t) => c4.saveCase(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "CREATE", "case_study", r.id, { verdict: r.verdict, score: r.score }); return r; }));
 r23.post("/charity/case-assess", perm("partners.read"), h(async (req) => c4.assess(req.body || {}, await c4.policy(db, cid(req)))));
+r23.get("/charity/batches/:id/zakat-check", perm("payments.read"), h(async (req) => c4.batchZakatCheck(db, cid(req), p(req).id)));

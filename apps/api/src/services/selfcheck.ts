@@ -18,6 +18,10 @@ import { reverse } from "../accounting/engine";
 import { openSession, posSale, closeSession } from "./pos";
 import { createAsset, runDepreciation } from "./assets";
 import * as rep from "./reports";
+import { fileWht, zakatCompute, zakatPost, zakatPay } from "./round23";
+import { revisePurchase } from "./round22";
+import { createReceipt, createDisbursement, cancelReceipt, savePerson } from "./charity";
+import { saveCase, zakatFund } from "./charity4";
 
 export interface Check { group: string; name: string; expected: any; actual: any; ok: boolean }
 export interface SelfCheckResult { ok: boolean; passed: number; failed: number; durationMs: number; scenario: string[]; checks: Check[]; error?: string }
@@ -222,6 +226,61 @@ export async function runAccountingSelfCheck(): Promise<SelfCheckResult> {
       eq("أرصدة 2026", "صافي 2026 (120 + ربح نقطة البيع 200 − إهلاك 6,000)", -5680, isF.net);
       const bsF = await rep.balanceSheet(t, C, { to: "2026-12-31" });
       eq("أرصدة 2026", "الميزانية متوازنة بعد نقطة البيع والأصل", true, bsF.balanced);
+
+      // ── Round 22–24: named cash sale, withholding tax, posted-purchase correction, zakat, charity zakat fund ──
+      const csD = await saveDraft(t, co, U, { direction: "SALE", kind: "INVOICE", date: "2026-07-02", partnerId: cusY.id, warehouseId: wh, lines: [{ productId: S1.id, qty: 1, unitPrice: 200, taxCode: "S" }] } as any);
+      const csP = await postInvoice(t, co, csD.id, U, { tenders: [{ method: "CASH", amount: 230 }] });
+      const csRows = (await rep.partnerStatement(t, C, cusY.id, { role: "CUSTOMER", from: "2026-07-02", to: "2026-07-02" })).rows.filter((r: any) => r.sourceId === csP.id);
+      eq("بيع نقدي لعميل مسمّى", "يظهر في كشف العميل: مدين بالفاتورة", 230, csRows.reduce((a: number, r: any) => a + Number(r.debit), 0));
+      eq("بيع نقدي لعميل مسمّى", "ودائن بالسداد الفوري", 230, csRows.reduce((a: number, r: any) => a + Number(r.credit), 0));
+      scenario.push("15) بيع نقدي 230 لعميل مسمّى يمر بحسابه (مدين ودائن) فيظهر في كشفه");
+
+      const nr = await t.insert("partners", { companyId: C, code: "S-NR", name: "مورد غير مقيم", isSupplier: true, kind: "COMPANY", country: "GB", isNonResident: true, whtType: "TECHNICAL" });
+      const whtBill = await doc("PURCHASE", "INVOICE", "2026-07-01", nr.id, [{ description: "خدمة فنية", qty: 1, unitPrice: 2000, taxCode: "O" }]);
+      const whtPay = await createPayment(t, C, U, { direction: "OUT", partnerId: nr.id, date: "2026-07-15", amount: 2000, accountId: bank, allocations: [{ invoiceId: whtBill.id, amount: 2000 }] });
+      eq("ضريبة الاستقطاع", "استقطاع 5% خدمات فنية من 2,000", 100, Number(whtPay.whtAmount));
+      eq("ضريبة الاستقطاع", "المسدد للمورد من البنك", 1900, Number(whtPay.netPaid));
+      const whtAcc = await acc("WHT_PAYABLE");
+      eq("ضريبة الاستقطاع", "رصيد ضريبة الاستقطاع المستحقة", -100, await glBal(whtAcc));
+      await fileWht(t, C, U, { period: "2026-07", accountId: bank, date: "2026-08-05" });
+      eq("ضريبة الاستقطاع", "الرصيد بعد سداد إقرار يوليو", 0, await glBal(whtAcc));
+      await rejects(t, "ضريبة الاستقطاع", "سند استقطاع بتاريخ شهر مقدَّم إقراره", () => createPayment(t, C, U, { direction: "OUT", partnerId: nr.id, date: "2026-07-20", amount: 100, accountId: bank }));
+      scenario.push("16) دفع 2,000 لمورد غير مقيم: استقطاع 100 وصافي 1,900، ثم إقرار يوليو وسداده");
+
+      const P3 = await t.insert("products", { companyId: C, sku: "T-P3", name: "صنف تعديل", type: "STOCK", salePrice: 30, purchasePrice: 10, taxCode: "S" });
+      const rvBill = await doc("PURCHASE", "INVOICE", "2026-07-03", supA.id, [{ productId: P3.id, qty: 10, unitPrice: 10, taxCode: "S" }]);
+      await doc("SALE", "INVOICE", "2026-07-04", cusX.id, [{ productId: P3.id, qty: 6, unitPrice: 30, taxCode: "S" }]);
+      const rv = await revisePurchase(t, co, U, rvBill.id, { partnerId: supA.id, warehouseId: wh, revisionReason: "فحص آلي لتصحيح السعر", lines: [{ productId: P3.id, qty: 10, unitPrice: 12, taxCode: "S" }] });
+      eq("تعديل فاتورة مشتريات مرحّلة", "نفس رقم الفاتورة", rvBill.number, rv.invoice.number);
+      eq("تعديل فاتورة مشتريات مرحّلة", "الإجمالي بعد التعديل 10 × 12 + 15%", 138, Number(rv.invoice.total));
+      eq("تعديل فاتورة مشتريات مرحّلة", "فرق السعر على 6 وحدات مباعة → تكلفة المبيعات", 12, rv.cogsAdjustment);
+      const p3b = await t.one(`SELECT qty, value FROM stock_balances WHERE company_id=$1 AND product_id=$2`, [C, P3.id]);
+      eq("تعديل فاتورة مشتريات مرحّلة", "قيمة الرصيد الباقي 4 × 12", 48, Number(p3b.value));
+      await rejects(t, "تعديل فاتورة مشتريات مرحّلة", "تخفيض الكمية تحت المصروف منها", () => revisePurchase(t, co, U, rvBill.id, { partnerId: supA.id, warehouseId: wh, revisionReason: "فحص آلي للتخفيض", lines: [{ productId: P3.id, qty: 3, unitPrice: 12, taxCode: "S" }] }));
+      await rejects(t, "تعديل فاتورة مشتريات مرحّلة", "فاتورة مبيعات لا تُعدَّل بعد الترحيل", () => revisePurchase(t, co, U, csP.id, { revisionReason: "محاولة غير مسموحة", lines: [] }));
+      scenario.push("17) تعديل فاتورة شراء مرحّلة من 10 إلى 12 بعد بيع 6 وحدات: فرق 12 لتكلفة المبيعات");
+
+      const zc = await zakatCompute(t, C, { year: "2026" });
+      eq("الزكاة", "الوعاء لا يقل عن صافي الربح المعدّل", true, zc.base >= zc.adjustedProfit);
+      eq("الزكاة", "الزكاة = الوعاء × 2.5776%", r2(zc.base * 0.025776), zc.zakat);
+      if (zc.zakat > 0) {
+        const zp = await zakatPost(t, C, U, { from: zc.from, to: zc.to, method: "GREGORIAN", items: zc.items, adjustedProfit: zc.adjustedProfit });
+        const zAcc = await acc("ZAKAT_PAYABLE");
+        eq("الزكاة", "مخصص الزكاة في الأستاذ", -zc.zakat, await glBal(zAcc));
+        await zakatPay(t, C, U, zp.id, { accountId: bank, date: "2026-12-31" });
+        eq("الزكاة", "المخصص بعد السداد", 0, await glBal(zAcc));
+      }
+      scenario.push("18) احتساب وعاء زكاة 2026 وترحيل المخصص وسداده");
+
+      const zr = await createReceipt(t, C, U, { source: "ZAKAT", amount: 1000, payerName: "مزكٍّ", method: "CASH", date: "2026-08-01" });
+      const ben = await savePerson(t, C, "BENEFICIARY", { name: "مستفيد الفحص" });
+      await saveCase(t, C, U, ben.id, { date: "2026-08-01", members: 5, income: 1500, housing: "RENT", rent: 1000 });
+      await createDisbursement(t, C, U, { kind: "CASH", capacity: "BENEFICIARY", partnerId: ben.id, amount: 600, reason: "مساعدة", date: "2026-08-02", fund: "ZAKAT", zakatCategory: "FUQARA" });
+      eq("صندوق الزكاة (الجمعية)", "المتاح بعد صرف 600 من 1,000", 400, (await zakatFund(t, C)).available);
+      await rejects(t, "صندوق الزكاة (الجمعية)", "صرف يتجاوز رصيد الزكاة", () => createDisbursement(t, C, U, { kind: "CASH", capacity: "BENEFICIARY", partnerId: ben.id, amount: 500, reason: "مساعدة", date: "2026-08-03", fund: "ZAKAT", zakatCategory: "FUQARA" }));
+      await rejects(t, "صندوق الزكاة (الجمعية)", "صرف زكاة لمستفيد بلا دراسة حالة", async () => { const b2 = await savePerson(t, C, "BENEFICIARY", { name: "بلا دراسة" }); return createDisbursement(t, C, U, { kind: "CASH", capacity: "BENEFICIARY", partnerId: b2.id, amount: 50, reason: "مساعدة", date: "2026-08-03", fund: "ZAKAT", zakatCategory: "FUQARA" }); });
+      await rejects(t, "صندوق الزكاة (الجمعية)", "إلغاء سند زكاة صُرف منه", () => cancelReceipt(t, C, U, zr.id, "فحص"));
+      scenario.push("19) الجمعية: تحصيل زكاة 1,000 وصرف 600 لفقير بدراسة حالة، ومنع تجاوز الرصيد وصرفها دون دراسة");
 
       const integ = await rep.integrity(t, C);
       for (const c of integ.checks) checks.push({ group: "فحوص التطابق الآلية", name: c.name, expected: c.b, actual: c.a, ok: c.ok });

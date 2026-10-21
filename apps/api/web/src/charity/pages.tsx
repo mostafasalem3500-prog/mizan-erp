@@ -476,6 +476,7 @@ export function BatchesPage() {
   const { data, loading, reload } = useFetch<any[]>("/charity/batches");
   const [edit, setEdit] = useState<any>(null);
   const [sheet, setSheet] = useState<any>(null);
+  const [zcheck, setZcheck] = useState<any>(null);
   const { run, busy } = useAction();
   const BS: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", CANCELLED: "ملغى" };
   return (
@@ -486,17 +487,19 @@ export function BatchesPage() {
         <div className="table-wrap"><table className="tbl">
           <thead><tr><th>الرقم</th><th>التاريخ</th><th>العنوان</th><th>المشروع</th><th>النوع</th><th className="n">البنود</th><th className="n">الإجمالي</th><th>الحالة</th><th /></tr></thead>
           <tbody>{data.map((b: any) => <tr key={b.id}>
-            <td className="num">{b.number}</td><td className="dt">{fmtDate(b.date)}</td><td><b>{b.title}</b></td><td>{b.projectName || "—"}</td><td>{KIND[b.kind]}</td><td className="n">{b.linesCount}</td><td className="n"><b><Money v={b.total} /></b></td><td><Badge s={b.status} map={BS} /></td>
+            <td className="num">{b.number}</td><td className="dt">{fmtDate(b.date)}</td><td><b>{b.title}</b>{b.fund === "ZAKAT" && <div><span className="badge" style={{ background: "#e8eef9", color: "#1c3f8a" }}>من الزكاة: {ZK_CAT[b.zakatCategory] || ""}</span></div>}</td><td>{b.projectName || "—"}</td><td>{KIND[b.kind]}</td><td className="n">{b.linesCount}</td><td className="n"><b><Money v={b.total} /></b></td><td><Badge s={b.status} map={BS} /></td>
             <td className="row" style={{ gap: 4 }}>
               <button className="btn sm" onClick={() => setSheet(b)}>🖨 الكشف</button>
               {b.status === "DRAFT" && can("payments.write") && <button className="btn sm" onClick={() => setEdit(b)}>تعديل</button>}
-              {b.status === "DRAFT" && can("accounting.write") && <button className="btn sm primary" disabled={busy} onClick={() => confirmDlg(`اعتماد وترحيل المسير ${b.number} بإجمالي ${money(b.total)}؟ سيُنشأ سند صرف لكل بند.`) && run(async () => { await api(`/charity/batches/${b.id}/post`, { body: {} }); reload(); }, "تم ترحيل المسير")}>اعتماد وترحيل</button>}
+              {b.status === "DRAFT" && can("accounting.write") && b.fund === "ZAKAT" && <button className="btn sm primary" onClick={() => setZcheck(b)}>فحص الأهلية والترحيل</button>}
+              {b.status === "DRAFT" && can("accounting.write") && b.fund !== "ZAKAT" && <button className="btn sm primary" disabled={busy} onClick={() => confirmDlg(`اعتماد وترحيل المسير ${b.number} بإجمالي ${money(b.total)}؟ سيُنشأ سند صرف لكل بند.`) && run(async () => { await api(`/charity/batches/${b.id}/post`, { body: {} }); reload(); }, "تم ترحيل المسير")}>اعتماد وترحيل</button>}
               {b.status !== "CANCELLED" && can("accounting.write") && <button className="btn sm ghost" disabled={busy} onClick={() => confirmDlg(b.status === "DRAFT" ? "حذف المسودة؟" : `إلغاء المسير ${b.number}؟ ستُلغى جميع سندات الصرف التابعة وتُعكس قيودها.`) && run(async () => { await api(`/charity/batches/${b.id}/cancel`, { body: {} }); reload(); }, "تم")}>{b.status === "DRAFT" ? "حذف" : "إلغاء"}</button>}
             </td></tr>)}</tbody>
         </table></div>
       )}
       {edit && <BatchModal init={edit} onClose={(ok) => { setEdit(null); if (ok) reload(); }} />}
       {sheet && <BatchSheet b={sheet} onClose={() => setSheet(null)} />}
+      {zcheck && <ZakatBatchCheck b={zcheck} onClose={(ok) => { setZcheck(null); if (ok) reload(); }} />}
     </div>
   );
 }
@@ -504,14 +507,16 @@ export function BatchesPage() {
 function BatchModal({ init, onClose }: { init: any; onClose: (ok?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
-  const [f, setF] = useState<any>({ date: fmtDate(init.date) || today(), title: init.title || "", projectId: init.projectId || "", kind: init.kind || "TRANSFER", notes: init.notes || "" });
+  const [f, setF] = useState<any>({ date: fmtDate(init.date) || today(), title: init.title || "", projectId: init.projectId || "", kind: init.kind || "TRANSFER", notes: init.notes || "", fund: init.fund || "GENERAL", zakatCategory: init.zakatCategory || "FUQARA" });
+  const zmeta = useFetch<any>("/charity/zakat/meta");
+  const isZ = f.fund === "ZAKAT";
   const [pay, setPay] = useState<any>(init.payAccountId ? { id: init.payAccountId, code: "", nameAr: "الحساب المحدد" } : null);
   const [exp, setExp] = useState<any>(init.expenseAccountId ? { id: init.expenseAccountId, code: "", nameAr: "الحساب المحدد" } : null);
   const [lines, setLines] = useState<any[]>(init.lines?.length ? init.lines : [{ name: "", amount: "" }]);
   const [def, setDef] = useState("500");
   const setL = (i: number, k: string, v: any) => setLines(lines.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
   const total = lines.reduce((a, l) => a + Number(l.amount || 0), 0);
-  const importAll = () => run(async () => { const list: any[] = await api("/charity/beneficiaries"); const have = new Set(lines.map((l) => l.partnerId).filter(Boolean)); const add = list.filter((b) => !have.has(b.id) && (b.beneficiaryInfo?.status || "ACTIVE") === "ACTIVE").map((b) => ({ partnerId: b.id, name: b.name, idNo: b.idNumber, phone: b.phone, iban: b.beneficiaryInfo?.iban, bankName: b.beneficiaryInfo?.bankName, capacity: "BENEFICIARY", amount: def })); setLines([...lines.filter((l) => l.name), ...add]); toast(`أضيف ${add.length} مستفيد`, "ok"); });
+  const importAll = () => run(async () => { const list: any[] = await api("/charity/beneficiaries"); const have = new Set(lines.map((l) => l.partnerId).filter(Boolean)); const add = list.filter((b) => !have.has(b.id) && (b.beneficiaryInfo?.status || "ACTIVE") === "ACTIVE" && (!isZ || ["AMILIN"].includes(f.zakatCategory) || (b.beneficiaryInfo?.assessment?.zakatEligible && !(b.beneficiaryInfo.assessment.validUntil && String(b.beneficiaryInfo.assessment.validUntil).slice(0, 10) < f.date)))).map((b) => ({ partnerId: b.id, name: b.name, idNo: b.idNumber, phone: b.phone, iban: b.beneficiaryInfo?.iban, bankName: b.beneficiaryInfo?.bankName, capacity: "BENEFICIARY", amount: def })); setLines([...lines.filter((l) => l.name), ...add]); toast(`أضيف ${add.length} مستفيد`, "ok"); });
   const save = () => run(async () => { const body = { ...f, payAccountId: pay?.id, expenseAccountId: exp?.id, lines }; if (init.id) await api(`/charity/batches/${init.id}`, { method: "PUT", body }); else await api("/charity/batches", { body }); onClose(true); }, "تم حفظ المسير");
   return (
     <Modal title={init.id ? `تعديل المسير ${init.number}` : "مسير مصروفات جديد"} onClose={() => onClose()} wide footer={<><b className="grow">الإجمالي: <Money v={total} /> · {lines.filter((l) => l.name).length} بند</b><button className="btn primary" disabled={busy} onClick={save}>حفظ كمسودة</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
@@ -522,10 +527,13 @@ function BatchModal({ init, onClose }: { init: any; onClose: (ok?: boolean) => v
         <Field label="المشروع / البرنامج"><ProjectSelect value={f.projectId} onChange={(v) => setF({ ...f, projectId: v })} /></Field>
         <Field label="من حساب (الصندوق / البنك)"><Picker value={pay} onChange={setPay} fetcher={cashFetcher} label={(a: any) => a.code ? acLabel(a) : a.nameAr} /></Field>
         <Field label="حساب المصروف" hint="فارغ = حسب صفة كل بند"><Picker value={exp} onChange={setExp} fetcher={expFetcher} label={(a: any) => a.code ? acLabel(a) : a.nameAr} /></Field>
+        <Field label="يُصرف من صندوق"><Select value={f.fund} onChange={(e) => setF({ ...f, fund: e.target.value })}><option value="GENERAL">الصندوق العام</option><option value="ZAKAT">صندوق الزكاة — المتاح {money(zmeta.data?.fund?.available || 0)}</option></Select></Field>
+        {isZ && <Field label="مصرف الزكاة"><Select value={f.zakatCategory} onChange={(e) => setF({ ...f, zakatCategory: e.target.value })}>{Object.entries(zmeta.data?.categories || {}).map(([k, v]: any) => <option key={k} value={k}>{v}</option>)}</Select></Field>}
+        {isZ && <div className="alert info small" style={{ margin: 0 }}>«إضافة كل المستفيدين» تضيف المؤهلين للزكاة فقط (دراسة حالة سارية). قبل الترحيل يُعرض فحص الأهلية والرصيد.</div>}
       </div>
       <div className="row mt"><b>البنود</b><div className="grow" /><span className="small muted">مبلغ افتراضي</span><Input style={{ width: 90 }} value={def} onChange={(e) => setDef(e.target.value)} /><button className="btn sm" disabled={busy} onClick={importAll}>＋ إضافة كل المستفيدين النشطين</button><button className="btn sm" onClick={() => setLines([...lines, { name: "", amount: def, capacity: "BENEFICIARY" }])}>＋ بند</button></div>
       <div className="table-wrap mt ch-batch"><table className="tbl compact">
-        <thead><tr><th>#</th><th>الاسم</th><th>الهوية</th><th>الصفة</th><th>الآيبان</th><th>السبب</th><th className="n">المبلغ</th><th /></tr></thead>
+        <thead><tr><th>#</th><th>الاسم</th><th>الهوية</th><th>الصفة</th><th>الآيبان</th><th>السبب</th>{isZ && <th>مبرر استثناء الأهلية</th>}<th className="n">المبلغ</th><th /></tr></thead>
         <tbody>{lines.map((l, i) => <tr key={i}>
           <td className="num">{i + 1}</td>
           <td><Input value={l.name} onChange={(e) => setL(i, "name", e.target.value)} /></td>
@@ -533,10 +541,29 @@ function BatchModal({ init, onClose }: { init: any; onClose: (ok?: boolean) => v
           <td><MapSelect map={CAPACITY} value={l.capacity || "BENEFICIARY"} onChange={(v) => setL(i, "capacity", v)} /></td>
           <td><Input value={l.iban || ""} onChange={(e) => setL(i, "iban", e.target.value)} dir="ltr" style={{ minWidth: 200 }} /></td>
           <td><Input value={l.reason || ""} onChange={(e) => setL(i, "reason", e.target.value)} /></td>
+          {isZ && <td><Input value={l.override || ""} onChange={(e) => setL(i, "override", e.target.value)} placeholder="عند الحاجة فقط" /></td>}
           <td><NumInput value={l.amount} onChange={(e) => setL(i, "amount", e.target.value)} style={{ width: 100 }} /></td>
           <td><button className="btn sm ghost" onClick={() => setLines(lines.filter((_, j) => j !== i))}>✕</button></td>
         </tr>)}</tbody>
       </table></div>
+    </Modal>
+  );
+}
+
+function ZakatBatchCheck({ b, onClose }: { b: any; onClose: (ok?: boolean) => void }) {
+  const { data } = useFetch<any>(`/charity/batches/${b.id}/zakat-check`);
+  const { run, busy } = useAction();
+  const ST: Record<string, [string, string]> = { OK: ["مؤهل", "pos-val"], OVERRIDE: ["استثناء معتمد", ""], BLOCK: ["غير مؤهل", "neg-val"] };
+  const can = data && data.enough && !data.blocked;
+  return (
+    <Modal wide title={`فحص أهلية الزكاة — ${b.number}`} onClose={() => onClose()} footer={<><b className="grow">{data ? <>الإجمالي <Money v={data.total} /> · المتاح في صندوق الزكاة <Money v={data.available} /></> : ""}</b><button className="btn" onClick={() => onClose()}>إغلاق</button><button className="btn primary" disabled={busy || !can} onClick={() => run(async () => { await api(`/charity/batches/${b.id}/post`, { body: {} }); onClose(true); }, "تم ترحيل المسير من صندوق الزكاة")}>اعتماد وترحيل</button></>}>
+      {!data ? <Loading /> : <>
+        {!data.enough && <div className="alert warn small mb">رصيد صندوق الزكاة لا يكفي لإجمالي المسير — خفّض المبالغ أو انتظر تحصيل زكاة إضافية.</div>}
+        {data.blocked > 0 && <div className="alert warn small mb">{data.blocked} بند غير مؤهل — عدّل المسير: احذفه، أو أضف دراسة حالة، أو اكتب مبرر استثناء معتمد في عمود البند.</div>}
+        {can && <div className="alert ok small mb">✓ كل البنود مؤهلة والرصيد كافٍ — مصرف: {data.category}</div>}
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>المستفيد</th><th className="n">المبلغ</th><th>الحالة</th><th>البيان</th></tr></thead>
+          <tbody>{data.lines.map((l: any, i: number) => <tr key={i}><td>{l.name}</td><td className="n"><Money v={l.amount} /></td><td className={ST[l.status][1]}>{ST[l.status][0]}</td><td className="small">{l.note}</td></tr>)}</tbody></table></div>
+      </>}
     </Modal>
   );
 }

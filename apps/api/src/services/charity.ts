@@ -9,7 +9,7 @@
 import { Db } from "../db/pool";
 import { bad, conflict, notFound, r2, D, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
-import { checkZakatDisbursement, ZAKAT_CATEGORIES } from "./charity4";
+import { checkZakatDisbursement, ZAKAT_CATEGORIES, zakatFund } from "./charity4";
 
 // ─── chart of accounts additions (idempotent; created on first use) ─────────
 const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE" | "ASSET", string, string | null][] = [
@@ -265,6 +265,11 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
 export async function cancelReceipt(t: Db, companyId: string, user: string, id: string, reason?: string) {
   const r = await t.one(`SELECT * FROM charity_receipts WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "السند غير موجود");
   if (r.status === "CANCELLED") throw bad("السند ملغى مسبقاً");
+  if (r.source === "ZAKAT") {
+    // zakat already distributed cannot lose its funding
+    const f = await zakatFund(t, companyId);
+    if (Number(r.amount) > f.available + 0.001) throw conflict(`لا يمكن إلغاء سند الزكاة: صُرف من صندوق الزكاة ما يعتمد عليه (المتاح ${f.available.toFixed(2)} ر.س أقل من مبلغ السند ${Number(r.amount).toFixed(2)}) — ألغِ سندات الصرف من الزكاة أولاً`);
+  }
   if (r.journalId) await reverse(t, companyId, r.journalId, today() < String(r.date).slice(0, 10) ? r.date : today(), `إلغاء سند قبض ${r.number}${reason ? " — " + reason : ""}`, user);
   await t.exec(`UPDATE charity_receipts SET status='CANCELLED', notes=COALESCE(notes,'') || $2 WHERE id=$1`, [id, reason ? ` [إلغاء: ${reason}]` : ""]);
   return { ok: true };
@@ -318,7 +323,7 @@ export async function createDisbursement(t: Db, companyId: string, user: string,
   const fund = b.fund === "ZAKAT" ? "ZAKAT" : "GENERAL";
   let zakatNote = "";
   if (fund === "ZAKAT") {
-    const z = await checkZakatDisbursement(t, companyId, { amount, date: d, category: String(b.zakatCategory || ""), capacity, partnerId: p?.id || null, override: b.eligibilityOverride || null });
+    const z = await checkZakatDisbursement(t, companyId, { amount, date: d, category: String(b.zakatCategory || ""), capacity, partnerId: p?.id || null, override: b.eligibilityOverride || null, name });
     if (z.override) zakatNote = ` [استثناء أهلية الزكاة: ${z.override}]`;
   }
   const number = await nextNumber(t, companyId, "DSB", d);
@@ -433,6 +438,7 @@ function cleanLines(lines: any[]) {
   return lines.filter((l) => l && (l.name || l.partnerId) && num(l.amount) > 0).slice(0, 1000).map((l) => ({
     partnerId: l.partnerId || null, name: String(l.name || "").trim(), idNo: l.idNo || null, phone: l.phone || null, capacity: pick(l.capacity, CAPACITIES, "BENEFICIARY"),
     iban: l.iban ? String(l.iban).replace(/\s/g, "").toUpperCase() : null, bankName: l.bankName || null, amount: r2(num(l.amount)), reason: l.reason || null,
+    override: l.override ? String(l.override).slice(0, 300) : null,
   }));
 }
 
@@ -446,6 +452,7 @@ export async function saveBatch(t: Db, companyId: string, user: string, b: any, 
   const data: any = {
     title, projectId: pr?.id || null, payAccountId: b.payAccountId || null, expenseAccountId: b.expenseAccountId || null, kind: pick(b.kind, ["CASH", "CHEQUE", "TRANSFER"], "TRANSFER"),
     lines: JSON.stringify(lines), total: r2(lines.reduce((a, l) => a + l.amount, 0)), notes: b.notes || null, date: date(b.date),
+    fund: b.fund === "ZAKAT" ? "ZAKAT" : "GENERAL", zakatCategory: b.fund === "ZAKAT" ? (ZAKAT_CATEGORIES[b.zakatCategory] ? b.zakatCategory : "FUQARA") : null,
   };
   if (id) {
     const x = await t.one(`SELECT * FROM charity_batches WHERE id=$1 AND company_id=$2`, [id, companyId], "المسير غير موجود");
@@ -469,6 +476,7 @@ export async function postBatch(t: Db, companyId: string, user: string, id: stri
       date: x.date, kind: x.kind, partnerId: l.partnerId, beneficiaryName: l.name, beneficiaryIdNo: l.idNo, beneficiaryPhone: l.phone, capacity: l.capacity,
       amount: l.amount, reason: l.reason || x.title, projectId: x.projectId, expenseAccountId: x.expenseAccountId, payAccountId: x.payAccountId,
       iban: l.iban, bankName: l.bankName, accountHolder: l.name, refNo: `${x.number}/${i}`, batchId: x.id, isDemo: x.isDemo,
+      fund: x.fund, zakatCategory: x.zakatCategory, eligibilityOverride: l.override || null,
     });
   }
   return t.update("charity_batches", { id, companyId }, { status: "POSTED", postedBy: user, postedAt: new Date() });
