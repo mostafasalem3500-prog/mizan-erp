@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import * as XLSX from "xlsx";
+import { readSheet } from "../shared/sheet";
 import { api, Modal, Field, Input, useAction, useToast, exportExcel } from "../lib";
 
 type Spec = { key: string; labels: string[]; required?: boolean; example: any };
@@ -53,10 +53,8 @@ export function ImportModal({ kind, role, onClose }: { kind: "products" | "partn
   const toast = useToast();
   const title = kind === "products" ? "استيراد الأصناف من Excel" : role === "SUPPLIER" ? "استيراد الموردين من Excel" : "استيراد العملاء من Excel";
   const onFile = async (file: File) => {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+    let rows: any[][];
+    try { rows = await readSheet(file); } catch (e: any) { return toast(e.message, "err"); }
     const m = mapRows(rows, spec);
     if (!m.cols.some((c) => c === "name")) return toast("لم يُعثر على عمود الاسم — استخدم القالب المرفق", "err");
     setParsed(m); setResult(null);

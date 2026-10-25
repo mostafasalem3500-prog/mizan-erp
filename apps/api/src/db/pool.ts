@@ -28,24 +28,34 @@ export class NotFoundError extends Error {
 /** Thin query helper over a pg client or pool: camelCase rows, snake_case writes. */
 export class Db {
   private spCounter = 0;
+  private queue: Promise<unknown> = Promise.resolve();
   constructor(private readonly c: Pool | PoolClient) {}
+
+  /** A single client runs one query at a time; queue concurrent calls (e.g. Promise.all inside tx)
+   *  instead of relying on pg's internal queue, which is deprecated and removed in pg@9. */
+  private q(sql: string, params?: any[]): Promise<any> {
+    if (this.c instanceof Pool) return this.c.query(sql, params);
+    const run = this.queue.then(() => (this.c as PoolClient).query(sql, params));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
 
   /** Runs fn inside a savepoint (only meaningful within tx): a thrown error rolls back just that part. */
   async savepoint<T>(fn: () => Promise<T>): Promise<T> {
     const name = `sp_${++this.spCounter}`;
-    await this.c.query(`SAVEPOINT ${name}`);
+    await this.q(`SAVEPOINT ${name}`);
     try {
       const r = await fn();
-      await this.c.query(`RELEASE SAVEPOINT ${name}`);
+      await this.q(`RELEASE SAVEPOINT ${name}`);
       return r;
     } catch (e) {
-      await this.c.query(`ROLLBACK TO SAVEPOINT ${name}`);
+      await this.q(`ROLLBACK TO SAVEPOINT ${name}`);
       throw e;
     }
   }
 
   async rows<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    const r = await this.c.query(sql, params);
+    const r = await this.q(sql, params);
     return r.rows.map(camelRow);
   }
   async maybe<T = any>(sql: string, params: any[] = []): Promise<T | null> {
@@ -58,7 +68,7 @@ export class Db {
     return r;
   }
   async exec(sql: string, params: any[] = []): Promise<number> {
-    const r = await this.c.query(sql, params);
+    const r = await this.q(sql, params);
     return r.rowCount ?? 0;
   }
   async insert<T = any>(table: string, obj: Record<string, any>): Promise<T> {
@@ -66,7 +76,7 @@ export class Db {
     const cols = keys.map((k) => `"${snake(k)}"`).join(",");
     const ph = keys.map((_, i) => `$${i + 1}`).join(",");
     const vals = keys.map((k) => jsonify(obj[k]));
-    const r = await this.c.query(`INSERT INTO ${table} (${cols}) VALUES (${ph}) RETURNING *`, vals);
+    const r = await this.q(`INSERT INTO ${table} (${cols}) VALUES (${ph}) RETURNING *`, vals);
     return camelRow(r.rows[0]);
   }
   async insertMany(table: string, list: Record<string, any>[]): Promise<void> {
@@ -81,7 +91,7 @@ export class Db {
       });
       return `(${ph.join(",")})`;
     });
-    await this.c.query(`INSERT INTO ${table} (${cols}) VALUES ${tuples.join(",")}`, vals);
+    await this.q(`INSERT INTO ${table} (${cols}) VALUES ${tuples.join(",")}`, vals);
   }
   async update<T = any>(table: string, where: Record<string, any>, obj: Record<string, any>): Promise<T | null> {
     const keys = Object.keys(obj).filter((k) => obj[k] !== undefined);
@@ -90,7 +100,7 @@ export class Db {
     const set = keys.map((k, i) => `"${snake(k)}" = $${i + 1}`).join(",");
     const wk = Object.keys(where);
     const cond = wk.map((k, i) => `"${snake(k)}" = $${keys.length + i + 1}`).join(" AND ");
-    const r = await this.c.query(`UPDATE ${table} SET ${set} WHERE ${cond} RETURNING *`, [...vals, ...wk.map((k) => where[k])]);
+    const r = await this.q(`UPDATE ${table} SET ${set} WHERE ${cond} RETURNING *`, [...vals, ...wk.map((k) => where[k])]);
     return r.rows[0] ? camelRow(r.rows[0]) : null;
   }
 }

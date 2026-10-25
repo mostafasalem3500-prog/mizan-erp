@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import { readSheet, rowsToObjects } from "../shared/sheet";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, productFetcher, useAction, useToast, useCompanyContext, ExportBtn, today, fmtDate, confirmDlg, JTYPE_AR, SearchBox, FilterInfo, matches } from "../lib";
 
 // ─── Price lists ───────────────────────────────────────────────────────────
@@ -33,10 +33,8 @@ function PriceListEditor({ id, onClose }: { id?: string; onClose: (s?: boolean) 
   const add = (p: any) => { if (!p) return; setItems((it) => [...it, { key: Math.random(), productId: p.id, name: p.name, sku: p.sku, salePrice: Number(p.salePrice), minQty: 1, price: Number(p.salePrice) }]); setProd(null); };
   const upd = (k: number, patch: any) => setItems((it) => it.map((i) => (i.key === k ? { ...i, ...patch } : i)));
   const importExcel = (file: File) => {
-    const r = new FileReader();
-    r.onload = () => run(async () => {
-      const wb = XLSX.read(r.result, { type: "array" });
-      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+    run(async () => {
+      const rows: any[] = rowsToObjects(await readSheet(file), "");
       let n = 0;
       for (const row of rows) {
         const sku = String(row["الرمز"] ?? row["SKU"] ?? row["sku"] ?? "").trim(); const price = Number(row["السعر"] ?? row["price"] ?? row["Price"]); const minQty = Number(row["الحد الأدنى"] ?? row["min_qty"] ?? 1) || 1;
@@ -46,7 +44,6 @@ function PriceListEditor({ id, onClose }: { id?: string; onClose: (s?: boolean) 
       }
       toast(`تم استيراد ${n} سطر`, "ok");
     });
-    r.readAsArrayBuffer(file);
   };
   if (!loaded) return <Modal title="..." onClose={() => onClose()}><Loading /></Modal>;
   return (
@@ -98,20 +95,17 @@ export function BankStatementPanel({ accountId, onChanged }: { accountId: string
   const [map, setMap] = useState<Record<string, string>>({});
   const [pick, setPick] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const load = (f: File) => {
-    const r = new FileReader();
-    r.onload = () => {
+  const load = async (f: File) => {
+    {
       try {
-        const wb = XLSX.read(r.result, { type: "array", cellDates: false });
-        const aoa: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+        const aoa: any[][] = (await readSheet(f)).map((row) => row.map((c) => c ?? ""));
         const hi = aoa.findIndex((row) => row.filter((c) => String(c).trim()).length >= 3);
         const headers = (aoa[hi] || []).map((h: any) => String(h).trim());
         const rows = aoa.slice(hi + 1).filter((row) => row.some((c) => String(c).trim()));
         const m: Record<string, string> = {}; headers.forEach((h, i) => { const g = guess(h); if (g && !Object.values(m).includes(String(i))) m[g] = String(i); });
         setMap(m); setFile({ headers, rows });
       } catch (e: any) { toast("تعذر قراءة الملف: " + e.message, "err"); }
-    };
-    r.readAsArrayBuffer(f);
+    }
   };
   const doImport = () => run(async () => {
     if (!file || map.date === undefined || (map.amount === undefined && map.credit === undefined && map.debit === undefined)) throw new Error("حدد عمود التاريخ وعمود المبلغ (أو الإيداع/السحب)");

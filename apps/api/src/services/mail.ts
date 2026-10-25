@@ -7,7 +7,7 @@ export function mailStatus() {
   return { configured: !!host, from: process.env.SMTP_FROM || process.env.SMTP_USER || null, host: host || null };
 }
 
-let transport: nodemailer.Transporter | null = null;
+let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
 function getTransport() {
   if (transport) return transport;
   const { configured } = mailStatus();

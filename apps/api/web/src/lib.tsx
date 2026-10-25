@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import { writeSheet } from "./shared/sheet";
 import { useLocation } from "react-router-dom";
 
 // ─── api ───────────────────────────────────────────────────────────────────
@@ -182,11 +182,7 @@ export function DateRange({ from, to, onChange }: { from: string; to: string; on
 }
 
 export function exportExcel(rows: any[], name: string, sheet = "Sheet1") {
-  const ws = XLSX.utils.json_to_sheet(rows);
-  if (!ws["!views"]) ws["!views"] = [{ rightToLeft: true }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheet);
-  XLSX.writeFile(wb, `${name}.xlsx`);
+  return writeSheet(rows, name, sheet).catch((e) => { console.error(e); alert("تعذر إنشاء ملف Excel: " + (e?.message || e)); });
 }
 
 export function ExportBtn({ rows, name }: { rows: any[] | (() => any[]); name: string }) {
