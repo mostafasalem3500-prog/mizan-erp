@@ -4,7 +4,8 @@ import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
 import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppError, today } from "../lib/core";
 import { authenticate, perm, cid, actor, p, ROLES } from "../lib/auth";
-import { TYPE_BY_CLASS, SUBTYPE_AR } from "../accounting/coa";
+import { TYPE_BY_CLASS, SUBTYPE_AR, SUBTYPES_BY_TYPE, normalizeSubtype } from "../accounting/coa";
+const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 
 export const master = Router();
 master.use(authenticate);
@@ -273,7 +274,7 @@ master.get(
       let p = r.parentId ? byId.get(r.parentId) : null;
       while (p) { p.balance = Number(p.balance) + Number(r.balance) * (r.isGroup ? 0 : 1); p = p.parentId ? byId.get(p.parentId) : null; }
     }
-    return { rows, subtypes: SUBTYPE_AR };
+    return { rows, subtypes: SUBTYPE_AR, subtypesByType: SUBTYPES_BY_TYPE };
   }),
 );
 
@@ -287,8 +288,8 @@ master.post(
     const parent = b.parentId ? await db.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2`, [b.parentId, cid(req)], "الحساب الرئيسي غير موجود") : null;
     if (!parent && !TYPE_BY_CLASS[code[0]]) throw bad("رقم الحساب يجب أن يبدأ بـ 1-5");
     const type = parent ? parent.type : TYPE_BY_CLASS[code[0]];
-    const subtype = b.subtype || parent?.subtype || type;
-    if (!SUBTYPE_AR[subtype]) throw bad("تصنيف الحساب غير صحيح");
+    if (b.subtype && !SUBTYPES_BY_TYPE[type]?.includes(b.subtype)) throw bad(`تصنيف «${SUBTYPE_AR[b.subtype] || b.subtype}» لا يناسب حساباً من نوع ${TYPE_AR[type] || type} — اختر من: ${SUBTYPES_BY_TYPE[type].map((x) => SUBTYPE_AR[x]).join("، ")}`);
+    const subtype = normalizeSubtype(type, b.subtype || parent?.subtype);
     if (parent) {
       const posted = await db.maybe(`SELECT 1 FROM journal_lines WHERE account_id=$1 LIMIT 1`, [parent.id]);
       if (posted) throw bad("لا يمكن إضافة حساب فرعي تحت حساب عليه حركات");
@@ -307,7 +308,7 @@ master.put(
   h(async (req) => {
     const a = await db.one(`SELECT * FROM accounts WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]);
     const b = req.body || {};
-    if (b.subtype && !SUBTYPE_AR[b.subtype]) throw bad("تصنيف غير صحيح");
+    if (b.subtype && !SUBTYPES_BY_TYPE[a.type]?.includes(b.subtype)) throw bad(`تصنيف «${SUBTYPE_AR[b.subtype] || b.subtype}» لا يناسب حساباً من نوع ${TYPE_AR[a.type] || a.type} — اختر من: ${SUBTYPES_BY_TYPE[a.type].map((x) => SUBTYPE_AR[x]).join("، ")}`);
     if (b.isActive === false && a.systemKey) throw bad("لا يمكن إيقاف حساب نظامي");
     const row = await db.update("accounts", { id: a.id }, { code: b.code, nameAr: b.nameAr, nameEn: b.nameEn, subtype: b.subtype, isActive: b.isActive, isCashBank: b.isCashBank })
       .catch((e) => { if (e.code === "23505") throw conflict("رقم الحساب مستخدم مسبقاً"); throw e; });

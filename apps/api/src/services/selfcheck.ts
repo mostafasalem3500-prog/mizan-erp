@@ -23,6 +23,7 @@ import { revisePurchase } from "./round22";
 import { createReceipt, createDisbursement, cancelReceipt, savePerson } from "./charity";
 import { saveCase, zakatFund } from "./charity4";
 import { financialAnalysis } from "./round25";
+import { finalAccounts, closeCheck } from "./round27";
 
 export interface Check { group: string; name: string; expected: any; actual: any; ok: boolean }
 export interface SelfCheckResult { ok: boolean; passed: number; failed: number; durationMs: number; scenario: string[]; checks: Check[]; error?: string }
@@ -293,6 +294,30 @@ export async function runAccountingSelfCheck(): Promise<SelfCheckResult> {
       const dp = fan.dupont;
       eq("التحليل المالي", "ديبونت: الهامش × الدوران × المضاعف = العائد على حقوق الملكية", true, dp.roe === null || Math.abs((dp.netMargin! / 100) * dp.assetTurnover! * dp.equityMultiplier! * 100 - dp.roe) < 0.3);
       scenario.push("20) التحليل المالي لسنة 2026 يطابق الميزانية وقائمة الدخل وتتسق مكونات ديبونت");
+
+      // ── Round 27: final accounts tie together, before and after closing 2025 ──
+      const fyRows = await t.rows(`SELECT id, name FROM fiscal_years WHERE company_id=$1 ORDER BY start_date`, [C]);
+      const fy25 = fyRows.find((y) => y.name === "2025"), fy26 = fyRows.find((y) => y.name === "2026");
+      if (fy25 && fy26) {
+        const failed = (r: any) => r.checks.filter((x: any) => !x.ok).map((x: any) => x.name).join(" | ") || "—";
+        const f25 = await finalAccounts(t, C, { fiscalYearId: fy25.id });
+        eq("الحسابات الختامية", "سنة 2025 (مقفلة): كل فحوص ترابط القوائم ناجحة", "—", failed(f25));
+        eq("الحسابات الختامية", "قيد إقفال 2025 حوّل صافي الربح كاملاً للأرباح المبقاة", f25.incomeStatement.totals.net[0], f25.equity.closingTransfer);
+        const f26 = await finalAccounts(t, C, { fiscalYearId: fy26.id });
+        eq("الحسابات الختامية", "سنة 2026: كل فحوص ترابط القوائم ناجحة (مركز مالي، دخل، حقوق ملكية، تدفقات)", "—", failed(f26));
+        eq("الحسابات الختامية", "حقوق الملكية أول 2026 = حقوق الملكية آخر 2025", f25.equity.closing.total, f26.equity.opening.total);
+        eq("الحسابات الختامية", "التدفقات النقدية 2026: الطريقة المباشرة = غير المباشرة", f26.cashFlow.direct.net, f26.cashFlow.indirect.net);
+        const cc = await closeCheck(t, C, fy26.id);
+        eq("الحسابات الختامية", "معاينة قيد إقفال 2026 = صافي ربح قائمة الدخل", f26.incomeStatement.totals.net[0], cc.preview.netIncome);
+        eq("الحسابات الختامية", "قيد الإقفال المعاين متوازن", cc.preview.debit, cc.preview.credit);
+        if (cc.canClose) {
+          const cl26 = await closeFiscalYear(t, C, U, fy26.id);
+          eq("الحسابات الختامية", "إقفال 2026 يرحّل نفس صافي الربح المعاين", cc.preview.netIncome, cl26.netIncome);
+          const f26c = await finalAccounts(t, C, { fiscalYearId: fy26.id });
+          eq("الحسابات الختامية", "سنة 2026 بعد الإقفال: كل فحوص الترابط ناجحة", "—", failed(f26c));
+        } else eq("الحسابات الختامية", "سنة 2026 قابلة للإقفال (لا موانع)", "—", cc.items.filter((i: any) => i.level === "block").map((i: any) => i.label + ": " + i.detail).join(" | "));
+        scenario.push("21) الحسابات الختامية لسنتي 2025 و2026 مترابطة، ومعاينة وإقفال 2026 تطابق قائمة الدخل وتبقى القوائم متطابقة بعد الإقفال");
+      }
 
       const integ = await rep.integrity(t, C);
       for (const c of integ.checks) checks.push({ group: "فحوص التطابق الآلية", name: c.name, expected: c.b, actual: c.a, ok: c.ok });

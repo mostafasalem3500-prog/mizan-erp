@@ -1,0 +1,13 @@
+-- Round 27: account classification must match account type (otherwise the account drops out of the statements)
+UPDATE accounts SET subtype = CASE type
+  WHEN 'ASSET' THEN 'CURRENT_ASSET' WHEN 'LIABILITY' THEN 'CURRENT_LIABILITY' WHEN 'EQUITY' THEN 'EQUITY'
+  WHEN 'REVENUE' THEN 'OTHER_INCOME' ELSE 'EXPENSE' END
+WHERE NOT (
+  (type='ASSET' AND subtype IN ('CASH','BANK','RECEIVABLE','INVENTORY','CURRENT_ASSET','FIXED_ASSET','ACC_DEPRECIATION')) OR
+  (type='LIABILITY' AND subtype IN ('PAYABLE','TAX','CURRENT_LIABILITY','LONG_TERM_LIABILITY')) OR
+  (type='EQUITY' AND subtype IN ('CAPITAL','RETAINED','EQUITY')) OR
+  (type='REVENUE' AND subtype IN ('SALES','SALES_RETURNS','OTHER_INCOME')) OR
+  (type='EXPENSE' AND subtype IN ('COGS','EXPENSE','SELLING_EXPENSE','OTHER_EXPENSE','ZAKAT')));
+
+ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS closed_by text;
+ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS close_summary jsonb;

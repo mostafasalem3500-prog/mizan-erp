@@ -1,4 +1,5 @@
 /** Separate interface for charities / non-profit associations, served at /charity on the same ledger. */
+import { FinalAccountsPage } from "../pages/Round27";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api, AppCtx, BaseCtx, useFetch } from "../lib";
@@ -44,6 +45,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/beneficiaries", ic: "👪", label: "المستفيدون", perm: "partners.read" },
   { to: "/charity/zakat", ic: "🕌", label: "صندوق الزكاة ومصارفها", perm: "reports.read" },
   { to: "/charity/indicators", ic: "📊", label: "مؤشرات الأداء والحوكمة", perm: "reports.read" },
+  { to: "/charity/final-accounts", ic: "📚", label: "القوائم المالية الختامية", perm: "reports.read" },
   { to: "/charity/volunteers", ic: "🙋", label: "المتطوعون وساعات التطوع", perm: "payments.read" },
   { to: "/charity/payroll", ic: "👔", label: "الرواتب", perm: "accounting.read", companyOnly: true },
   { group: "المشتريات والعهد" },
@@ -127,6 +129,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/treasury" element={<TreasuryPage />} />
                   <Route path="/charity/zakat" element={<ZakatFundPage />} />
                   <Route path="/charity/indicators" element={<CharityIndicatorsPage settings={s} />} />
+                  <Route path="/charity/final-accounts" element={<FinalAccountsPage charity />} />
                   <Route path="/charity/journals/:id" element={<JournalView />} />
                   <Route path="/charity/projects" element={<ProjectsPage />} />
                   <Route path="/charity/budget" element={<BudgetPage />} />

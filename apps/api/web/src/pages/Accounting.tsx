@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { BranchField } from "./Branches";
+import { CloseYearModal } from "./Round27";
 import { AccountLedger } from "./Statements";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, JTYPE_AR, TYPE_AR, confirmDlg, SearchBox, FilterInfo, useUrlSearch, normalizeAr } from "../lib";
 
@@ -58,13 +59,14 @@ export function AccountsPage() {
             </tbody></table></div>
         )}
       </div>
-      {edit && <AccountEditor a={edit} subtypes={data.subtypes} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
+      {edit && <AccountEditor a={edit} subtypes={data.subtypes} byType={data.subtypesByType} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
       {ledger && <LedgerModal account={ledger} onClose={() => setLedger(null)} />}
     </div>
   );
 }
 
-function AccountEditor({ a, subtypes, onClose }: { a: any; subtypes: Record<string, string>; onClose: (s?: boolean) => void }) {
+const TYPE_OF_CODE: Record<string, string> = { "1": "ASSET", "2": "LIABILITY", "3": "EQUITY", "4": "REVENUE", "5": "EXPENSE" };
+function AccountEditor({ a, subtypes, byType, onClose }: { a: any; subtypes: Record<string, string>; byType?: Record<string, string[]>; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const [f, setF] = useState<any>({ code: a.parent ? a.parent.code + (a.parent.level === 1 ? "1" : a.parent.level === 2 ? "01" : "01") : "", nameAr: "", nameEn: "", subtype: a.parent?.subtype || "", isGroup: false, isCashBank: false, isActive: true, ...a });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
@@ -76,7 +78,7 @@ function AccountEditor({ a, subtypes, onClose }: { a: any; subtypes: Record<stri
         <Field label="رقم الحساب"><Input value={f.code} onChange={s("code")} dir="ltr" /></Field>
         <Field label="الاسم بالعربية"><Input value={f.nameAr} onChange={s("nameAr")} autoFocus /></Field>
         <Field label="الاسم بالإنجليزية"><Input value={f.nameEn || ""} onChange={s("nameEn")} dir="ltr" /></Field>
-        <Field label="التصنيف في القوائم المالية"><Select value={f.subtype} onChange={s("subtype")}><option value="">—</option>{Object.entries(subtypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+        <Field label="التصنيف في القوائم المالية"><Select value={f.subtype} onChange={s("subtype")}><option value="">—</option>{Object.entries(subtypes).filter(([k]) => { const ty = a.type || a.parent?.type || TYPE_OF_CODE[String(f.code || "")[0]]; return !ty || !byType?.[ty] || byType[ty].includes(k); }).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
         {!a.id && <label className="check"><input type="checkbox" checked={f.isGroup} onChange={s("isGroup")} /> حساب رئيسي (تجميعي، لا يقبل قيوداً)</label>}
         <label className="check"><input type="checkbox" checked={!!f.isCashBank} onChange={s("isCashBank")} /> حساب نقدية / بنك (يظهر في سندات القبض والصرف)</label>
         {a.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}
@@ -161,6 +163,7 @@ function JournalEditor({ mode, onClose }: { mode: "manual" | "opening"; onClose:
 export function PeriodsPage() {
   const { can, me } = useCompanyContext();
   const { data, loading, reload } = useFetch("/fiscal-years");
+  const [closing, setClosing] = useState<any>(null);
   const { run, busy } = useAction();
   const toast = useToast();
   if (loading || !data) return <Loading />;
@@ -168,11 +171,12 @@ export function PeriodsPage() {
     <div className="grid c2">
       <div className="card"><div className="card-h"><h3>السنوات المالية</h3></div><div className="card-b">
         <div className="alert info">تبدأ السنة المالية في شهر {me.company.fiscalYearStart} (يُضبط من إعدادات المنشأة). تُنشأ السنة وفتراتها الشهرية تلقائياً عند أول قيد.</div>
-        <table className="tbl"><thead><tr><th>السنة</th><th>من</th><th>إلى</th><th>الحالة</th><th /></tr></thead><tbody>{data.years.map((y: any) => <tr key={y.id}><td><b>{y.name}</b></td><td className="dt">{fmtDate(y.startDate)}</td><td className="dt">{fmtDate(y.endDate)}</td><td><Badge s={y.status} /></td><td>{can("accounting.write") && (y.status === "OPEN" ? <button className="btn sm danger" disabled={busy} onClick={() => run(async () => { if (!confirmDlg(`إقفال السنة ${y.name}؟ سيُنشأ قيد إقفال يرحّل صافي الربح/الخسارة إلى الأرباح المبقاة وتُقفل كل الفترات.`)) return; const r = await api(`/fiscal-years/${y.id}/close`, { body: {} }); toast(`تم الإقفال — صافي النتيجة ${money(r.netIncome)}`, "ok"); reload(); })}>إقفال السنة</button> : <button className="btn sm" disabled={busy} onClick={() => run(async () => { if (confirmDlg("إعادة فتح السنة وحذف قيد الإقفال؟")) { await api(`/fiscal-years/${y.id}/reopen`, { body: {} }); reload(); } })}>إعادة فتح</button>)}</td></tr>)}</tbody></table>
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>السنة</th><th>من</th><th>إلى</th><th>الحالة</th><th /></tr></thead><tbody>{data.years.map((y: any) => <tr key={y.id}><td><b>{y.name}</b></td><td className="dt">{fmtDate(y.startDate)}</td><td className="dt">{fmtDate(y.endDate)}</td><td><Badge s={y.status} />{y.closeSummary && <div className="small muted">صافي {money(y.closeSummary.netIncome)}</div>}</td><td><Link className="btn sm ghost" to={`/final-accounts?fy=${y.id}`}>القوائم</Link> {can("accounting.write") && (y.status === "OPEN" ? <button className="btn sm danger" disabled={busy} onClick={() => setClosing(y)}>فحص وإقفال السنة</button> : <button className="btn sm" disabled={busy} onClick={() => run(async () => { if (confirmDlg("إعادة فتح السنة وحذف قيد الإقفال؟")) { await api(`/fiscal-years/${y.id}/reopen`, { body: {} }); reload(); } })}>إعادة فتح</button>)}</td></tr>)}</tbody></table></div>
       </div></div>
+      {closing && <CloseYearModal year={closing} onClose={(done) => { setClosing(null); if (done) reload(); }} />}
       <div className="card"><div className="card-h"><h3>الفترات الشهرية</h3></div><div className="card-b">
         <div className="hint mb">قفل الفترة يمنع أي ترحيل بتاريخ داخلها (لمنع التعديل بعد تقديم الإقرار الضريبي مثلاً).</div>
-        <table className="tbl compact"><thead><tr><th>الفترة</th><th>من</th><th>إلى</th><th>الحالة</th><th /></tr></thead><tbody>{data.periods.map((p: any) => <tr key={p.id}><td>{p.name}</td><td className="dt">{fmtDate(p.startDate)}</td><td className="dt">{fmtDate(p.endDate)}</td><td><Badge s={p.status} /></td><td>{can("accounting.write") && data.years.find((y: any) => y.id === p.fiscalYearId)?.status === "OPEN" && <button className="btn sm ghost" onClick={() => run(async () => { await api(`/periods/${p.id}`, { method: "PUT", body: { status: p.status === "OPEN" ? "LOCKED" : "OPEN" } }); reload(); })}>{p.status === "OPEN" ? "قفل" : "فتح"}</button>}</td></tr>)}</tbody></table>
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الفترة</th><th>من</th><th>إلى</th><th>الحالة</th><th /></tr></thead><tbody>{data.periods.map((p: any) => <tr key={p.id}><td>{p.name}</td><td className="dt">{fmtDate(p.startDate)}</td><td className="dt">{fmtDate(p.endDate)}</td><td><Badge s={p.status} /></td><td>{can("accounting.write") && data.years.find((y: any) => y.id === p.fiscalYearId)?.status === "OPEN" && <button className="btn sm ghost" onClick={() => run(async () => { await api(`/periods/${p.id}`, { method: "PUT", body: { status: p.status === "OPEN" ? "LOCKED" : "OPEN" } }); reload(); })}>{p.status === "OPEN" ? "قفل" : "فتح"}</button>}</td></tr>)}</tbody></table></div>
       </div></div>
     </div>
   );

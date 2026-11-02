@@ -2,7 +2,7 @@
 import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
 import { provisionTotals } from "./hr";
-import { debitNature, SUBTYPE_AR } from "../accounting/coa";
+import { debitNature, SUBTYPE_AR, normalizeSubtype } from "../accounting/coa";
 
 const dateRange = (q: any) => {
   const from = q.from && isDate(q.from) ? q.from : "1900-01-01";
@@ -113,16 +113,19 @@ export async function journalBook(t: Db, companyId: string, q: any) {
   return { from, to, total: total.c, rows: entries };
 }
 
-async function balancesByType(t: Db, companyId: string, from: string, to: string, branchId?: string, excludeClosing = false) {
+export async function balancesByType(t: Db, companyId: string, from: string, to: string, branchId?: string, excludeClosing = false) {
   const params: any[] = [companyId, from, to];
   // the income statement must show the year's revenue & expenses even after the year-end closing entry zeroed them
   const bc = branchCond({ branchId }, params) + (excludeClosing ? " AND e.type <> 'CLOSING'" : "");
-  return t.rows(
+  const rows = await t.rows(
     `SELECT a.id, a.code, a.name_ar, a.type, a.subtype, a.parent_id, COALESCE(SUM(l.debit - l.credit),0) bal
      FROM accounts a JOIN journal_lines l ON l.account_id=a.id JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'
      WHERE a.company_id=$1 AND e.date BETWEEN $2 AND $3${bc} GROUP BY a.id HAVING COALESCE(SUM(l.debit - l.credit),0) <> 0 ORDER BY a.code`,
     params,
   );
+  // an account classified outside its type (legacy data) still lands in its type's default section, never drops out
+  for (const r of rows) r.subtype = normalizeSubtype(r.type, r.subtype);
+  return rows;
 }
 
 function group(rows: any[], subtypes: string[], sign: 1 | -1) {

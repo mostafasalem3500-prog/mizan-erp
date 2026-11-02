@@ -132,3 +132,16 @@ export const SUBTYPE_AR: Record<string, string> = {
   OTHER_INCOME: "إيرادات أخرى", COGS: "تكلفة مبيعات", EXPENSE: "مصروفات عمومية وإدارية",
   SELLING_EXPENSE: "مصروفات بيع وتسويق", OTHER_EXPENSE: "مصروفات أخرى", ZAKAT: "زكاة", ASSET: "أصول",
 };
+
+/** Which statement classifications are valid for each account type (an account outside its type's list
+ *  would silently fall out of the balance sheet or income statement). */
+export const SUBTYPES_BY_TYPE: Record<string, string[]> = {
+  ASSET: ["CASH", "BANK", "RECEIVABLE", "INVENTORY", "CURRENT_ASSET", "FIXED_ASSET", "ACC_DEPRECIATION"],
+  LIABILITY: ["PAYABLE", "TAX", "CURRENT_LIABILITY", "LONG_TERM_LIABILITY"],
+  EQUITY: ["CAPITAL", "RETAINED", "EQUITY"],
+  REVENUE: ["SALES", "SALES_RETURNS", "OTHER_INCOME"],
+  EXPENSE: ["COGS", "EXPENSE", "SELLING_EXPENSE", "OTHER_EXPENSE", "ZAKAT"],
+};
+export const DEFAULT_SUBTYPE: Record<string, string> = { ASSET: "CURRENT_ASSET", LIABILITY: "CURRENT_LIABILITY", EQUITY: "EQUITY", REVENUE: "OTHER_INCOME", EXPENSE: "EXPENSE" };
+/** Subtype that is valid for the type: the given one if it fits, otherwise the type's default. */
+export const normalizeSubtype = (type: string, subtype?: string | null) => (subtype && SUBTYPES_BY_TYPE[type]?.includes(subtype) ? subtype : DEFAULT_SUBTYPE[type] || subtype || "CURRENT_ASSET");
