@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Round 17 charity screens: financial custody, purchase requests & receiving reports, refund requests. */
 import React, { useMemo, useState } from "react";
 import { api, q, useFetch, Money, money, Loading, Empty, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useCompanyContext, today, fmtDate, PeriodFilter, SearchBox, FilterInfo, useSorted, Th, matches, exportExcel, useUrlSearch, confirmDlg } from "../lib";
@@ -294,7 +295,7 @@ function PurchaseModal({ init, onClose }: { init: any; onClose: (ok?: boolean) =
         <tbody>{items.map((it, i) => <tr key={i}><td>{i + 1}</td><td><Input value={it.name} onChange={(e) => setI(i, "name", e.target.value)} /></td><td><Input value={it.spec} onChange={(e) => setI(i, "spec", e.target.value)} /></td><td><NumInput value={it.qty} onChange={(e) => setI(i, "qty", e.target.value)} style={{ width: 80 }} /></td><td><NumInput value={it.price} onChange={(e) => setI(i, "price", e.target.value)} style={{ width: 100 }} /></td><td className="n"><Money v={Number(it.qty || 0) * Number(it.price || 0)} /></td><td><button className="btn sm ghost" onClick={() => setItems(items.filter((_, j) => j !== i))}>✕</button></td></tr>)}</tbody>
         <tfoot><tr><td colSpan={5}>الإجمالي قبل الضريبة / الضريبة</td><td className="n"><Money v={sub} /> / <Money v={vat} /></td><td /></tr></tfoot>
       </table></div>
-      <div className="row mt"><button className="btn sm" onClick={() => setItems([...items, { name: "", spec: "", qty: 1, price: "" }])}>＋ صنف</button><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={!!f.applyVat} onChange={set("applyVat")} />إضافة ضريبة القيمة المضافة 15%</label><span className="muted small">{words(sub + vat)}</span></div>
+      <div className="row mt"><button className="btn sm" onClick={() => setItems([...items, { name: "", spec: "", qty: 1, price: "" }])}>＋ صنف</button><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={!!f.applyVat} onChange={set("applyVat")} />إضافة ضريبة القيمة المضافة {CFG.vatRate}%</label><span className="muted small">{words(sub + vat)}</span></div>
       <div className="grid c3 mt">
         <Field label="الغرض من الشراء" span2><Input value={f.purpose} onChange={set("purpose")} /></Field>
         <Field label="البرنامج / المشروع"><ProjectSelect value={projectId} onChange={setProjectId} /></Field>

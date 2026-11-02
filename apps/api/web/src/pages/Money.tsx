@@ -1,3 +1,4 @@
+import { CUR, CFG, VATF } from "../shared/country";
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
@@ -65,11 +66,11 @@ export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: 
   const [alloc, setAlloc] = useState<Record<string, number>>({});
   const [auto, setAuto] = useState(true);
   const { data: currencies } = useFetch("/currencies");
-  const [currency, setCurrency] = useState("SAR");
+  const [currency, setCurrency] = useState(CFG.currency);
   const [fcAmount, setFcAmount] = useState<string>("");
   const [rate, setRate] = useState<string>("");
-  const fc = currency !== "SAR";
-  useEffect(() => { if (partner) { api(`/payments/open-invoices/${partner.id}?direction=${direction}`).then(setOpen); setCurrency(partner.currency && partner.currency !== "SAR" ? partner.currency : "SAR"); } else setOpen([]); setAlloc({}); }, [partner]);
+  const fc = currency !== CFG.currency;
+  useEffect(() => { if (partner) { api(`/payments/open-invoices/${partner.id}?direction=${direction}`).then(setOpen); setCurrency(partner.currency && partner.currency !== CFG.currency ? partner.currency : CFG.currency); } else setOpen([]); setAlloc({}); }, [partner]);
   useEffect(() => { const c = currencies?.find((x: any) => x.code === currency); if (c && fc) setRate(String(c.rate)); }, [currency, currencies]);
   useEffect(() => { if (fc && fcAmount && rate) setAmount((Number(fcAmount) * Number(rate)).toFixed(2)); }, [fcAmount, rate, fc]);
   // for foreign-currency vouchers allocations are in the foreign currency (only same-currency documents are listed)
@@ -90,25 +91,42 @@ export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: 
   useEffect(() => { setWhtOn(true); setWhtBorne(false); setWhtType(partner?.whtType || "OTHER"); }, [partner?.id]);
   const whtRate = whtTypes.data?.[whtType]?.rate || 0;
   const whtTax = nonRes && whtOn && !fc ? (whtBorne ? Math.round((amt / (1 - whtRate) - amt) * 100) / 100 : Math.round(amt * whtRate * 100) / 100) : 0;
-  const whtBody = nonRes ? (whtOn && !fc ? { type: whtType, borne: whtBorne } : null) : undefined;
+  // Egypt: الخصم تحت حساب الضريبة — we deduct from a supplier, or a customer deducted it from us
+  const EG = CFG.country === "EG";
+  const egTypes = useFetch<any>(EG && partner ? "/tax/eg-wht/types" : null, [partner?.id]);
+  const [egOn, setEgOn] = useState(false);
+  const [egType, setEgType] = useState("SUPPLIES");
+  useEffect(() => { if (EG) { setEgOn(direction === "OUT" && !!partner?.whtType); setEgType(partner?.whtType || "SUPPLIES"); } }, [partner?.id]);
+  const egRate = egTypes.data?.types?.[egType]?.rate || 0;
+  const egBase = Math.round((amt / (1 + VATF())) * 100) / 100;
+  const egTax = EG && egOn && !fc ? Math.round(egBase * egRate * 100) / 100 : 0;
+  const whtBody = EG ? (egOn && !fc ? { type: egType } : null) : nonRes ? (whtOn && !fc ? { type: whtType, borne: whtBorne } : null) : undefined;
   return (
     <Modal title={direction === "IN" ? "سند قبض جديد" : "سند صرف جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !partner || !account || amt <= 0 || (fc && Number(fcAmount) <= 0)} onClick={() => run(async () => { await api("/payments", { body: { direction, branchId: branchId || undefined, partnerId: partner.id, accountId: account.id, date, amount: amt, method, reference: ref, notes, currency, fcAmount: fc ? Number(fcAmount) : undefined, wht: whtBody, allocations: Object.entries(alloc).filter(([, v]) => v > 0).map(([invoiceId, amount]) => ({ invoiceId, amount })) } }); onClose(true); }, "تم تسجيل السند وترحيل القيد")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label={direction === "IN" ? "العميل" : "المورد"} span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher(direction === "IN" ? "CUSTOMER" : "SUPPLIER")} label={(p: any) => `${p.name} — الرصيد ${money(p.balance)}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="العملة"><Select value={currency} onChange={(e) => { setCurrency(e.target.value); setAlloc({}); }}>{(currencies || [{ code: "SAR", nameAr: "ريال سعودي" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
+        <Field label="العملة"><Select value={currency} onChange={(e) => { setCurrency(e.target.value); setAlloc({}); }}>{(currencies || [{ code: CFG.currency, nameAr: CFG.currencyAr }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
         {fc && <Field label={`المبلغ بالعملة (${sym})`}><NumInput value={fcAmount} onChange={(e) => setFcAmount(e.target.value)} /></Field>}
-        {fc && <Field label="سعر الصرف الفعلي (ر.س لكل وحدة)" hint="سعر البنك في هذه العملية — الفرق عن سعر الفاتورة يُقيد كأرباح/خسائر فروق عملة"><NumInput value={rate} onChange={(e) => setRate(e.target.value)} /></Field>}
-        <Field label={fc ? "المعادل بالريال (المبلغ الفعلي من الحساب)" : "المبلغ"}><NumInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+        {fc && <Field label={`سعر الصرف الفعلي (${CUR()} لكل وحدة)`} hint="سعر البنك في هذه العملية — الفرق عن سعر الفاتورة يُقيد كأرباح/خسائر فروق عملة"><NumInput value={rate} onChange={(e) => setRate(e.target.value)} /></Field>}
+        <Field label={fc ? "المعادل بالعملة الأساسية (المبلغ الفعلي من الحساب)" : "المبلغ"}><NumInput value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         <Field label="طريقة الدفع"><Select value={method} onChange={(e) => setMethod(e.target.value)}>{["CASH", "BANK", "CARD", "CHEQUE"].map((m) => <option key={m} value={m}>{METHOD_AR[m]}</option>)}</Select></Field>
         <Field label="الصندوق / البنك"><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
         <Field label="المرجع (حوالة/شيك)"><Input value={ref} onChange={(e) => setRef(e.target.value)} dir="ltr" /></Field>
         <Field label="بيان"><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
         <BranchField value={branchId} onChange={setBranchId} />
       </div>
-      {nonRes && <div className="card mt" style={{ borderColor: "var(--accent)" }}><div className="card-b">
+      {EG && partner && !fc && <div className="card mt" style={{ borderColor: "var(--accent)" }}><div className="card-b">
+        <div className="row between"><b>🧾 الخصم تحت حساب الضريبة {direction === "OUT" ? "(نخصمه من المورد ونورّده بنموذج 41)" : "(خصمه العميل من المبلغ المدفوع لنا)"}</b><label className="check"><input type="checkbox" checked={egOn} onChange={(e) => setEgOn(e.target.checked)} /> تطبيق الخصم</label></div>
+        {egOn && <div className="form-grid mt">
+          <Field label="نوع التعامل والنسبة"><Select value={egType} onChange={(e) => setEgType(e.target.value)}>{Object.entries(egTypes.data?.types || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(1).replace(/\.0$/, "")}%</option>)}</Select></Field>
+          <div className="stat-list span2"><div className="item"><span>الوعاء التقريبي قبل الضريبة</span><b><Money v={egBase} /></b></div><div className="item"><span>مبلغ الخصم (يُحسب نهائياً من الفواتير المخصصة)</span><b className="neg-val"><Money v={egTax} /></b></div><div className="item"><span>{direction === "OUT" ? "المحوَّل للمورد" : "المستلم في البنك"}</span><b><Money v={amt - egTax} /></b></div></div>
+          {egBase <= (egTypes.data?.threshold || 300) && <div className="alert warn small span3">لا يُخصم على التعاملات التي لا تتجاوز {egTypes.data?.threshold || 300} جنيه قبل الضريبة.</div>}
+        </div>}
+      </div></div>}
+      {nonRes && !EG && <div className="card mt" style={{ borderColor: "var(--accent)" }}><div className="card-b">
         <div className="row between"><b>🌍 ضريبة الاستقطاع — مورد غير مقيم{partner.country ? ` (${partner.country})` : ""}</b><label className="check"><input type="checkbox" checked={whtOn} onChange={(e) => setWhtOn(e.target.checked)} /> تطبيق الاستقطاع</label></div>
-        {fc ? <div className="small muted mt">سند الصرف مع ضريبة الاستقطاع يكون بالريال.</div> : whtOn && <div className="form-grid mt">
+        {fc ? <div className="small muted mt">سند الصرف مع ضريبة الاستقطاع يكون بالعملة الأساسية.</div> : whtOn && <div className="form-grid mt">
           <Field label="نوع الدفعة ونسبة الاستقطاع"><Select value={whtType} onChange={(e) => setWhtType(e.target.value)}>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>
           <Field label="من يتحمل الضريبة"><Select value={whtBorne ? "1" : "0"} onChange={(e) => setWhtBorne(e.target.value === "1")}><option value="0">يُخصم من المورد (الأصل)</option><option value="1">تتحملها المنشأة (يستلم المورد كامل المبلغ)</option></Select></Field>
           <div className="stat-list span2"><div className="item"><span>المبلغ المسدد للمورد من البنك</span><b><Money v={whtBorne ? amt : amt - whtTax} /></b></div><div className="item"><span>ضريبة الاستقطاع المستحقة للهيئة {whtBorne ? "(على المبلغ الإجمالي بعد التعلية)" : ""}</span><b className="neg-val"><Money v={whtTax} /></b></div><div className="item"><span>تُورَّد خلال العشرة أيام الأولى من الشهر التالي</span><b className="small">ح/ ضريبة الاستقطاع المستحقة</b></div></div>
@@ -119,7 +137,7 @@ export function PaymentEditor({ direction, onClose, partner: p0 }: { direction: 
           <div className="row between"><h3>تخصيص المبلغ على الفواتير المفتوحة{fc && <span className="muted small"> — بالـ{sym}</span>}</h3><label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> تخصيص تلقائي (الأقدم أولاً)</label></div>
           {!docs.length ? <div className="muted mt">لا توجد فواتير مفتوحة{fc ? ` بعملة ${currency}` : ""} — سيُسجل المبلغ كدفعة مقدمة على الحساب.</div> : (
             <table className="tbl compact mt"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>المخصص</th></tr></thead>
-              <tbody>{docs.map((i) => <tr key={i.id}><td>{i.number}{i.currency !== "SAR" && <span className="badge blue" style={{ marginInlineStart: 6 }}>{i.currency} @ {Number(i.exchangeRate)}</span>}</td><td className="dt">{fmtDate(i.date)}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n">{i.currency !== "SAR" ? <><Money v={i.fcTotal} /> <span className="muted small">({money(i.total)} ر.س)</span></> : <Money v={i.total} />}</td><td className="n"><Money v={fc ? i.fcDue : i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={dueOf(i)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(dueOf(i), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
+              <tbody>{docs.map((i) => <tr key={i.id}><td>{i.number}{i.currency !== CFG.currency && <span className="badge blue" style={{ marginInlineStart: 6 }}>{i.currency} @ {Number(i.exchangeRate)}</span>}</td><td className="dt">{fmtDate(i.date)}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n">{i.currency !== CFG.currency ? <><Money v={i.fcTotal} /> <span className="muted small">({money(i.total)} {CUR()})</span></> : <Money v={i.total} />}</td><td className="n"><Money v={fc ? i.fcDue : i.due} /></td><td><NumInput value={alloc[i.id] || ""} max={dueOf(i)} onChange={(e) => { setAuto(false); setAlloc({ ...alloc, [i.id]: Math.min(dueOf(i), Number(e.target.value) || 0) }); }} style={{ width: 120 }} /></td></tr>)}</tbody>
               <tfoot><tr><td colSpan={5}>المخصص / المبلغ</td><td className={allocated > payAmt + 0.001 ? "neg-val" : ""}><Money v={allocated} /> / <Money v={payAmt} /> {fc ? sym : ""}</td></tr></tfoot></table>
           )}
         </div>
@@ -136,7 +154,7 @@ export function VoucherPrint({ p, direction, onClose }: { p: any; direction: str
         <div className="head"><div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && <>الرقم الضريبي: {me.company.vatNumber}</>}</div></div><div><h2 style={{ color: "var(--primary)" }}>{direction === "IN" ? "سند قبض" : "سند صرف"}</h2><div>رقم: <b className="num">{p.number}</b></div><div>التاريخ: <span className="num">{fmtDate(p.date)}</span></div></div></div>
         <table><tbody>
           <tr><td style={{ width: 160 }}>{direction === "IN" ? "استلمنا من السيد/السادة" : "صرفنا إلى السيد/السادة"}</td><td><b>{p.partnerName}</b></td></tr>
-          <tr><td>مبلغاً وقدره</td><td><b className="num" style={{ fontSize: 18 }}>{money(p.amount)} ريال سعودي</b><div className="small">{amountToArabicWords(Number(p.amount))}</div></td></tr>
+          <tr><td>مبلغاً وقدره</td><td><b className="num" style={{ fontSize: 18 }}>{money(p.amount)} {CFG.currencyAr}</b><div className="small">{amountToArabicWords(Number(p.amount))}</div></td></tr>
           <tr><td>طريقة الدفع</td><td>{METHOD_AR[p.method]} — {p.accountName}{p.reference && <> — مرجع: <span className="num">{p.reference}</span></>}</td></tr>
           <tr><td>وذلك عن</td><td>{p.notes || (p.allocations?.length ? "سداد فواتير" : "دفعة على الحساب")}</td></tr>
         </tbody></table>
@@ -196,8 +214,8 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
   const [partner, setPartner] = useState<any>(null);
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const amt = Number(f.amount || 0);
-  const rate = f.taxCode === "S" ? 0.15 : 0;
-  const net = f.amountIncludesVat && rate ? amt / 1.15 : amt;
+  const rate = f.taxCode === "S" ? VATF() : 0;
+  const net = f.amountIncludesVat && rate ? amt / (1 + rate) : amt;
   const vat = net * rate;
   return (
     <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner)} onClick={() => run(async () => { await api("/expenses", { body: { ...f, branchId: f.branchId || undefined, amount: amt, accountId: account.id, payAccountId: credit ? null : pay.id, partnerId: credit ? partner.id : null } }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
@@ -268,7 +286,7 @@ function AssetEditor({ onClose }: { onClose: (s?: boolean) => void }) {
   const [partner, setPartner] = useState<any>(null);
   const [credit, setCredit] = useState(false);
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  useEffect(() => { if (f.cost && !f.vatAmount && !f.noJournal) setF((x: any) => ({ ...x, vatAmount: (Number(x.cost) * 0.15).toFixed(2) })); }, [f.cost]);
+  useEffect(() => { if (f.cost && !f.vatAmount && !f.noJournal) setF((x: any) => ({ ...x, vatAmount: (Number(x.cost) * VATF()).toFixed(2) })); }, [f.cost]);
   return (
     <Modal title="تسجيل أصل ثابت" onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !f.name || !f.cost} onClick={() => run(async () => { await api("/assets", { body: { ...f, cost: Number(f.cost), vatAmount: Number(f.vatAmount || 0), salvageValue: Number(f.salvageValue || 0), usefulLifeMonths: Number(f.usefulLifeMonths), accumulated: Number(f.accumulated || 0), assetAccountId: assetAcc?.id, accDepAccountId: depAcc?.id, depExpAccountId: expAcc?.id, payAccountId: credit || f.noJournal ? null : pay?.id, partnerId: credit ? partner?.id : null } }); onClose(true); }, "تم تسجيل الأصل")}>حفظ</button></>}>
       <div className="form-grid">

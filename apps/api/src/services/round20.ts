@@ -7,6 +7,7 @@
  *   • reports: inventory count sheet, inventory operations summary
  */
 import { Db } from "../db/pool";
+import { VAT_F } from "../lib/country";
 import { bad, conflict, r2, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
 import { saveDraft, getInvoice } from "./invoices";
@@ -142,7 +143,7 @@ export async function treasuryTransfer(t: Db, companyId: string, user: string, b
   const amount = r2(num(b.amount));
   if (!(amount > 0)) throw bad("المبلغ يجب أن يكون أكبر من صفر");
   const fee = Math.max(0, r2(num(b.fee)));
-  const feeVat = b.feeVat ? r2(fee * 0.15) : 0;
+  const feeVat = b.feeVat ? r2(fee * VAT_F) : 0;
   const date = isDate(b.date) ? b.date : today();
   if (!b.allowOverdraft) {
     const bal = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=$1 AND e.status='POSTED' AND e.date <= $2`, [from.id, date]);

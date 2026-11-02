@@ -1,3 +1,4 @@
+import { CUR } from "../shared/country";
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZATCA_AR, useCompanyContext, useLocalState } from "../lib";
@@ -60,7 +61,7 @@ export function Dashboard() {
         </div>
       )}
       <div className="grid c4">
-        <div className="card kpi"><div className="icon">🧾</div><div className="label">مبيعات الشهر</div><div className="value"><Money v={d.salesMonth} /></div><div className="sub">اليوم: {money(d.salesToday)} ر.س</div></div>
+        <div className="card kpi"><div className="icon">🧾</div><div className="label">مبيعات الشهر</div><div className="value"><Money v={d.salesMonth} /></div><div className="sub">اليوم: {money(d.salesToday)} {CUR()}</div></div>
         <div className="card kpi info"><div className="icon">📦</div><div className="label">مشتريات الشهر</div><div className="value"><Money v={d.purchMonth} /></div><div className="sub">مصروفات الشهر: {money(d.expMonth)}</div></div>
         <div className="card kpi success"><div className="icon">💵</div><div className="label">النقدية والبنوك</div><div className="value"><Money v={d.cashTotal} /></div><div className="sub">{d.cash.map((c: any) => `${c.nameAr}: ${money(c.bal)}`).slice(0, 2).join(" · ")}</div></div>
         <div className="card kpi accent"><div className="icon">٪</div><div className="label">صافي الضريبة المستحقة</div><div className="value"><Money v={d.vatDue} /></div><div className="sub">مخرجات − مدخلات (غير مسوّاة)</div></div>

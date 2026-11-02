@@ -24,6 +24,8 @@ import { createReceipt, createDisbursement, cancelReceipt, savePerson } from "./
 import { saveCase, zakatFund } from "./charity4";
 import { financialAnalysis } from "./round25";
 import { finalAccounts, closeCheck } from "./round27";
+import { IS_EG } from "../lib/country";
+import { runEgyptSelfCheck } from "./selfcheck_eg";
 
 export interface Check { group: string; name: string; expected: any; actual: any; ok: boolean }
 export interface SelfCheckResult { ok: boolean; passed: number; failed: number; durationMs: number; scenario: string[]; checks: Check[]; error?: string }
@@ -31,6 +33,7 @@ export interface SelfCheckResult { ok: boolean; passed: number; failed: number; 
 class Rollback extends Error {}
 
 export async function runAccountingSelfCheck(): Promise<SelfCheckResult> {
+  if (IS_EG) return runEgyptSelfCheck();
   const started = Date.now();
   const checks: Check[] = [];
   const scenario: string[] = [];

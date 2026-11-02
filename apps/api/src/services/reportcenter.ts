@@ -5,6 +5,7 @@
  * Rows may carry `_link` (in-app path) for drill-down.
  */
 import { Db } from "../db/pool";
+import { VAT_F, VAT_RATE, BASE_CURRENCY } from "../lib/country";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
 import { SUBTYPE_AR } from "../accounting/coa";
 import { incomeStatement, balanceSheet, aging } from "./reports";
@@ -489,7 +490,7 @@ IMPL["cash.cheques"] = async (t, companyId, q) => {
   return { columns: [{ key: "dirAr", label: "النوع" }, { key: "chequeNo", label: "رقم الشيك" }, { key: "bankName", label: "البنك" }, { key: "partner", label: "الطرف" }, { key: "amount", label: "المبلغ", type: "money", sum: true }, { key: "receivedDate", label: "الاستلام/الإصدار", type: "date" }, { key: "dueDate", label: "الاستحقاق", type: "date" }, { key: "daysToDue", label: "أيام للاستحقاق", type: "int" }, { key: "statusAr", label: "الحالة" }, { key: "bankAccount", label: "حساب البنك" }, { key: "notes", label: "ملاحظات" }], rows: rows.map((r) => ({ ...r, dirAr: r.direction === "IN" ? "مستلم" : "صادر", statusAr: ST[r.status] || r.status })) };
 };
 IMPL["cash.fx"] = async (t, companyId, q) => {
-  const w = voucherWhere(companyId, { ...q, status: "POSTED" }); w.raw("p.currency <> 'SAR'");
+  const w = voucherWhere(companyId, { ...q, status: "POSTED" }); w.raw(`p.currency <> '${BASE_CURRENCY}'`);
   const rows = await t.rows(`SELECT p.number, p.direction, p.date, pr.name AS partner, p.currency, p.fc_amount, p.exchange_rate, p.amount, p.fx_diff ${V_FROM} WHERE ${w.sql} ORDER BY p.date DESC`, w.params);
   return { columns: [{ key: "number", label: "السند" }, { key: "dirAr", label: "النوع" }, { key: "date", label: "التاريخ", type: "date" }, { key: "partner", label: "الطرف" }, { key: "currency", label: "العملة" }, { key: "fcAmount", label: "المبلغ بالعملة", type: "money", sum: true }, { key: "exchangeRate", label: "سعر الصرف", type: "qty" }, { key: "amount", label: "المعادل بالريال", type: "money", sum: true }, { key: "fxDiff", label: "فرق العملة (+ربح/−خسارة)", type: "money", sum: true }], rows: rows.map((r) => ({ ...r, dirAr: r.direction === "IN" ? "قبض" : "صرف" })) };
 };
@@ -607,23 +608,23 @@ IMPL["vat.detail"] = async (t, companyId, q) => {
       SELECT i.date, i.number, 'OUTPUT' side, CASE WHEN i.kind='CREDIT_NOTE' THEN 'إشعار دائن مبيعات' ELSE 'فاتورة مبيعات' END source, i.partner_name AS partner, i.partner_vat AS vat_no, l.tax_code, l.net_amount*${SIGN} taxable, l.vat_amount*${SIGN} vat, i.id AS doc_id, i.partner_id
         FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE') AND i.date BETWEEN $2 AND $3${B}
       UNION ALL
-      SELECT i.date, i.number, 'INPUT', CASE WHEN i.kind='CREDIT_NOTE' THEN 'مرتجع مشتريات' WHEN l.tax_code='IM' THEN 'استيراد (ضريبة الجمارك)' WHEN l.tax_code='RC' THEN 'احتساب عكسي — مدخلات' ELSE 'فاتورة مشتريات' END, i.partner_name, i.partner_vat, l.tax_code, l.net_amount*${SIGN}, CASE WHEN l.tax_code='RC' THEN l.net_amount*0.15 ELSE l.vat_amount END*${SIGN}, i.id, i.partner_id
+      SELECT i.date, i.number, 'INPUT', CASE WHEN i.kind='CREDIT_NOTE' THEN 'مرتجع مشتريات' WHEN l.tax_code='IM' THEN 'استيراد (ضريبة الجمارك)' WHEN l.tax_code='RC' THEN 'احتساب عكسي — مدخلات' ELSE 'فاتورة مشتريات' END, i.partner_name, i.partner_vat, l.tax_code, l.net_amount*${SIGN}, CASE WHEN l.tax_code='RC' THEN l.net_amount*${VAT_F} ELSE l.vat_amount END*${SIGN}, i.id, i.partner_id
         FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE') AND i.date BETWEEN $2 AND $3${B}
       UNION ALL
-      SELECT i.date, i.number, 'OUTPUT', 'احتساب عكسي — مخرجات', i.partner_name, i.partner_vat, 'RC', l.net_amount*${SIGN}, l.net_amount*0.15*${SIGN}, i.id, i.partner_id
+      SELECT i.date, i.number, 'OUTPUT', 'احتساب عكسي — مخرجات', i.partner_name, i.partner_vat, 'RC', l.net_amount*${SIGN}, l.net_amount*${VAT_F}*${SIGN}, i.id, i.partner_id
         FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE') AND l.tax_code='RC' AND i.date BETWEEN $2 AND $3${B}
       UNION ALL
-      SELECT x.date, x.number, 'OUTPUT', 'احتساب عكسي — مخرجات', COALESCE(NULLIF(x.payee,''), pr.name), x.supplier_vat, 'RC', x.amount, x.amount*0.15, NULL, x.partner_id FROM expenses x LEFT JOIN partners pr ON pr.id=x.partner_id WHERE x.company_id=$1 AND x.status='POSTED' AND x.tax_code='RC' AND x.date BETWEEN $2 AND $3${BX}
+      SELECT x.date, x.number, 'OUTPUT', 'احتساب عكسي — مخرجات', COALESCE(NULLIF(x.payee,''), pr.name), x.supplier_vat, 'RC', x.amount, x.amount*${VAT_F}, NULL, x.partner_id FROM expenses x LEFT JOIN partners pr ON pr.id=x.partner_id WHERE x.company_id=$1 AND x.status='POSTED' AND x.tax_code='RC' AND x.date BETWEEN $2 AND $3${BX}
       UNION ALL
-      SELECT e.date, f.code, 'INPUT', 'شراء أصل ثابت', f.name, NULL, 'S', ROUND((l.debit-l.credit)/0.15,2), l.debit-l.credit, NULL, NULL
+      SELECT e.date, f.code, 'INPUT', 'شراء أصل ثابت', f.name, NULL, 'S', ROUND((l.debit-l.credit)/${VAT_F},2), l.debit-l.credit, NULL, NULL
         FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id JOIN fixed_assets f ON f.id=e.source_id WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.type='ASSET' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3${q.branchId && UUID.test(q.branchId) ? ` AND e.branch_id='${q.branchId}'::uuid` : ""}
       UNION ALL
-      SELECT x.date, x.number, 'INPUT', CASE WHEN x.tax_code='RC' THEN 'احتساب عكسي — مدخلات' ELSE 'مصروف' END, COALESCE(NULLIF(x.payee,''), pr.name), x.supplier_vat, x.tax_code, x.amount, CASE WHEN x.tax_code='RC' THEN x.amount*0.15 ELSE x.vat_amount END, NULL, x.partner_id FROM expenses x LEFT JOIN partners pr ON pr.id=x.partner_id WHERE x.company_id=$1 AND x.status='POSTED' AND x.date BETWEEN $2 AND $3${BX}
+      SELECT x.date, x.number, 'INPUT', CASE WHEN x.tax_code='RC' THEN 'احتساب عكسي — مدخلات' ELSE 'مصروف' END, COALESCE(NULLIF(x.payee,''), pr.name), x.supplier_vat, x.tax_code, x.amount, CASE WHEN x.tax_code='RC' THEN x.amount*${VAT_F} ELSE x.vat_amount END, NULL, x.partner_id FROM expenses x LEFT JOIN partners pr ON pr.id=x.partner_id WHERE x.company_id=$1 AND x.status='POSTED' AND x.date BETWEEN $2 AND $3${BX}
       UNION ALL
       SELECT p.date, p.number, 'INPUT', 'عمولة منصة', p.platform, NULL, 'S', p.fees, p.fee_vat, NULL, NULL FROM estore_payouts p WHERE p.company_id=$1 AND p.status='POSTED' AND p.date BETWEEN $2 AND $3)
     SELECT * FROM u WHERE 1=1${P}${q.vatSide ? ` AND side='${q.vatSide === "INPUT" ? "INPUT" : "OUTPUT"}'` : ""}${list(q.taxCode).length ? ` AND tax_code = ANY('{${list(q.taxCode).join(",")}}'::text[])` : ""}${q.q ? ` AND (number ILIKE $4 OR partner ILIKE $4 OR vat_no ILIKE $4)` : ""} ORDER BY date, number`, q.q ? [companyId, from, to, `%${q.q}%`] : [companyId, from, to]);
   const g = q.groupBy || "none";
-  const TC: Record<string, string> = { S: "خاضع 15%", Z: "نسبة صفر", X: "صادرات", E: "معفى", O: "خارج النطاق", IM: "استيراد", RC: "احتساب عكسي" };
+  const TC: Record<string, string> = { S: `خاضع ${VAT_RATE}%`, Z: "نسبة صفر", X: "صادرات", E: "معفى", O: "خارج النطاق", IM: "استيراد", RC: "احتساب عكسي" };
   if (g === "none") return { columns: [{ key: "date", label: "التاريخ", type: "date" }, { key: "number", label: "المستند" }, { key: "sideAr", label: "النوع" }, { key: "source", label: "المصدر" }, { key: "partner", label: "الطرف" }, { key: "vatNo", label: "الرقم الضريبي" }, { key: "taxCodeAr", label: "الرمز الضريبي" }, { key: "taxable", label: "القاعدة الخاضعة", type: "money", sum: true }, { key: "vat", label: "الضريبة", type: "money", sum: true }], rows: rows.map((r) => ({ ...r, sideAr: r.side === "OUTPUT" ? "مخرجات" : "مدخلات", taxCodeAr: TC[r.taxCode] || r.taxCode, _link: r.docId ? `/doc/${r.docId}` : undefined })) };
   const keyOf = (r: any) => g === "taxCode" ? TC[r.taxCode] || r.taxCode : g === "partner" ? r.partner || "—" : g === "month" ? String(r.date).slice(0, 7) : r.source;
   const by = new Map<string, any>();
@@ -801,7 +802,7 @@ export async function dimensionValues(t: Db, companyId: string, key: string) {
     department: `SELECT DISTINCT department v FROM employees WHERE company_id=$1 AND department IS NOT NULL ORDER BY 1`,
     city: `SELECT DISTINCT city v FROM partners WHERE company_id=$1 AND city IS NOT NULL AND city<>'' ORDER BY 1`,
     assetCategory: `SELECT DISTINCT category v FROM fixed_assets WHERE company_id=$1 AND category IS NOT NULL ORDER BY 1`,
-    currency: `SELECT DISTINCT currency v FROM payments WHERE company_id=$1 AND currency<>'SAR' ORDER BY 1`,
+    currency: `SELECT DISTINCT currency v FROM payments WHERE company_id=$1 AND currency<>'${BASE_CURRENCY}' ORDER BY 1`,
     employee: `SELECT id, code || ' · ' || name AS v FROM employees WHERE company_id=$1 ORDER BY code`,
     asset: `SELECT id, code || ' · ' || name AS v FROM fixed_assets WHERE company_id=$1 ORDER BY code`,
   };

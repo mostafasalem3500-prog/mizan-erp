@@ -4,6 +4,7 @@
  *     Dr Bank (net received) · Dr Platform fees 5304 · Dr Input VAT (VAT on the fees)  /  Cr E-store clearing (gross)
  */
 import { Db } from "../db/pool";
+import { VAT_F } from "../lib/country";
 import { bad, conflict, r2, D, num, isDate, today } from "../lib/core";
 import { post, nextNumber, reverse } from "../accounting/engine";
 import { PLATFORMS } from "./salla";
@@ -27,7 +28,7 @@ export async function createPayout(t: Db, companyId: string, user: string, p: Pa
   if (!isDate(date)) throw bad("التاريخ غير صحيح");
   const net = r2(num(p.net));
   const fees = r2(num(p.fees));
-  const feeVat = p.feeVat === undefined || p.feeVat === null || (p.feeVat as any) === "" ? r2(D(fees).times(0.15)) : r2(num(p.feeVat));
+  const feeVat = p.feeVat === undefined || p.feeVat === null || (p.feeVat as any) === "" ? r2(D(fees).times(VAT_F)) : r2(num(p.feeVat));
   if (net <= 0) throw bad("أدخل المبلغ المحوَّل إلى البنك");
   if (fees < 0 || feeVat < 0) throw bad("العمولة والضريبة لا تكون سالبة");
   const gross = r2(D(net).plus(fees).plus(feeVat));

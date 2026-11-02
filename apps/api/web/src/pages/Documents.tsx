@@ -1,6 +1,12 @@
+import { CUR, CFG } from "../shared/country";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
+import { EtaBadge, EtaDocModal } from "./Egypt";
+/** ETA verification link encoded in the QR of accepted Egyptian e-invoices / e-receipts. */
+export const etaQrText = (d: any) => !d?.etaUuid ? "" : d.etaKind === "RECEIPT"
+  ? `https://invoicing.eta.gov.eg/receipts/search/${d.etaUuid}/share/${(d.issuedAt ? new Date(d.issuedAt) : new Date(d.date + "T10:00:00+02:00")).toISOString().replace(/\.\d{3}Z$/, "Z")}#Total:${Number(d.total).toFixed(2)},IssuerRIN:${d.company?.vatNumber || ""}`
+  : `https://invoicing.eta.gov.eg/documents/${d.etaUuid}/share/${d.etaLongId || ""}`;
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter } from "../lib";
 import { PartnerStatement } from "./Statements";
@@ -71,7 +77,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
                 <td className="n"><Money v={r.taxable} /></td><td className="n"><Money v={r.vatTotal} /></td><td className="n"><b><Money v={r.total} /></b></td>
                 <td className="n">{r.kind === "INVOICE" && r.status === "POSTED" ? <Money v={Number(r.total) - Number(r.amountPaid)} blankZero /> : ""}</td>
                 <td><Badge s={r.status} /> {r.kind === "INVOICE" && r.status === "POSTED" && <Badge s={r.paymentStatus} />}</td>
-                {direction === "SALE" && kinds.includes("INVOICE") && <td>{r.zatcaStatus && <Badge s={r.zatcaStatus} map={ZATCA_AR} />}</td>}
+                {direction === "SALE" && kinds.includes("INVOICE") && <td>{CFG.country === "EG" ? <EtaBadge s={r.etaStatus} /> : r.zatcaStatus && <Badge s={r.zatcaStatus} map={ZATCA_AR} />}</td>}
               </tr>))}
             </tbody>
             <tfoot><tr><td colSpan={6}>الإجمالي (المرحّل، صافي الإشعارات)</td><td className="n"><Money v={data.sum} /></td><td colSpan={3} /></tr></tfoot>
@@ -116,29 +122,29 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   const isSale = direction === "SALE";
   const isNote = kind === "CREDIT_NOTE" || kind === "DEBIT_NOTE";
   const { data: currencies } = useFetch("/currencies");
-  const [currency, setCurrency] = useState("SAR");
+  const [currency, setCurrency] = useState(CFG.currency);
   const [rate, setRate] = useState<number>(1);
   const [priceList, setPriceList] = useState<any>(null);
   const whs = useFetch<any[]>("/warehouse-options");
   const [warehouseId, setWarehouseId] = useState("");
-  const fc = currency !== "SAR";
+  const fc = currency !== CFG.currency;
   const sym = (currencies || []).find((c: any) => c.code === currency)?.symbol || currency;
   // partner defaults: currency (foreign suppliers/customers) and price list (customers)
   useEffect(() => {
     if (!partner || id || isNote) return;
-    const cur = partner.currency && partner.currency !== "SAR" ? partner.currency : "SAR";
+    const cur = partner.currency && partner.currency !== CFG.currency ? partner.currency : CFG.currency;
     setCurrency(cur);
-    if (cur !== "SAR") api(`/currencies/${cur}/rate${q({ date })}`).then((r) => setRate(Number(r.rate))).catch(() => undefined); else setRate(1);
+    if (cur !== CFG.currency) api(`/currencies/${cur}/rate${q({ date })}`).then((r) => setRate(Number(r.rate))).catch(() => undefined); else setRate(1);
     if (isSale && partner.priceListId) api(`/price-lists/${partner.priceListId}`).then(setPriceList).catch(() => setPriceList(null)); else setPriceList(null);
   }, [partner?.id]);
-  const changeCurrency = async (cur: string) => { setCurrency(cur); if (cur === "SAR") setRate(1); else try { const r = await api(`/currencies/${cur}/rate${q({ date })}`); setRate(Number(r.rate)); } catch {} };
+  const changeCurrency = async (cur: string) => { setCurrency(cur); if (cur === CFG.currency) setRate(1); else try { const r = await api(`/currencies/${cur}/rate${q({ date })}`); setRate(Number(r.rate)); } catch {} };
   useEffect(() => {
     if (prefill) { setPartner(prefill.partner); if (prefill.lines) setLines(prefill.lines); setReason(prefill.reason || ""); setLoaded(true); return; }
     if (!id) return;
     api(`/invoices/${id}`).then((d) => {
       setPartner(d.partner || { id: d.partnerId, name: d.partnerName });
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
-      setCurrency(d.currency || "SAR"); setRate(Number(d.exchangeRate) || 1); setWarehouseId(d.warehouseId || "");
+      setCurrency(d.currency || CFG.currency); setRate(Number(d.exchangeRate) || 1); setWarehouseId(d.warehouseId || "");
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
       setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
       setLoaded(true);
@@ -170,7 +176,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   const saveRevision = () => run(async () => {
     if (!partner) throw new Error("اختر المورد");
     if (revReason.trim().length < 5) throw new Error("اكتب سبب التعديل (5 أحرف على الأقل) — يُحفظ في سجل المراجعة");
-    if (!confirmDlg(`سيُعكس القيد الأصلي ويُعاد ترحيل الفاتورة بنفس الرقم بإجمالي ${money(totals.total)} ر.س، مع تعديل المخزون. متابعة؟`)) return;
+    if (!confirmDlg(`سيُعكس القيد الأصلي ويُعاد ترحيل الفاتورة بنفس الرقم بإجمالي ${money(totals.total)} ${CUR()}، مع تعديل المخزون. متابعة؟`)) return;
     const r = await api(`/invoices/${id}/revise`, { body: { ...body(), revisionReason: revReason.trim() } });
     toast(`تم تعديل الفاتورة (تعديل رقم ${r.revision})${r.cogsAdjustment ? ` — فرق سعر الكميات المباعة ${money(r.cogsAdjustment)} حُمّل على تكلفة المبيعات` : ""}`, "ok");
     onClose(true);
@@ -179,7 +185,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
     const d = id ? await api(`/invoices/${id}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
     if (post) {
-      if (!confirmDlg(`ترحيل ${KIND_TITLE[direction][kind]} بإجمالي ${money(totals.total)} ر.س؟ لا يمكن تعديل المستند بعد الترحيل.`)) { onClose(true); return; }
+      if (!confirmDlg(`ترحيل ${KIND_TITLE[direction][kind]} بإجمالي ${money(totals.total)} ${CUR()}؟ لا يمكن تعديل المستند بعد الترحيل.`)) { onClose(true); return; }
       await postWithCreditCheck(d.id, me.role === "OWNER" || me.role === "ADMIN" || me.superAdmin);
       toast("تم الترحيل وإنشاء القيد المحاسبي", "ok");
       onClose(true);
@@ -197,14 +203,14 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   if (!loaded) return <Modal title="..." onClose={onClose}><Loading /></Modal>;
   return (
     <Modal wide title={revise ? `تعديل ${KIND_TITLE[direction][kind]} مرحّلة` : `${id ? "تعديل" : "إنشاء"} ${KIND_TITLE[direction][kind]}`} onClose={() => onClose()} footer={<>
-      <div className="grow row"><span className="muted">قبل الضريبة</span><b><Money v={totals.net} /></b><span className="muted">الضريبة</span><b><Money v={totals.vat} /></b>{totals.rc > 0 && <span className="muted small">احتساب عكسي: {money(totals.rc * (fc ? rate : 1))} ر.س</span>}{totals.customs > 0 && <span className="muted small">منها ضريبة استيراد تُسدد للجمارك: {money(totals.customs * (fc ? rate : 1))} ر.س</span>}<span className="muted">{totals.customs > 0 ? "المستحق للمورد" : "الإجمالي"}</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={totals.total} /> {fc ? sym : ""}</b>{fc && <span className="muted small">= {money(totals.total * rate)} ر.س @ {rate}</span>}</div>
+      <div className="grow row"><span className="muted">قبل الضريبة</span><b><Money v={totals.net} /></b><span className="muted">الضريبة</span><b><Money v={totals.vat} /></b>{totals.rc > 0 && <span className="muted small">احتساب عكسي: {money(totals.rc * (fc ? rate : 1))} {CUR()}</span>}{totals.customs > 0 && <span className="muted small">منها ضريبة استيراد تُسدد للجمارك: {money(totals.customs * (fc ? rate : 1))} {CUR()}</span>}<span className="muted">{totals.customs > 0 ? "المستحق للمورد" : "الإجمالي"}</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={totals.total} /> {fc ? sym : ""}</b>{fc && <span className="muted small">= {money(totals.total * rate)} {CUR()} @ {rate}</span>}</div>
       <button className="btn" onClick={() => onClose()}>إلغاء</button>
       {revise ? <button className="btn primary" disabled={busy} onClick={saveRevision}>حفظ التعديل وإعادة الترحيل ✓</button> : <>
       <button className="btn" disabled={busy} onClick={() => save(false)}>حفظ مسودة</button>
       {(kind === "INVOICE" || isNote) && <button className="btn primary" disabled={busy} onClick={() => save(true)}>حفظ وترحيل ✓</button>}
       {(kind === "QUOTATION" || kind === "ORDER") && <button className="btn primary" disabled={busy} onClick={() => save(false)}>حفظ</button>}</>}
     </>}>
-      {revise && <div className="alert info small mb">تعديل فاتورة مشتريات مرحّلة: يُعكس القيد الأصلي ويُعاد الترحيل <b>بنفس رقم الفاتورة</b>، وتُعكس كميات المخزون وتُستلم من جديد. فرق السعر على الكميات المباعة يُحمّل على تكلفة المبيعات. يُحفظ التعديل في سجل المراجعة مع سببه وصورة قبل/بعد.{revise.amountPaid > 0 && <> المسدد على الفاتورة {money(revise.amountPaid)} ر.س يبقى مخصصاً لها — لا يمكن تغيير المورد أو تخفيض الإجمالي عنه.</>}</div>}
+      {revise && <div className="alert info small mb">تعديل فاتورة مشتريات مرحّلة: يُعكس القيد الأصلي ويُعاد الترحيل <b>بنفس رقم الفاتورة</b>، وتُعكس كميات المخزون وتُستلم من جديد. فرق السعر على الكميات المباعة يُحمّل على تكلفة المبيعات. يُحفظ التعديل في سجل المراجعة مع سببه وصورة قبل/بعد.{revise.amountPaid > 0 && <> المسدد على الفاتورة {money(revise.amountPaid)} {CUR()} يبقى مخصصاً لها — لا يمكن تغيير المورد أو تخفيض الإجمالي عنه.</>}</div>}
       {revise && <Field label="سبب التعديل (إلزامي — سجل المراجعة)"><Input autoFocus value={revReason} onChange={(e) => setRevReason(e.target.value)} placeholder="مثال: خطأ في سعر الوحدة مقارنة بفاتورة المورد رقم ..." /></Field>}
       <div className="form-grid">
         <Field label={isSale ? "العميل" : "المورد"} span2>
@@ -215,7 +221,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
         {(whs.data?.length || 0) > 1 && !isNote && <Field label={isSale ? "يُصرف من مستودع / فرع" : "يُستلم في مستودع / فرع"}><Select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">تلقائي{whs.data![0]?.mine ? " (مستودع فرعي)" : " (المستودع الافتراضي)"}</option>{whs.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
         {!isSale && <Field label="رقم فاتورة المورد"><Input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} dir="ltr" /></Field>}
         {isNote && <Field label="سبب الإشعار (إلزامي للهيئة)" span2><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: إرجاع بضاعة / خطأ في السعر" /></Field>}
-        <Field label="العملة"><div className="row" style={{ gap: 6 }}><Select value={currency} disabled={isNote} onChange={(e) => changeCurrency(e.target.value)} style={{ width: 110 }}>{(currencies || [{ code: "SAR" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</Select>{fc && <NumInput title="سعر الصرف: ريال لكل وحدة" value={rate} disabled={isNote} onChange={(e) => setRate(Number(e.target.value) || 0)} style={{ width: 100 }} />}</div></Field>
+        <Field label="العملة"><div className="row" style={{ gap: 6 }}><Select value={currency} disabled={isNote} onChange={(e) => changeCurrency(e.target.value)} style={{ width: 110 }}>{(currencies || [{ code: CFG.currency }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</Select>{fc && <NumInput title={`سعر الصرف: ${CFG.currencySymbol} لكل وحدة`} value={rate} disabled={isNote} onChange={(e) => setRate(Number(e.target.value) || 0)} style={{ width: 100 }} />}</div></Field>
         <Field label="خيارات"><label className="check"><input type="checkbox" checked={incl} onChange={(e) => setIncl(e.target.checked)} /> الأسعار شاملة الضريبة</label>{priceList && <div className="small" style={{ color: "var(--primary)" }}>قائمة الأسعار: {priceList.name}{priceList.kind === "DISCOUNT" ? ` (خصم ${priceList.discountPct}%)` : ""}</div>}</Field>
         {isSale && <Field label="مسح باركود"><Input placeholder="امسح أو اكتب ثم Enter" dir="ltr" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const v = (e.target as HTMLInputElement).value.trim(); if (v) { barcodeAdd(v); (e.target as HTMLInputElement).value = ""; } } }} /></Field>}
       </div>
@@ -286,7 +292,9 @@ export function DocumentView() {
   const revs = useFetch<any[]>(id && d?.direction === "PURCHASE" && Number(d?.revision) > 0 ? `/invoices/${id}/revisions` : null, [d?.revision]);
   const mail = useFetch("/mail/status");
   const { run, busy } = useAction();
-  useEffect(() => { if (d?.qr) QRCode.toDataURL(d.qr, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [d?.qr]);
+  const qrText = d?.qr || etaQrText(d);
+  useEffect(() => { if (qrText) QRCode.toDataURL(qrText, { margin: 0, width: 140 }).then(setQr); else setQr(""); }, [qrText]);
+  const [etaOpen, setEtaOpen] = useState(false);
   if (loading || !d) return <Loading />;
   const isSale = d.direction === "SALE";
   const title = KIND_TITLE[d.direction][d.kind];
@@ -316,6 +324,8 @@ export function DocumentView() {
         {!isSale && d.status === "POSTED" && d.kind === "INVOICE" && can("purchases.write") && d.lines.some((l: any) => l.productId) && <button className="btn sm" onClick={() => setLanded(true)}>🚢 تكاليف استيراد</button>}
         {!isSale && d.status === "POSTED" && Number(d.customsVat) > 0 && !d.customsPaidJournalId && can("payments.write") && <button className="btn accent sm" onClick={() => setCustoms(true)}>سداد ضريبة الجمارك ({money(d.customsVat)})</button>}
         {isSale && d.status === "POSTED" && ["PENDING", "FAILED", "NOT_ONBOARDED", "REJECTED"].includes(d.zatcaStatus) && <button className="btn sm" onClick={resend}>إرسال للهيئة</button>}
+        {isSale && d.status === "POSTED" && CFG.country === "EG" && d.etaStatus && <><EtaBadge s={d.etaStatus} /><button className="btn sm" onClick={() => setEtaOpen(true)}>منظومة الضرائب</button></>}
+        {etaOpen && <EtaDocModal id={d.id} onClose={(ch) => { setEtaOpen(false); if (ch) reload(); }} />}
         {d.partnerId && can("reports.read") && <button className="btn sm" onClick={() => setPstmt(true)}>📄 كشف حساب {isSale ? "العميل" : "المورد"}</button>}
         {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
         <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
@@ -391,7 +401,7 @@ function LandedCostModal({ doc, onClose }: { doc: any; onClose: (s?: boolean) =>
     <Modal wide title={`تحميل تكاليف استيراد على ${doc.number}`} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn" disabled={busy} onClick={() => run(async () => setPreview(await api("/landed-costs/preview", { body: body() })))}>معاينة التوزيع</button><button className="btn primary" disabled={busy || !preview} onClick={() => run(async () => { const r = await api("/landed-costs", { body: body() }); await api(`/landed-costs/${r.id}/post`, { body: {} }); onClose(true); }, "تم تحميل التكاليف على المخزون وترحيل القيد")}>ترحيل</button></>}>
       <div className="alert info">سجّل فواتير الشحن والجمارك أولاً كمصروف على حساب «مصروفات شحن وجمارك وتخليص (تُحمَّل على المخزون)»، ثم حمّلها هنا على أصناف الفاتورة فترتفع تكلفة الوحدة. الكميات المباعة قبل التحميل تُحمَّل على تكلفة المبيعات مباشرة.</div>
       <div className="form-grid"><Field label="التاريخ"><Input type="date" value={date} onChange={(e) => { setDate(e.target.value); setPreview(null); }} /></Field><Field label="أساس التوزيع"><Select value={method} onChange={(e) => { setMethod(e.target.value); setPreview(null); }}><option value="VALUE">حسب قيمة الأسطر</option><option value="QTY">حسب الكمية</option></Select></Field></div>
-      <table className="tbl compact mt"><thead><tr><th>البيان</th><th style={{ width: 160 }}>المبلغ (ر.س)</th><th>الحساب الدائن (افتراضي: حساب التحميل)</th><th /></tr></thead>
+      <table className="tbl compact mt"><thead><tr><th>البيان</th><th style={{ width: 160 }}>المبلغ ({CUR()})</th><th>الحساب الدائن (افتراضي: حساب التحميل)</th><th /></tr></thead>
         <tbody>{costs.map((c) => <tr key={c.key}><td><Input value={c.description} onChange={(e) => upd(c.key, { description: e.target.value })} /></td><td><NumInput value={c.amount} onChange={(e) => upd(c.key, { amount: e.target.value })} /></td><td><Picker value={c.account} onChange={(a) => upd(c.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.isCashBank || a.type === "LIABILITY")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="5104 مصروفات شحن وجمارك (افتراضي)" /></td><td><button className="btn ghost sm" onClick={() => setCosts((cs) => cs.filter((x) => x.key !== c.key))}>✕</button></td></tr>)}</tbody></table>
       <button className="btn sm mt" onClick={() => setCosts((cs) => [...cs, { key: Date.now(), description: "", amount: "", account: null }])}>＋ سطر</button>
       {preview && <div className="mt"><div className="row between"><h3>التوزيع</h3><span>إجمالي {money(preview.total)} — للمخزون <b>{money(preview.toInventory)}</b> · لتكلفة المبيعات <b>{money(preview.toCogs)}</b></span></div>
@@ -426,9 +436,9 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
   const title = KIND_TITLE[d.direction][d.kind];
   const c = d.company;
   const remaining = Number(d.total) - Number(d.amountPaid);
-  const docTitle = isSale ? (d.kind === "INVOICE" ? (d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية") : title) : title;
+  const docTitle = isSale ? (d.kind === "INVOICE" ? (CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية") : title) : title;
   const showVat = d.lines.some((l: any) => Number(l.vatAmount) > 0);
-  const fc = d.currency && d.currency !== "SAR";
+  const fc = d.currency && d.currency !== CFG.currency;
   const fx = (v: any) => money(Number(v) / Number(d.exchangeRate || 1));
   return (
         <div className="card print-doc">
@@ -437,7 +447,7 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
               {c.logo && <img src={c.logo} style={{ height: 60, marginBottom: 6 }} alt="" />}
               <h2>{c.nameAr}</h2>{c.nameEn && <div className="muted">{c.nameEn}</div>}
               <div className="small">{[c.buildingNo, c.street, c.district, c.city, c.postalCode].filter(Boolean).join("، ")}</div>
-              <div className="small">{c.vatNumber && <>الرقم الضريبي: <span className="num">{c.vatNumber}</span></>}{c.crNumber && <> · س.ت: <span className="num">{c.crNumber}</span></>}</div>
+              <div className="small">{c.vatNumber && <>{CFG.taxIdLabel}: <span className="num">{c.vatNumber}</span></>}{c.crNumber && <> · س.ت: <span className="num">{c.crNumber}</span></>}</div>
               <div className="small">{c.phone && <>هاتف: <span className="num">{c.phone}</span></>}{c.email && <> · {c.email}</>}</div>
             </div>
             <div style={{ textAlign: "start" }}>
@@ -453,14 +463,14 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
                 {fc && <tr><td style={{ border: "none" }} className="muted">العملة</td><td style={{ border: "none" }} className="num">{d.currency} — سعر الصرف {Number(d.exchangeRate)}</td></tr>}
               </tbody></table>
             </div>
-            {qr && <img src={qr} alt="QR" style={{ width: 120, height: 120 }} />}
+            {qr && <div style={{ textAlign: "center" }}><img src={qr} alt="QR" style={{ width: 120, height: 120 }} />{d.etaUuid && <div className="small num" dir="ltr" style={{ fontSize: 9, maxWidth: 140, wordBreak: "break-all" }}>{d.etaUuid}</div>}</div>}
           </div>
           <div className="grid c2 mb">
             <div><div className="muted small">{isSale ? "العميل" : "المورد"}</div><b>{d.partnerName}</b>{d.partner && <div className="small">{[d.partner.buildingNo, d.partner.street, d.partner.district, d.partner.city].filter(Boolean).join("، ")}{d.partner.vatNumber && <> · الرقم الضريبي: <span className="num">{d.partner.vatNumber}</span></>}{d.partner.phone && <> · <span className="num">{d.partner.phone}</span></>}</div>}</div>
             {d.reason && <div><div className="muted small">سبب الإشعار</div>{d.reason}</div>}
           </div>
           <table><thead><tr><th>#</th><th>البيان</th><th>الكمية</th><th>سعر الوحدة</th>{d.lines.some((l: any) => Number(l.discountPct)) && <th>خصم</th>}<th>المبلغ قبل الضريبة</th>{showVat && <><th>الضريبة</th><th>الإجمالي</th></>}</tr></thead>
-            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.uom || l.unit || ""}{l.uom && Number(l.factor) > 1 ? <span className="small muted"> (= {Number(l.qty) * Number(l.factor)} {l.unit})</span> : null}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} ر.س</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
+            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.uom || l.unit || ""}{l.uom && Number(l.factor) > 1 ? <span className="small muted"> (= {Number(l.qty) * Number(l.factor)} {l.unit})</span> : null}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} {CUR()}</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
           </table>
           <div className="row mt" style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
             <div className="small muted" style={{ maxWidth: 380 }}>{d.notes && <div>ملاحظات: {d.notes}</div>}{c.invoiceTerms && <div>{c.invoiceTerms}</div>}{d.tenders?.length > 0 && <div>طريقة الدفع: {d.tenders.map((t: any) => `${METHOD_AR[t.method] || t.method} ${money(t.amount)}`).join(" + ")}</div>}</div>
@@ -468,9 +478,9 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
               <tr><td>الإجمالي قبل الخصم</td><td className="num">{money(d.subtotal)}</td></tr>
               {Number(d.discountTotal) > 0 && <tr><td>الخصم</td><td className="num">{money(d.discountTotal)}</td></tr>}
               <tr><td>الإجمالي الخاضع للضريبة</td><td className="num">{money(d.taxable)}</td></tr>
-              <tr><td>ضريبة القيمة المضافة 15%</td><td className="num">{money(d.vatTotal)}</td></tr>
+              <tr><td>ضريبة القيمة المضافة {CFG.vatRate}%</td><td className="num">{money(d.vatTotal)}</td></tr>
               {Number(d.customsVat) > 0 && <tr><td className="small">منها ضريبة استيراد تُسدد للجمارك (لا تُدفع للمورد)</td><td className="num">−{money(d.customsVat)}</td></tr>}
-              <tr style={{ fontWeight: 700, fontSize: 15 }}><td>{Number(d.customsVat) > 0 ? "المستحق للمورد" : "الإجمالي شامل الضريبة"}</td><td className="num">{money(d.total)} ر.س</td></tr>
+              <tr style={{ fontWeight: 700, fontSize: 15 }}><td>{Number(d.customsVat) > 0 ? "المستحق للمورد" : "الإجمالي شامل الضريبة"}</td><td className="num">{money(d.total)} {CUR()}</td></tr>
               {fc && <tr style={{ fontWeight: 700 }}><td>الإجمالي بعملة المستند</td><td className="num">{money(d.fcTotal ?? fx(d.total))} {d.currency}</td></tr>}
               <tr><td colSpan={2} className="small" style={{ background: "#f8fafa" }}>{amountToArabicWords(Number(d.total))}</td></tr>
               {d.kind === "INVOICE" && d.status === "POSTED" && Number(d.amountPaid) > 0 && <><tr><td>المسدد</td><td className="num">{money(d.amountPaid)}</td></tr><tr><td>المتبقي</td><td className="num">{money(remaining)}</td></tr></>}
@@ -486,7 +496,7 @@ export function Thermal({ d, qr }: { d: any; qr: string }) {
   return (
     <div className="thermal card">
       <div className="c">{c.logo && <img src={c.logo} style={{ height: 40 }} alt="" />}<div style={{ fontWeight: 700, fontSize: 14 }}>{c.nameAr}</div><div>{c.nameEn}</div><div>{[c.street, c.city].filter(Boolean).join("، ")}</div>{c.phone && <div className="num">{c.phone}</div>}{c.vatNumber && <div>الرقم الضريبي: <span className="num">{c.vatNumber}</span></div>}</div>
-      <div className="c" style={{ margin: "6px 0", fontWeight: 700 }}>{d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية"}{d.kind === "CREDIT_NOTE" ? " — إشعار دائن" : ""}</div>
+      <div className="c" style={{ margin: "6px 0", fontWeight: 700 }}>{CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية"}{d.kind === "CREDIT_NOTE" ? " — إشعار دائن" : ""}</div>
       <div>رقم: <span className="num">{d.number}</span></div>
       <div>التاريخ: <span className="num">{fmtDT(d.issuedAt)}</span></div>
       {d.partnerName && d.partnerName !== "عميل نقدي" && <div>العميل: {d.partnerName}</div>}
@@ -496,8 +506,8 @@ export function Thermal({ d, qr }: { d: any; qr: string }) {
       <div style={{ marginTop: 6 }}>
         <div className="row between"><span>الإجمالي قبل الضريبة</span><span className="num">{money(d.taxable)}</span></div>
         {Number(d.discountTotal) > 0 && <div className="row between"><span>الخصم</span><span className="num">{money(d.discountTotal)}</span></div>}
-        <div className="row between"><span>ضريبة القيمة المضافة 15%</span><span className="num">{money(d.vatTotal)}</span></div>
-        <div className="row between" style={{ fontWeight: 700, fontSize: 15, borderTop: "1px solid #000", paddingTop: 3 }}><span>الإجمالي</span><span className="num">{money(d.total)} ر.س</span></div>
+        <div className="row between"><span>ضريبة القيمة المضافة {CFG.vatRate}%</span><span className="num">{money(d.vatTotal)}</span></div>
+        <div className="row between" style={{ fontWeight: 700, fontSize: 15, borderTop: "1px solid #000", paddingTop: 3 }}><span>الإجمالي</span><span className="num">{money(d.total)} {CUR()}</span></div>
         {d.tenders?.map((t: any, i: number) => <div key={i} className="row between"><span>{METHOD_AR[t.method] || t.method}</span><span className="num">{money(t.amount)}</span></div>)}
       </div>
       {qr && <div className="c" style={{ marginTop: 8 }}><img src={qr} style={{ width: 110 }} alt="QR" /></div>}
@@ -524,7 +534,7 @@ export async function postWithCreditCheck(id: string, canOverride: boolean) {
 function ShareBtn({ d }: { d: any }) {
   const toast = useToast();
   const url = `${location.origin}/p/${d.shareToken}`;
-  const text = encodeURIComponent(`${d.company?.nameAr || ""} — ${KIND_TITLE[d.direction][d.kind]} ${d.number} بمبلغ ${money(d.total)} ر.س\n${url}`);
+  const text = encodeURIComponent(`${d.company?.nameAr || ""} — ${KIND_TITLE[d.direction][d.kind]} ${d.number} بمبلغ ${money(d.total)} ${CUR()}\n${url}`);
   return (
     <div className="row" style={{ gap: 4 }}>
       <button className="btn sm" onClick={async () => { try { await navigator.clipboard.writeText(url); toast("تم نسخ رابط الفاتورة", "ok"); } catch { prompt("انسخ الرابط", url); } }}>🔗 رابط</button>

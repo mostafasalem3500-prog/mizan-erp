@@ -1,3 +1,4 @@
+import { CUR } from "../shared/country";
 /** Round 23 — Saudi zakat base assessment and withholding tax (non-residents). */
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -5,7 +6,7 @@ import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, In
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
-function PayModal({ title, max, onSubmit, onClose }: { title: string; max: number; onSubmit: (b: any) => Promise<any>; onClose: (s?: boolean) => void }) {
+export function PayModal({ title, max, onSubmit, onClose }: { title: string; max: number; onSubmit: (b: any) => Promise<any>; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const [account, setAccount] = useState<any>(null);
   const [amount, setAmount] = useState<string>(String(max || ""));
@@ -45,7 +46,7 @@ export function ZakatPage() {
   }, [items, profit, rate]);
   const upd = (k: number, patch: any) => setItems((xs) => xs.map((x) => (x.k === k ? { ...x, ...patch } : x)));
   const postIt = () => run(async () => {
-    if (!confirmDlg(`ترحيل مخصص الزكاة ${money(sum.zakat)} ر.س للفترة ${data.from} – ${data.to}؟ (من ح/ الزكاة الشرعية إلى ح/ مخصص الزكاة)`)) return;
+    if (!confirmDlg(`ترحيل مخصص الزكاة ${money(sum.zakat)} ${CUR()} للفترة ${data.from} – ${data.to}؟ (من ح/ الزكاة الشرعية إلى ح/ مخصص الزكاة)`)) return;
     const r = await api("/zakat", { body: { from: data.from, to: data.to, method, items, adjustedProfit: profit } });
     setView(r.id); reload();
   }, "تم ترحيل مخصص الزكاة");
@@ -76,7 +77,7 @@ export function ZakatPage() {
             <div className="item"><span>صافي الربح المعدّل للسنة (الحد الأدنى للوعاء)</span><b><span className="print-only">{money(profit)}</span><NumInput className="no-print" value={profit} onChange={(e) => setProfit(Number(e.target.value))} style={{ width: 150 }} /></b></div>
             <div className="item"><span>الإضافات − الحسميات</span><b><Money v={sum.raw} /></b></div>
             <div className="item"><span>الوعاء الزكوي{sum.floor ? " (رُفع إلى صافي الربح المعدّل)" : ""}</span><b><Money v={sum.base} /></b></div>
-            <div className="item"><span>الزكاة المستحقة ({(rate * 100).toFixed(4)}%)</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={sum.zakat} /> ر.س</b></div>
+            <div className="item"><span>الزكاة المستحقة ({(rate * 100).toFixed(4)}%)</span><b style={{ fontSize: 18, color: "var(--primary)" }}><Money v={sum.zakat} /> {CUR()}</b></div>
           </div>
           {posted && <div className="alert warn small mt no-print">يوجد احتساب مرحّل لهذه الفترة ({posted.number} — زكاة {money(posted.zakat)}). لإعادة الاحتساب ألغِ الاحتساب السابق أولاً من السجل (ما لم يُسدَّد منه شيء).</div>}
           {can("accounting.write") && <div className="row mt no-print"><button className="btn primary" disabled={busy || !(sum.zakat > 0) || !!posted} onClick={postIt}>ترحيل مخصص الزكاة ✓</button><span className="small muted">قيد: من ح/ الزكاة الشرعية (5401) إلى ح/ مخصص الزكاة (210203) بتاريخ {data.to}</span></div>}

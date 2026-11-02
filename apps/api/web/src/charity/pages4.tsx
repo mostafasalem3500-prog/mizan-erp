@@ -1,3 +1,4 @@
+import { CUR, CFG } from "../shared/country";
 /** Round 23 — charity: zakat fund statement & policy, and the social case study (دراسة الحالة). */
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -34,7 +35,7 @@ export function CaseStudyModal({ p, onClose }: { p: any; onClose: (saved?: boole
       <div className="grid c3">
         <Field label="تاريخ الدراسة"><Input type="date" value={f.date} onChange={set("date")} /></Field>
         <Field label="عدد أفراد الأسرة"><NumInput value={f.members} onChange={set("members")} /></Field>
-        <Field label="إجمالي الدخل الشهري للأسرة (ريال)"><NumInput value={f.income} onChange={set("income")} /></Field>
+        <Field label={`إجمالي الدخل الشهري للأسرة (${CFG.words.one})`}><NumInput value={f.income} onChange={set("income")} /></Field>
         <Field label="مصادر الدخل" hint="افصل بفاصلة: راتب، ضمان اجتماعي، حساب المواطن…"><Input value={f.incomeSources} onChange={set("incomeSources")} /></Field>
         <Field label="السكن"><Select value={f.housing} onChange={set("housing")}><option value="RENT">إيجار</option><option value="OWN">ملك</option><option value="FAMILY">مع الأقارب</option><option value="OTHER">أخرى</option></Select></Field>
         {f.housing === "RENT" && <Field label="الإيجار الشهري"><NumInput value={f.rent} onChange={set("rent")} /></Field>}
@@ -96,7 +97,7 @@ export function ZakatFundPage() {
         {loading && !data ? <Loading /> : data && <div className="card-b print-doc" style={{ maxWidth: "none" }}>
           <div className="head"><div className="row"><img className="ch-print-logo" src={settings?.logoUrl} alt="" /><div><h2>{settings?.associationName}</h2><div className="small">{settings?.licenseNo && `ترخيص رقم ${settings.licenseNo}`}</div></div></div><div style={{ textAlign: "left" }}><h3>كشف صندوق الزكاة</h3><div className="small">من {fmtDate(data.from)} إلى {fmtDate(data.to)}</div></div></div>
           <div className="mini-kpis mb"><div><span>رصيد أول الفترة</span><b><Money v={data.opening} /></b></div><div><span>الزكاة المحصّلة ({data.receipts} سند)</span><b className="pos-val"><Money v={data.received} /></b></div><div><span>الزكاة المصروفة</span><b className="neg-val"><Money v={data.distributed} /></b></div><div><span>رصيد آخر الفترة</span><b><Money v={data.closing} /></b></div></div>
-          <div className={"alert small " + (data.amilinPct > data.amilinCapPct ? "warn" : "info")}>حصة «العاملين عليها» {data.amilinPct}% من الزكاة المحصّلة في الفترة (السقف {data.amilinCapPct}%). رصيد الصندوق المتاح حالياً للصرف: <b>{money(data.totalAvailable)}</b> ر.س.</div>
+          <div className={"alert small " + (data.amilinPct > data.amilinCapPct ? "warn" : "info")}>حصة «العاملين عليها» {data.amilinPct}% من الزكاة المحصّلة في الفترة (السقف {data.amilinCapPct}%). رصيد الصندوق المتاح حالياً للصرف: <b>{money(data.totalAvailable)}</b> {CUR()}.</div>
           <h4 style={{ margin: "8px 0" }}>المصروف حسب مصارف الزكاة الثمانية (التوبة: 60)</h4>
           <div className="table-wrap"><table className="tbl compact"><thead><tr><th>المصرف</th><th className="n">السندات</th><th className="n">المستفيدون</th><th className="n">المبلغ</th><th className="n">النسبة</th></tr></thead>
             <tbody>{data.rows.map((r: any) => <tr key={r.key} className={r.amount ? "" : "muted"}><td>{r.category}</td><td className="n">{r.count}</td><td className="n">{r.people}</td><td className="n"><Money v={r.amount} /></td><td className="n">{r.pct}%</td></tr>)}</tbody>
@@ -109,8 +110,8 @@ export function ZakatFundPage() {
       </div>
       {pol && <div className="card no-print"><div className="card-h"><h3>⚙ سياسة الزكاة والمساعدات</h3></div><div className="card-b">
         <div className="grid c3">
-          <Field label="حد الفقير — نصيب الفرد الشهري (ريال)"><NumInput disabled={!can("settings.write")} value={pol.faqirLine} onChange={(e) => setPol({ ...pol, faqirLine: Number(e.target.value) })} /></Field>
-          <Field label="حد المسكين — نصيب الفرد الشهري (ريال)"><NumInput disabled={!can("settings.write")} value={pol.miskeenLine} onChange={(e) => setPol({ ...pol, miskeenLine: Number(e.target.value) })} /></Field>
+          <Field label={`حد الفقير — نصيب الفرد الشهري (${CFG.words.one})`}><NumInput disabled={!can("settings.write")} value={pol.faqirLine} onChange={(e) => setPol({ ...pol, faqirLine: Number(e.target.value) })} /></Field>
+          <Field label={`حد المسكين — نصيب الفرد الشهري (${CFG.words.one})`}><NumInput disabled={!can("settings.write")} value={pol.miskeenLine} onChange={(e) => setPol({ ...pol, miskeenLine: Number(e.target.value) })} /></Field>
           <Field label="سقف «العاملين عليها» من زكاة السنة %" hint="0 = بلا سقف؛ الافتراضي الثُمن 12.5%"><NumInput disabled={!can("settings.write")} value={pol.amilinCapPct} onChange={(e) => setPol({ ...pol, amilinCapPct: Number(e.target.value) })} /></Field>
           <Field label="تنبيه تكرار الصرف خلال (يوم)"><NumInput disabled={!can("settings.write")} value={pol.aidCooldownDays} onChange={(e) => setPol({ ...pol, aidCooldownDays: Number(e.target.value) })} /></Field>
           <Field label="صلاحية دراسة الحالة (يوم)"><NumInput disabled={!can("settings.write")} value={pol.caseValidityDays} onChange={(e) => setPol({ ...pol, caseValidityDays: Number(e.target.value) })} /></Field>

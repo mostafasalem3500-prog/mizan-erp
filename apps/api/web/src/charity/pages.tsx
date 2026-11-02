@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Charity interface screens. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -170,7 +171,7 @@ export function ReceiptsPage() {
               <td><Badge s={r.status} map={DOC_ST} /></td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨 طباعة</button>
-                {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ريال (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
+                {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ${CFG.words.one} (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
                 {can("payments.write") && r.status === "POSTED" && <button className="btn sm ghost" disabled={busy} onClick={() => { const why = window.prompt(`سبب إلغاء السند ${r.number}؟ (سيُعكس القيد)`); if (why !== null) run(async () => { await api(`/charity/receipts/${r.id}/cancel`, { body: { reason: why } }); reload(); }, "تم الإلغاء وعكس القيد"); }}>إلغاء</button>}
               </td>
             </tr>))}
@@ -209,7 +210,7 @@ function ReceiptModal({ onClose }: { onClose: (saved?: any) => void }) {
         <Field label="الجوال"><Input value={f.payerPhone} onChange={set("payerPhone")} dir="ltr" /></Field>
         <Field label="الغرض / وذلك عن" span2><Input value={f.purpose} onChange={set("purpose")} /></Field>
         <Field label=" "><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={f.restricted || !!proj?.restricted} disabled={!!proj?.restricted} onChange={set("restricted")} />تبرع مقيد بغرض محدد</label></Field>
-        <Field label="المبلغ (ريال)"><NumInput value={f.amount} onChange={set("amount")} /></Field>
+        <Field label={`المبلغ (${CFG.words.one})`}><NumInput value={f.amount} onChange={set("amount")} /></Field>
         <Field label="المبلغ كتابةً" span2><div className="input" style={{ background: "var(--surface-2)", minHeight: 36 }}>{words(f.amount)}</div></Field>
         <Field label="طريقة الاستلام"><MapSelect map={METHOD} value={f.method} onChange={set("method")} /></Field>
         <Field label="إلى حساب (الصندوق / البنك)" hint="فارغ = الصندوق الرئيسي للنقدي والبنك الافتراضي لغيره"><Picker value={cash} onChange={setCash} fetcher={cashFetcher} label={acLabel} /></Field>
@@ -339,7 +340,7 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
         {f.fund === "ZAKAT" && <div className="alert info small" style={{ gridColumn: "1 / -1", margin: 0 }}>الزكاة تُصرف في مصارفها الثمانية فقط ولا تتجاوز المحصّل منها{f.zakatCategory === "AMILIN" ? ` — حصة «العاملين عليها» بحد أقصى ${zmeta.data?.policy?.amilinCapPct ?? 12.5}% من زكاة السنة` : " — للمستفيدين فقط"}.{cs ? ` دراسة الحالة ${cs.number}: ${cs.verdict === "FAQIR" ? "فقير" : cs.verdict === "MISKEEN" ? "مسكين" : "غير مستحق للزكاة"} (نصيب الفرد ${money(cs.perCapita)}، الأولوية ${cs.score}/100)${cs.validUntil ? ` — سارية حتى ${fmtDate(cs.validUntil)}` : ""}.` : ""}</div>}
         {needOverride && <Field label="مبرر الاستثناء المعتمد من اللجنة (إلزامي)" span3 hint={!cs ? "لا توجد دراسة حالة للمستفيد — سجّلها من سجل المستفيدين أو اكتب مبرر الاستثناء" : "دراسة الحالة لا تؤهله للزكاة أو منتهية"}><Input value={f.eligibilityOverride || ""} onChange={set("eligibilityOverride")} placeholder="مثال: قرار لجنة المساعدات رقم ... لظرف طارئ" /></Field>}
         {hist.data?.warning && <div className="alert warn small" style={{ gridColumn: "1 / -1", margin: 0 }}>⚠ {hist.data.warning}. إجمالي ما صُرف له هذا العام {money(hist.data.yearTotal)} ({hist.data.yearCount} سند).</div>}
-        <Field label="المبلغ (ريال)"><NumInput value={f.amount} onChange={set("amount")} /></Field>
+        <Field label={`المبلغ (${CFG.words.one})`}><NumInput value={f.amount} onChange={set("amount")} /></Field>
         <Field label="المبلغ كتابةً" span2><div className="input" style={{ background: "var(--surface-2)", minHeight: 36 }}>{words(f.amount)}</div></Field>
         <Field label="سبب الصرف" span2><Input value={f.reason} onChange={set("reason")} /></Field>
         <Field label="الإدارة / القسم"><Input value={f.department} onChange={set("department")} /></Field>

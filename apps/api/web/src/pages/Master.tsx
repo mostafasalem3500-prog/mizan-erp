@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 import { PartnerStatement } from "./Statements";
 import { ProductImagesModal } from "./ProductImages";
 import React, { useEffect, useMemo, useState } from "react";
@@ -75,8 +76,9 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
   const toast = useToast();
   const { data: currencies } = useFetch("/currencies");
   const { data: priceLists } = useFetch("/price-lists");
-  const whtTypes = useFetch<any>(role === "SUPPLIER" || p.isSupplier ? "/tax/wht/types" : null);
-  const [f, setF] = useState<any>({ kind: "COMPANY", country: "SA", paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, ...p });
+  const EG = CFG.country === "EG";
+  const whtTypes = useFetch<any>(role === "SUPPLIER" || p.isSupplier ? (EG ? "/tax/eg-wht/types" : "/tax/wht/types") : null);
+  const [f, setF] = useState<any>({ kind: "COMPANY", country: CFG.country, paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, ...p });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
     <Modal title={p.id ? `تعديل: ${p.name}` : role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"} onClose={() => onClose()} footer={<>
@@ -86,7 +88,7 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         <Field label="الاسم" span2><Input autoFocus value={f.name || ""} onChange={s("name")} /></Field>
         <Field label="النوع"><Select value={f.kind} onChange={s("kind")}><option value="COMPANY">منشأة</option><option value="INDIVIDUAL">فرد</option></Select></Field>
         <Field label="الكود (تلقائي)"><Input value={f.code || ""} onChange={s("code")} dir="ltr" /></Field>
-        <Field label="الرقم الضريبي" hint="15 رقماً يبدأ وينتهي بـ 3"><Input value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" /></Field>
+        <Field label={CFG.taxIdLabel} hint={EG ? "9 أرقام للشركات، أو الرقم القومي 14 رقماً للأفراد" : CFG.taxIdHint}><Input value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" /></Field>
         <Field label="السجل التجاري"><Input value={f.crNumber || ""} onChange={s("crNumber")} dir="ltr" /></Field>
         <Field label="الجوال"><Input value={f.phone || ""} onChange={s("phone")} dir="ltr" /></Field>
         <Field label="البريد"><Input value={f.email || ""} onChange={s("email")} dir="ltr" /></Field>
@@ -95,14 +97,18 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         <Field label="الحي"><Input value={f.district || ""} onChange={s("district")} /></Field>
         <Field label="المدينة"><Input value={f.city || ""} onChange={s("city")} /></Field>
         <Field label="الرمز البريدي"><Input value={f.postalCode || ""} onChange={s("postalCode")} dir="ltr" /></Field>
-        <Field label="الدولة"><Input value={f.country || "SA"} onChange={s("country")} dir="ltr" /></Field>
+        <Field label="الدولة"><Input value={f.country || CFG.country} onChange={s("country")} dir="ltr" /></Field>
+        {EG && <Field label="المحافظة"><Input value={f.governate || ""} onChange={s("governate")} list="eg-gov" /><datalist id="eg-gov">{["القاهرة", "الجيزة", "الإسكندرية", "القليوبية", "الشرقية", "الدقهلية", "الغربية", "المنوفية", "البحيرة", "دمياط", "بورسعيد", "الإسماعيلية", "السويس", "أسيوط", "سوهاج", "قنا", "الأقصر", "أسوان"].map((g) => <option key={g} value={g} />)}</datalist></Field>}
+        {EG && <Field label="نوع المتعامل في الفاتورة الإلكترونية"><Select value={f.etaType || ""} onChange={s("etaType")}><option value="">تلقائي (من البيانات)</option><option value="B">شركة / منشأة (B)</option><option value="P">شخص طبيعي (P)</option><option value="F">أجنبي (F)</option></Select></Field>}
+        {EG && <Field label="الرقم القومي / رقم الهوية" hint="مطلوب للأفراد في فواتير 50,000 جنيه فأكثر"><Input value={f.idNumber || ""} onChange={s("idNumber")} dir="ltr" /></Field>}
         <Field label="أيام السداد (0 = نقدي)"><NumInput value={f.paymentTerms} onChange={s("paymentTerms")} /></Field>
         <Field label="حد الائتمان"><NumInput value={f.creditLimit} onChange={s("creditLimit")} /></Field>
-        <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || "SAR"} onChange={s("currency")}>{(currencies || [{ code: "SAR", nameAr: "ريال سعودي" }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
+        <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || CFG.currency} onChange={s("currency")}>{(currencies || [{ code: CFG.currency, nameAr: CFG.currencyAr }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
         <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
         <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>
-        {!!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country })} /> مورد غير مقيم في المملكة</label></Field>}
-        {!!f.isSupplier && !!f.isNonResident && <Field label="نوع الدفعات الافتراضي (نسبة الاستقطاع)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— يُحدد في كل سند —</option>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>}
+        {EG && !!f.isSupplier && <Field label="الخصم تحت حساب الضريبة (الافتراضي في سندات الصرف)" hint="يُخصم من المدفوعات للمورد ويورَّد بنموذج 41 (للتعاملات فوق 300 جنيه)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— لا يُخصم —</option>{Object.entries(whtTypes.data?.types || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(1).replace(/\.0$/, "")}%</option>)}</Select></Field>}
+        {!EG && !!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country })} /> مورد غير مقيم في المملكة</label></Field>}
+        {!EG && !!f.isSupplier && !!f.isNonResident && <Field label="نوع الدفعات الافتراضي (نسبة الاستقطاع)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— يُحدد في كل سند —</option>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>}
         <Field label="ملاحظات" span3><textarea className="input" value={f.notes || ""} onChange={s("notes")} /></Field>
       </div>
     </Modal>
@@ -207,6 +213,9 @@ export function ProductEditor({ p, categories, onClose }: { p: any; categories: 
         <Field label="سعر البيع"><NumInput value={f.salePrice} onChange={s("salePrice")} /></Field>
         <Field label="سعر الشراء الافتراضي"><NumInput value={f.purchasePrice} onChange={s("purchasePrice")} /></Field>
         <Field label="الضريبة"><Select value={f.taxCode} onChange={s("taxCode")}>{["S", "Z", "E", "O"].map((t) => <option key={t} value={t}>{TAX_AR[t]}</option>)}</Select></Field>
+        {CFG.country === "EG" && <Field label="نوع كود الصنف (منظومة الضرائب)" hint="EGS: كود داخلي مسجل على بوابة المصلحة · GS1: باركود عالمي"><Select value={f.etaItemType || "EGS"} onChange={s("etaItemType")}><option value="EGS">EGS</option><option value="GS1">GS1</option></Select></Field>}
+        {CFG.country === "EG" && <Field label="كود الصنف في المنظومة" hint={(f.etaItemType || "EGS") === "EGS" ? "فارغ = EG-<رقم التسجيل>-<رمز الصنف> (يجب تسجيله على البوابة)" : "رقم GS1 (8–14 رقماً)"}><Input value={f.etaItemCode || ""} onChange={s("etaItemCode")} dir="ltr" /></Field>}
+        {CFG.country === "EG" && <Field label="وحدة القياس في المنظومة"><Select value={f.etaUnitType || "EA"} onChange={s("etaUnitType")}>{[["EA", "قطعة/وحدة"], ["KGM", "كيلوجرام"], ["GRM", "جرام"], ["LTR", "لتر"], ["MTR", "متر"], ["MTK", "متر مربع"], ["BOX", "علبة/كرتونة"], ["PK", "عبوة"], ["HUR", "ساعة"], ["DAY", "يوم"], ["MON", "شهر"], ["SET", "طقم"]].map(([k, v]) => <option key={k} value={k}>{k} — {v}</option>)}</Select></Field>}
         {f.type === "STOCK" && <Field label="حد إعادة الطلب"><NumInput value={f.reorderLevel} onChange={s("reorderLevel")} /></Field>}
         {f.type === "STOCK" && <Field label="الدفعات والصلاحية" hint="يُطلب رقم الدفعة وتاريخ الانتهاء عند الشراء، ويُصرف الأقرب انتهاءً أولاً (FEFO)"><label className="check"><input type="checkbox" checked={!!f.trackLots} onChange={s("trackLots")} /> تتبع الدفعات وتواريخ الانتهاء</label></Field>}
         {f.type === "STOCK" && f.trackLots && <Field label="مدة الصلاحية الافتراضية (يوم)" hint="تُستخدم لحساب تاريخ الانتهاء إن لم يُدخل عند الشراء"><NumInput value={f.shelfLifeDays || ""} onChange={s("shelfLifeDays")} /></Field>}

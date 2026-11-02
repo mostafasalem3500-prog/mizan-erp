@@ -1,3 +1,4 @@
+import { CUR, CFG } from "../shared/country";
 /** Round 25 — financial analysis (program) and governance indicators (association). */
 import React, { useState } from "react";
 import { useFetch, Money, money, Loading, Empty, BarChart, PeriodFilter, PrintBtn, exportExcel, today, useCompanyContext } from "../lib";
@@ -11,7 +12,7 @@ export function fmtVal(v: number | null, unit: string) {
   if (unit === "%") return `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
   if (unit === "days") return `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })} يوم`;
   if (unit === "months") return `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })} شهر`;
-  if (unit === "SAR") return `${money(v)} ر.س`;
+  if (unit === CFG.currency) return `${money(v)} ${CUR()}`;
   return v.toLocaleString("en-US", { maximumFractionDigits: 3 });
 }
 
@@ -97,7 +98,7 @@ export function FinancialAnalysisPage() {
             {d.breakEven.breakEvenSales === null ? <div className="muted small">لا يمكن حسابها — هامش المساهمة غير موجب أو لا توجد مبيعات</div> : <>
               <div className="stat-list"><div className="item"><span>المصروفات الثابتة (التشغيلية)</span><b><Money v={d.breakEven.fixedCosts} /></b></div><div className="item"><span>نسبة هامش المساهمة</span><b>{d.breakEven.cmRatio}%</b></div><div className="item"><span>مبيعات التعادل للفترة</span><b><Money v={d.breakEven.breakEvenSales} /></b></div><div className="item"><span>مبيعات التعادل الشهرية</span><b><Money v={d.breakEven.breakEvenMonthly} /></b></div></div>
               <div className="fa-bar mt"><div style={{ width: `${Math.min(100, (d.breakEven.breakEvenSales / Math.max(d.summary.netSales, d.breakEven.breakEvenSales)) * 100)}%` }} /><span style={{ insetInlineStart: `${Math.min(100, (d.summary.netSales / Math.max(d.summary.netSales, d.breakEven.breakEvenSales)) * 100)}%` }} /></div>
-              <div className={"small mt " + (d.breakEven.achieved ? "pos-val" : "neg-val")}>{d.breakEven.achieved ? `✓ هامش الأمان ${d.breakEven.marginOfSafety}% من المبيعات` : `المبيعات أقل من التعادل بـ ${money(d.breakEven.breakEvenSales - d.summary.netSales)} ر.س`}</div>
+              <div className={"small mt " + (d.breakEven.achieved ? "pos-val" : "neg-val")}>{d.breakEven.achieved ? `✓ هامش الأمان ${d.breakEven.marginOfSafety}% من المبيعات` : `المبيعات أقل من التعادل بـ ${money(d.breakEven.breakEvenSales - d.summary.netSales)} ${CUR()}`}</div>
             </>}
             <div className="small muted mt">التكاليف المتغيرة = تكلفة المبيعات؛ الثابتة = المصروفات التشغيلية.</div>
           </div></div>

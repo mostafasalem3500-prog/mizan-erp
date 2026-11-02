@@ -5,6 +5,7 @@
  *   • الاسترداد    : سند صرف من حساب الإيراد/الحساب المختار إلى الصندوق/البنك
  */
 import { Db } from "../db/pool";
+import { VAT_F } from "../lib/country";
 import { bad, r2, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
 import { ensureCharity, acct, project, createDisbursement } from "./charity";
@@ -170,7 +171,7 @@ export async function saveForm(t: Db, companyId: string, user: string, kind: str
     d0.items = cleanItems(d0.items);
     if (!d0.items.length) throw bad("أضف صنفاً أو خدمة واحدة على الأقل");
     d0.subtotal = r2(d0.items.reduce((s: number, i: any) => s + i.total, 0));
-    d0.vat = d0.vatIncluded === false ? 0 : r2(num(d0.vat ?? (d0.applyVat ? d0.subtotal * 0.15 : 0)));
+    d0.vat = d0.vatIncluded === false ? 0 : r2(num(d0.vat ?? (d0.applyVat ? d0.subtotal * VAT_F : 0)));
     d0.total = r2(d0.subtotal + d0.vat);
     amount = d0.total; party = String(d0.requester || user).trim();
     if (!String(d0.purpose || "").trim()) throw bad("الغرض من الشراء مطلوب");

@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Report center: one generic renderer for every module report — filter bar built from the catalog, KPIs, chart, sortable table, Excel/print, saved presets, URL-synced filters. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
@@ -12,7 +13,7 @@ const OPTS: Record<string, [string, string][]> = {
   channel: [["BACKOFFICE", "المكتب"], ["POS", "نقطة البيع"], ["SALLA", "سلة"], ["ZID", "زد"], ["API", "API"]],
   zatca: [["NOT_REQUIRED", "مرحلة أولى"], ["PENDING", "بانتظار الإرسال"], ["REPORTED", "مُبلَّغ"], ["CLEARED", "معتمد"], ["WARNING", "بتحذير"], ["REJECTED", "مرفوض"], ["FAILED", "فشل"]],
   kind: [["QUOTATION", "عرض سعر"], ["ORDER", "أمر"], ["INVOICE", "فاتورة"], ["CREDIT_NOTE", "إشعار دائن"], ["DEBIT_NOTE", "إشعار مدين"]],
-  taxCode: [["S", "خاضع 15%"], ["Z", "نسبة صفر"], ["X", "صادرات"], ["E", "معفى"], ["O", "خارج النطاق"], ["IM", "استيراد"], ["RC", "احتساب عكسي"]],
+  taxCode: [["S", `خاضع ${CFG.vatRate}%`], ["Z", "نسبة صفر"], ["X", "صادرات"], ["E", "معفى"], ["O", "خارج النطاق"], ["IM", "استيراد"], ["RC", "احتساب عكسي"]],
   accountType: [["ASSET", "أصول"], ["LIABILITY", "خصوم"], ["EQUITY", "حقوق ملكية"], ["REVENUE", "إيرادات"], ["EXPENSE", "مصروفات"]],
   subtype: [["CASH", "نقدية"], ["BANK", "بنوك"], ["RECEIVABLE", "ذمم مدينة"], ["INVENTORY", "مخزون"], ["CURRENT_ASSET", "أصول متداولة أخرى"], ["FIXED_ASSET", "أصول ثابتة"], ["ACC_DEPRECIATION", "مجمع إهلاك"], ["PAYABLE", "ذمم دائنة"], ["TAX", "ضرائب وزكاة"], ["CURRENT_LIABILITY", "خصوم متداولة"], ["LONG_TERM_LIABILITY", "خصوم طويلة الأجل"], ["CAPITAL", "رأس المال"], ["RETAINED", "أرباح مبقاة"], ["SALES", "مبيعات"], ["SALES_RETURNS", "مرتجعات مبيعات"], ["OTHER_INCOME", "إيرادات أخرى"], ["COGS", "تكلفة المبيعات"], ["EXPENSE", "مصروفات تشغيلية"], ["SELLING_EXPENSE", "مصروفات بيعية"], ["OTHER_EXPENSE", "مصروفات أخرى"], ["ZAKAT", "زكاة"]],
   entryType: [["MANUAL", "قيد يدوي"], ["OPENING", "افتتاحي"], ["SALES", "مبيعات"], ["SALES_RETURN", "مرتجع مبيعات"], ["PURCHASE", "مشتريات"], ["PURCHASE_RETURN", "مرتجع مشتريات"], ["RECEIPT", "سند قبض"], ["PAYMENT", "سند صرف"], ["EXPENSE", "مصروف"], ["POS", "نقاط بيع"], ["POS_CLOSE", "إغلاق وردية"], ["STOCK", "مخزون"], ["DEPRECIATION", "إهلاك"], ["ASSET", "أصول"], ["VAT_SETTLEMENT", "تسوية ضريبة"], ["REVERSAL", "عكسي"], ["CHEQUE", "شيكات"], ["PAYROLL", "رواتب"], ["CLOSING", "إقفال"]],

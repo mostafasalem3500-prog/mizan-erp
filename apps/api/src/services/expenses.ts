@@ -1,4 +1,5 @@
 import { Db } from "../db/pool";
+import { VAT_F } from "../lib/country";
 import { bad, conflict, r2, D, num, isDate, today, calcLine, TAX_CODES } from "../lib/core";
 import { post, nextNumber, reverse } from "../accounting/engine";
 
@@ -35,7 +36,7 @@ export async function createExpense(t: Db, companyId: string, user: string, e: E
   const lines: any[] = [{ account: acc.id, debit: c.net, costCenterId: e.costCenterId, description: e.description }];
   if (c.vat) lines.push({ key: "VAT_IN", debit: c.vat, description: `ضريبة مدخلات ${number}` });
   if (taxCode === "RC") {
-    const rc = r2(D(c.net).times(0.15));
+    const rc = r2(D(c.net).times(VAT_F));
     lines.push({ key: "VAT_IN", debit: rc, description: `احتساب عكسي ${number}` }, { key: "VAT_OUT", credit: rc, description: `احتساب عكسي ${number}` });
   }
   if (pay) lines.push({ account: pay.id, credit: c.total, description: memo });

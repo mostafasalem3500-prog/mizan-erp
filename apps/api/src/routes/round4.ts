@@ -5,6 +5,8 @@ import { h, bad, req as need, num, isDate, r2 } from "../lib/core";
 import { authenticate, perm, cid, actor, p } from "../lib/auth";
 import { audit } from "./master";
 import { createRun, postRun, payRun, deleteRun, wpsCsv, computeLine, GOSI } from "../services/payroll";
+import { IS_EG } from "../lib/country";
+import { computeLineEG } from "../services/egypt";
 import { loanInstallments } from "../services/hr";
 
 export const r4 = Router();
@@ -29,7 +31,7 @@ r4.get("/payroll", perm("accounting.read"), h(async (req) => ({ runs: await db.r
 r4.get("/payroll/preview", perm("accounting.read"), h(async (req) => {
   const emps = await db.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [cid(req)]);
   const loans = await loanInstallments(db, cid(req), String(req.query.period || ""));
-  return emps.map((e) => computeLine(e, {}, loans[e.id] || []));
+  return emps.map((e) => (IS_EG ? computeLineEG : computeLine)(e, {}, loans[e.id] || []));
 }));
 r4.post("/payroll", perm("accounting.write"), h(async (req) => { const r = await tx((t) => createRun(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "payroll", r.id, { period: r.period, net: r.totalNet }); return r; }));
 r4.post("/payroll/:id/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => postRun(t, cid(req), actor(req), p(req).id)); await audit(req, "POST", "payroll", r.id); return r; }));

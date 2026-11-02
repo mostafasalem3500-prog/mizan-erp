@@ -1,3 +1,4 @@
+import { CUR, CFG } from "../shared/country";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
@@ -63,11 +64,11 @@ export function PosPage() {
   const totals = useMemo(() => {
     let net = 0, vat = 0;
     for (const l of cart) {
-      const rate = l.product.taxCode === "S" ? 15 : 0;
+      const rate = l.product.taxCode === "S" ? CFG.vatRate : 0;
       const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100;
       const gross = l.qty * l.unitPrice * (1 - disc / 100);
       let n = gross, v = gross * rate / 100;
-      if (incl && rate) { n = gross / 1.15; v = gross - n; }
+      if (incl && rate) { n = gross / (1 + rate / 100); v = gross - n; }
       net += Math.round(n * 100) / 100; vat += Math.round(v * 100) / 100;
     }
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0) };
@@ -108,7 +109,7 @@ export function PosPage() {
   }, []);
   /** builds a local invoice-like object so the receipt can be shown/printed while offline */
   const localReceipt = (body: any, lines: CartLine[], tenders: any[]) => {
-    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? 15 : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
+    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? CFG.vatRate : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
     const taxable = rows.reduce((a, r) => a + r.netAmount, 0), vatTotal = rows.reduce((a, r) => a + r.vatAmount, 0);
     return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? taxable + vatTotal })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
   };
@@ -142,7 +143,7 @@ export function PosPage() {
         <div className="row mb"><button className="btn sm" onClick={() => nav("/")}>← الرئيسية</button><h2>فتح وردية نقطة البيع</h2></div>
         <p className="muted">الكاشير: <b>{me.user.fullName}</b> · المنشأة: {me.company.nameAr}</p>
         {(posWh.data?.length || 0) > 1 && <Field label="المستودع / الفرع"><Select value={posWhId} onChange={(e) => setPosWhId(e.target.value)}><option value="">تلقائي{posWh.data![0]?.mine ? " — مستودع فرعي" : ""}</option>{posWh.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
-        <Field label="النقدية الافتتاحية في الدرج (ر.س)"><NumInput autoFocus value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" /></Field>
+        <Field label={`النقدية الافتتاحية في الدرج (${CUR()})`}><NumInput autoFocus value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" /></Field>
         <button className="btn primary lg block mt" disabled={busy} onClick={() => run(async () => { await api("/pos/session/open", { body: { openingCash: Number(openCash || 0), warehouseId: posWhId || undefined } }); sess.reload(); }, "تم فتح الوردية")}>فتح الوردية وبدء البيع</button>
         <div className="hint mt">لا يمكن البيع بدون وردية مفتوحة. ستُحسب النقدية المتوقعة عند الإغلاق تلقائياً.</div>
       </div></div></div></div>
@@ -214,7 +215,7 @@ export function PosPage() {
         <div className="totals">
           <div className="t"><span>الأصناف</span><span className="num">{totals.count}</span></div>
           <div className="t"><span>قبل الضريبة</span><span className="num">{money(totals.net)}</span></div>
-          <div className="t"><span>الضريبة 15%</span><span className="num">{money(totals.vat)}</span></div>
+          <div className="t"><span>الضريبة {CFG.vatRate}%</span><span className="num">{money(totals.vat)}</span></div>
           <div className="t"><span>خصم على الفاتورة %</span><input className="input num" style={{ width: 70, minHeight: 28, padding: "2px 6px" }} value={ticketDisc} onChange={(e) => setTicketDisc(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} /></div>
           <div className="t grand"><span>الإجمالي</span><span className="num">{money(totals.total)}</span></div>
         </div>
@@ -265,7 +266,7 @@ function PayModal({ total, partner, onClose, onPay }: { total: number; partner: 
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
   const quick = [total, Math.ceil(total / 10) * 10, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100].filter((v, i, a) => a.indexOf(v) === i);
   return (
-    <Modal narrow title={<>الدفع — <span className="num">{money(total)}</span> ر.س</>} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary lg" disabled={method === "MIXED" && short > 0 || (method === "CREDIT" && !partner)} onClick={submit}>تأكيد الدفع (Enter)</button></>}>
+    <Modal narrow title={<>الدفع — <span className="num">{money(total)}</span> {CUR()}</>} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary lg" disabled={method === "MIXED" && short > 0 || (method === "CREDIT" && !partner)} onClick={submit}>تأكيد الدفع (Enter)</button></>}>
       <div className="pay">
         <div className="methods">
           {(["CASH", "CARD", "MIXED", "CREDIT"] as const).map((m) => <button key={m} className={method === m ? "active" : ""} onClick={() => setMethod(m)}>{m === "MIXED" ? "مختلط" : METHOD_AR[m]}</button>)}

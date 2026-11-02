@@ -3,6 +3,7 @@
  * sub-group, 6-digit posting account). `key` marks accounts the posting engine
  * resolves by role, so users may rename/renumber accounts freely.
  */
+import { IS_EG } from "../lib/country";
 type Row = [code: string, nameAr: string, nameEn: string, subtype: string, opts?: { key?: string; cash?: boolean; system?: boolean }];
 
 export const SAUDI_COA: Row[] = [
@@ -119,6 +120,32 @@ export const SAUDI_COA: Row[] = [
   ["5404", "خسائر فروق عملة", "FX Losses", "OTHER_EXPENSE", { key: "FX_LOSS" }],
 ];
 
+/** Egypt edition: same structure and system keys (so the posting engine is unchanged), Egyptian names,
+ *  plus the accounts Egyptian taxes need (withholding credits, salary tax, martyrs fund, income tax). */
+const EG_RENAME: Record<string, [string, string]> = {
+  "110201": ["البنك الأهلي المصري", "National Bank of Egypt"], "110202": ["بنك مصر", "Banque Misr"],
+  "110203": ["حساب تسوية البطاقات (ميزة/فيزا)", "Card Clearing (Meeza/Visa)"], "110204": ["حساب تسوية المتاجر الإلكترونية", "E-store Clearing"],
+  "110502": ["ضريبة القيمة المضافة - المدخلات (مشتريات)", "Input VAT"],
+  "2102": ["مصلحة الضرائب - أرصدة دائنة", "Tax Authority Payables"],
+  "210201": ["ضريبة القيمة المضافة - المخرجات (مبيعات)", "Output VAT"], "210202": ["ضريبة القيمة المضافة - مستحقة للمصلحة", "VAT Payable"],
+  "210204": ["ضريبة قيمة مضافة مستحقة للجمارك", "Customs VAT Payable"], "210205": ["ضرائب الخصم تحت حساب الضريبة - مستحقة للمصلحة", "Withholding Tax Payable (Form 41)"],
+  "210302": ["الهيئة القومية للتأمين الاجتماعي - مستحق", "Social Insurance Payable"],
+  "3102": ["الاحتياطي القانوني", "Legal Reserve"],
+  "5203": ["حصة صاحب العمل في التأمينات الاجتماعية", "Employer Social Insurance"],
+  "5217": ["ضريبة خصم تتحملها المنشأة", "Withholding Tax Borne"],
+};
+export const EGYPT_COA: Row[] = SAUDI_COA.flatMap((r): Row[] => {
+  const [code, nameAr, nameEn, subtype, opts] = r;
+  if (code === "210203") return [["210203", "ضريبة الدخل المستحقة (أشخاص اعتبارية)", "Corporate Income Tax Payable", "TAX", { key: "INCOME_TAX_PAYABLE" }]];
+  if (code === "5401") return [["5401", "ضريبة الدخل على الأرباح", "Income Tax Expense", "ZAKAT", { key: "INCOME_TAX" }]];
+  const rn = EG_RENAME[code];
+  const row: Row = [code, rn ? rn[0] : nameAr, rn ? rn[1] : nameEn, subtype, opts];
+  if (code === "110504") return [row, ["110505", "ضرائب مخصومة منا تحت حساب الضريبة (لدى العملاء)", "Withholding Tax Credits", "CURRENT_ASSET", { key: "EG_WHT_CREDIT" }], ["110506", "ضرائب دخل مسددة مقدماً (دفعات مقدمة)", "Advance Income Tax Payments", "CURRENT_ASSET", { key: "INCOME_TAX_ADVANCE" }]];
+  if (code === "210304") return [row, ["210305", "ضريبة كسب العمل المستحقة", "Payroll Tax Payable", "CURRENT_LIABILITY", { key: "SALARY_TAX_PAYABLE" }], ["210306", "صندوق تكريم الشهداء - مستحق", "Martyrs Fund Payable", "CURRENT_LIABILITY", { key: "MARTYRS_PAYABLE" }]];
+  return [row];
+});
+export const COUNTRY_COA = (eg: boolean) => (eg ? EGYPT_COA : SAUDI_COA);
+
 export const TYPE_BY_CLASS: Record<string, string> = { "1": "ASSET", "2": "LIABILITY", "3": "EQUITY", "4": "REVENUE", "5": "EXPENSE" };
 
 /** Natural balance side for display: assets & expenses are debit-natured. */
@@ -126,11 +153,11 @@ export const debitNature = (type: string) => type === "ASSET" || type === "EXPEN
 
 export const SUBTYPE_AR: Record<string, string> = {
   CASH: "نقدية", BANK: "بنوك", RECEIVABLE: "ذمم مدينة", INVENTORY: "مخزون", CURRENT_ASSET: "أصول متداولة أخرى",
-  FIXED_ASSET: "أصول ثابتة", ACC_DEPRECIATION: "مجمع إهلاك", PAYABLE: "ذمم دائنة", TAX: "ضرائب وزكاة",
+  FIXED_ASSET: "أصول ثابتة", ACC_DEPRECIATION: "مجمع إهلاك", PAYABLE: "ذمم دائنة", TAX: IS_EG ? "ضرائب مستحقة" : "ضرائب وزكاة",
   CURRENT_LIABILITY: "خصوم متداولة أخرى", LONG_TERM_LIABILITY: "خصوم طويلة الأجل", CAPITAL: "رأس المال",
   RETAINED: "أرباح مبقاة", EQUITY: "حقوق ملكية أخرى", SALES: "مبيعات", SALES_RETURNS: "مردودات مبيعات",
   OTHER_INCOME: "إيرادات أخرى", COGS: "تكلفة مبيعات", EXPENSE: "مصروفات عمومية وإدارية",
-  SELLING_EXPENSE: "مصروفات بيع وتسويق", OTHER_EXPENSE: "مصروفات أخرى", ZAKAT: "زكاة", ASSET: "أصول",
+  SELLING_EXPENSE: "مصروفات بيع وتسويق", OTHER_EXPENSE: "مصروفات أخرى", ZAKAT: IS_EG ? "ضرائب الدخل" : "زكاة", ASSET: "أصول",
 };
 
 /** Which statement classifications are valid for each account type (an account outside its type's list

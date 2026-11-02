@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { pool } from "./pool";
+import { BASE_CURRENCY, VAT_RATE, COUNTRY } from "../lib/country";
 
 /** Applies db/migrations/*.sql in order, once each, inside a transaction per file. */
 export async function migrate(): Promise<void> {
@@ -25,6 +26,11 @@ export async function migrate(): Promise<void> {
         throw e;
       }
     }
+    // country edition defaults (idempotent): base currency and standard VAT rate on new rows
+    const cur = BASE_CURRENCY.replace(/[^A-Z]/g, "");
+    for (const tbl of ["companies", "partners", "payments", "invoices", "price_lists"]) await client.query(`ALTER TABLE ${tbl} ALTER COLUMN currency SET DEFAULT '${cur}'`);
+    await client.query(`ALTER TABLE invoice_lines ALTER COLUMN tax_rate SET DEFAULT ${Number(VAT_RATE)}`);
+    for (const tbl of ["companies", "partners"]) await client.query(`ALTER TABLE ${tbl} ALTER COLUMN country SET DEFAULT '${COUNTRY}'`);
   } finally {
     await client.query("SELECT pg_advisory_unlock(727274)").catch(() => undefined);
     client.release();

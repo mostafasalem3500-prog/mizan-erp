@@ -1,4 +1,5 @@
 /** Arabic number-to-words (تفقيط) for SAR amounts: "فقط ألف ومئتان وخمسون ريالاً وخمس وسبعون هللة لا غير" */
+import { CFG } from "./country";
 const ONES = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة", "عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
 const TENS = ["", "", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
 const HUNDREDS = ["", "مائة", "مائتان", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
@@ -46,7 +47,9 @@ export function intToArabic(n: number): string {
   return groups.join(" و");
 }
 
-export function amountToArabicWords(amount: number, currency = "ريال", currencyDual = "ريالان", currencyPlural = "ريالات", currencyAcc = "ريالاً"): string {
+export function amountToArabicWords(amount: number, currency?: string, currencyDual?: string, currencyPlural?: string, currencyAcc?: string): string {
+  const W = CFG.words;
+  currency = currency || W.one; currencyDual = currencyDual || W.two; currencyPlural = currencyPlural || W.plural; currencyAcc = currencyAcc || W.acc;
   const abs = Math.abs(amount);
   const whole = Math.floor(abs + 1e-9);
   const frac = Math.round((abs - whole) * 100);
@@ -59,8 +62,11 @@ export function amountToArabicWords(amount: number, currency = "ريال", curre
   let out = main;
   if (frac) {
     const fr = frac % 100;
-    const sub = frac === 1 ? "هللة واحدة" : frac === 2 ? "هللتان" : `${intToArabic(frac)} ${fr >= 3 && fr <= 10 ? "هللات" : "هللة"}`;
+    const subOne = W.sub === "هللة" ? "هللة واحدة" : `${W.sub} واحد`;
+    const subAcc = W.sub === "هللة" ? "هللة" : `${W.sub}اً`;
+    const sub = frac === 1 ? subOne : frac === 2 ? W.subTwo : `${intToArabic(frac)} ${fr >= 3 && fr <= 10 ? W.subPlural : fr >= 11 ? subAcc : W.sub}`;
     out += ` و${sub}`;
   }
   return `فقط ${out} لا غير${amount < 0 ? " (بالسالب)" : ""}`;
 }
+

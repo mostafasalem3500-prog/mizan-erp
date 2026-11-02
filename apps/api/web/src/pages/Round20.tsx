@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Round 20 screens: product profile, treasury (cash & bank accounts), journal entry page, inventory count sheet & operations summary. */
 import React, { useContext, useMemo, useState } from "react";
 import { ChCtx } from "../charity/CharityApp";
@@ -164,7 +165,7 @@ function TransferModal({ init, accounts, onClose }: { init: any; accounts: any[]
         <Field label="المبلغ"><NumInput value={f.amount} onChange={set("amount")} /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={set("date")} /></Field>
         <Field label="رسوم التحويل البنكية (اختياري)"><NumInput value={f.fee} onChange={set("fee")} /></Field>
-        <Field label=" "><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={f.feeVat} onChange={set("feeVat")} />الرسوم خاضعة لضريبة 15% (مدخلات)</label></Field>
+        <Field label=" "><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={f.feeVat} onChange={set("feeVat")} />الرسوم خاضعة لضريبة {CFG.vatRate}% (مدخلات)</label></Field>
         <Field label="المرجع (رقم الحوالة / الإيداع)"><Input value={f.reference} onChange={set("reference")} dir="ltr" /></Field>
         <Field label="البيان"><Input value={f.memo} onChange={set("memo")} /></Field>
       </div>

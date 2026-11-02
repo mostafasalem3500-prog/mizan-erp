@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 import React, { useEffect, useState } from "react";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState, SearchBox, FilterInfo, useSorted, Th, matches, addMonths } from "../lib";
 import { PartnerStatement } from "./Statements";
@@ -204,7 +205,7 @@ function RecurringForm({ onClose }: { onClose: (s?: boolean) => void }) {
       {kind === "EXPENSE" && <div className="form-grid">
         <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
         <Field label="المبلغ"><NumInput value={exp.amount} onChange={se("amount")} /></Field>
-        <Field label="الضريبة"><Select value={exp.taxCode} onChange={se("taxCode")}><option value="S">خاضع 15%</option><option value="E">معفى</option><option value="O">خارج النطاق</option></Select></Field>
+        <Field label="الضريبة"><Select value={exp.taxCode} onChange={se("taxCode")}><option value="S">خاضع {CFG.vatRate}%</option><option value="E">معفى</option><option value="O">خارج النطاق</option></Select></Field>
         <Field label="البيان" span2><Input value={exp.description} onChange={se("description")} /></Field>
         <Field label="المستفيد"><Input value={exp.payee} onChange={se("payee")} /></Field>
         <Field label="الدفع"><Select value={credit ? "CREDIT" : "NOW"} onChange={(e) => setCredit(e.target.value === "CREDIT")}><option value="NOW">نقدي / بنك</option><option value="CREDIT">آجل على مورد</option></Select></Field>

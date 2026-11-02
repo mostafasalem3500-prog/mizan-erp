@@ -3,6 +3,8 @@
  * and their automatic accounting/inventory effects.
  */
 import { Db } from "../db/pool";
+import { VAT_F, IS_EG } from "../lib/country";
+import { queueDocument } from "../eta/eta";
 import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, isDate, addDays, TAX_CODES, today } from "../lib/core";
 import { currentCtx } from "../lib/context";
 import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
@@ -345,7 +347,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
       } else {
         jl.push({ ...(l.accountId ? { account: l.accountId } : { key: "PURCHASE_EXPENSE" }), [dr]: net, description: l.description } as Line);
       }
-      if (l.taxCode === "RC") rcVat = r2(D(rcVat).plus(D(net).times(0.15)));
+      if (l.taxCode === "RC") rcVat = r2(D(rcVat).plus(D(net).times(VAT_F)));
     }
     const vat = Number(inv.vatTotal);
     if (vat) jl.push({ key: "VAT_IN", [dr]: vat, description: `ضريبة مدخلات ${ref}` } as Line);
@@ -392,7 +394,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     // fully returned
   }
 
-  if (isSale) await stampInvoice(t, company, id);
+  if (isSale) await (IS_EG ? queueDocument(t, company, id) : stampInvoice(t, company, id));
   return getInvoice(t, companyId, id);
 }
 

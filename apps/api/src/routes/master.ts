@@ -1,10 +1,13 @@
 import { Router } from "express";
+import { validTaxId, validPartnerTaxId, TAX_ID_MSG } from "../lib/country";
 import { WHT_TYPES } from "../services/round23";
 import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
 import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppError, today } from "../lib/core";
 import { authenticate, perm, cid, actor, p, ROLES } from "../lib/auth";
 import { TYPE_BY_CLASS, SUBTYPE_AR, SUBTYPES_BY_TYPE, normalizeSubtype } from "../accounting/coa";
+import { BASE_CURRENCY, IS_EG, COUNTRY } from "../lib/country";
+import { EG_WHT_TYPES } from "../services/egypt";
 const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 
 export const master = Router();
@@ -49,14 +52,15 @@ master.post(
     const b = req.body || {};
     const name = String(need(b, "name", "الاسم")).trim();
     if (!b.isCustomer && !b.isSupplier) b.isCustomer = true;
-    if (b.vatNumber && !/^3\d{13}3$/.test(b.vatNumber)) throw bad("الرقم الضريبي يجب أن يكون 15 رقماً يبدأ وينتهي بـ 3");
+    if (b.vatNumber && !validPartnerTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
     const code = b.code?.trim() || (await nextCode(cid(req), b.isSupplier && !b.isCustomer ? "S" : "C"));
     const row = await db.insert("partners", {
       companyId: cid(req), code, name, nameEn: b.nameEn || null, isCustomer: !!b.isCustomer, isSupplier: !!b.isSupplier, kind: b.kind === "INDIVIDUAL" ? "INDIVIDUAL" : "COMPANY",
       vatNumber: b.vatNumber || null, crNumber: b.crNumber || null, phone: b.phone || null, email: b.email || null, street: b.street || null, buildingNo: b.buildingNo || null,
-      district: b.district || null, city: b.city || null, postalCode: b.postalCode || null, country: b.country || "SA", creditLimit: num(b.creditLimit), paymentTerms: Math.max(0, Math.round(num(b.paymentTerms))), notes: b.notes || null,
-      currency: /^[A-Z]{3}$/.test(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId || null,
-      isNonResident: !!b.isNonResident, whtType: b.isNonResident && WHT_TYPES[b.whtType] ? b.whtType : null,
+      district: b.district || null, city: b.city || null, postalCode: b.postalCode || null, country: b.country || COUNTRY, creditLimit: num(b.creditLimit), paymentTerms: Math.max(0, Math.round(num(b.paymentTerms))), notes: b.notes || null,
+      currency: /^[A-Z]{3}$/.test(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : BASE_CURRENCY, priceListId: b.priceListId || null,
+      isNonResident: !!b.isNonResident, whtType: IS_EG ? (EG_WHT_TYPES[b.whtType] ? b.whtType : null) : b.isNonResident && WHT_TYPES[b.whtType] ? b.whtType : null,
+      etaType: ["B", "P", "F"].includes(b.etaType) ? b.etaType : null, governate: b.governate || null, idNumber: b.idNumber || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("كود العميل/المورد مستخدم مسبقاً"); throw e; });
     await audit(req, "CREATE", "partner", row.id, { name });
     return row;
@@ -68,13 +72,14 @@ master.put(
   perm("partners.write"),
   h(async (req) => {
     const b = req.body || {};
-    if (b.vatNumber && !/^3\d{13}3$/.test(b.vatNumber)) throw bad("الرقم الضريبي غير صحيح");
+    if (b.vatNumber && !validPartnerTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
     const row = await db.update("partners", { id: p(req).id, companyId: cid(req) }, {
       name: b.name, nameEn: b.nameEn, isCustomer: b.isCustomer, isSupplier: b.isSupplier, kind: b.kind, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone ?? null, email: b.email ?? null,
       street: b.street ?? null, buildingNo: b.buildingNo ?? null, district: b.district ?? null, city: b.city ?? null, postalCode: b.postalCode ?? null, country: b.country, creditLimit: b.creditLimit === undefined ? undefined : num(b.creditLimit),
       paymentTerms: b.paymentTerms === undefined ? undefined : Math.round(num(b.paymentTerms)), notes: b.notes ?? null, isActive: b.isActive,
-      currency: b.currency === undefined ? undefined : /^[A-Z]{3}$/.test(String(b.currency).toUpperCase()) ? String(b.currency).toUpperCase() : "SAR", priceListId: b.priceListId === undefined ? undefined : b.priceListId || null,
-      isNonResident: b.isNonResident === undefined ? undefined : !!b.isNonResident, whtType: b.whtType === undefined ? undefined : b.isNonResident !== false && WHT_TYPES[b.whtType] ? b.whtType : null,
+      currency: b.currency === undefined ? undefined : /^[A-Z]{3}$/.test(String(b.currency).toUpperCase()) ? String(b.currency).toUpperCase() : BASE_CURRENCY, priceListId: b.priceListId === undefined ? undefined : b.priceListId || null,
+      isNonResident: b.isNonResident === undefined ? undefined : !!b.isNonResident, whtType: b.whtType === undefined ? undefined : IS_EG ? (EG_WHT_TYPES[b.whtType] ? b.whtType : null) : b.isNonResident !== false && WHT_TYPES[b.whtType] ? b.whtType : null,
+      etaType: b.etaType === undefined ? undefined : ["B", "P", "F"].includes(b.etaType) ? b.etaType : null, governate: b.governate === undefined ? undefined : b.governate || null, idNumber: b.idNumber === undefined ? undefined : b.idNumber || null,
     });
     if (!row) throw notFound();
     await audit(req, "UPDATE", "partner", row.id, { name: row.name });
@@ -165,6 +170,7 @@ master.post(
       companyId: cid(req), sku, barcode: b.barcode || null, name, nameEn: b.nameEn || null, type: b.type === "SERVICE" ? "SERVICE" : "STOCK", categoryId: b.categoryId || null, unit: b.unit || "حبة",
       salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image, imageUpdatedAt: image ? new Date() : null,
       trackLots: b.type !== "SERVICE" && !!b.trackLots, shelfLifeDays: b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
+      etaItemType: ["EGS", "GS1"].includes(b.etaItemType) ? b.etaItemType : null, etaItemCode: b.etaItemCode || null, etaUnitType: b.etaUnitType || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف (SKU) مستخدم مسبقاً"); throw e; });
     if (Array.isArray(b.uoms)) await saveUoms(cid(req), row.id, b.uoms);
     if (b.openingQty && row.type === "STOCK") {
@@ -187,6 +193,7 @@ master.put(
       sku: b.sku, barcode: b.barcode ?? null, name: b.name, nameEn: b.nameEn ?? null, categoryId: b.categoryId ?? null, unit: b.unit, salePrice: b.salePrice === undefined ? undefined : num(b.salePrice),
       purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image, imageUpdatedAt: image === undefined ? undefined : new Date(), isActive: b.isActive, type: b.type,
       trackLots: b.trackLots === undefined ? undefined : !!b.trackLots, shelfLifeDays: b.shelfLifeDays === undefined ? undefined : b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
+      etaItemType: b.etaItemType === undefined ? undefined : ["EGS", "GS1"].includes(b.etaItemType) ? b.etaItemType : null, etaItemCode: b.etaItemCode === undefined ? undefined : b.etaItemCode || null, etaUnitType: b.etaUnitType === undefined ? undefined : b.etaUnitType || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("رمز الصنف مستخدم مسبقاً"); throw e; });
     if (!row) throw notFound();
     if (row.trackLots) { const { openLotsForExisting } = require("../accounting/stock") as typeof import("../accounting/stock"); await tx((t) => openLotsForExisting(t, cid(req), row.id, today())); }
@@ -340,7 +347,7 @@ master.put(
   perm("settings.write"),
   h(async (req) => {
     const b = req.body || {};
-    if (b.vatNumber && !/^3\d{13}3$/.test(b.vatNumber)) throw bad("الرقم الضريبي يجب أن يكون 15 رقماً يبدأ وينتهي بـ 3");
+    if (b.vatNumber && !validTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
     if (b.logo && String(b.logo).length > 400000) throw bad("الشعار كبير — الحد 300 كيلوبايت");
     const row = await db.update("companies", { id: cid(req) }, {
       nameAr: b.nameAr, nameEn: b.nameEn, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone, email: b.email, website: b.website, logo: b.logo, street: b.street, buildingNo: b.buildingNo, additionalNo: b.additionalNo,

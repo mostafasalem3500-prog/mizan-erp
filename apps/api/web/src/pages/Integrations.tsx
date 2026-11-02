@@ -1,3 +1,4 @@
+import { CUR } from "../shared/country";
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, useAction, useToast, useCompanyContext, PrintBtn, fmtDate, fmtDT, confirmDlg } from "../lib";
@@ -104,8 +105,8 @@ export function CustomerPortal() {
         <div style={{ textAlign: "start" }}><div className="small muted">{d.role === "CUSTOMER" ? "بوابة العميل" : "بوابة المورد"}</div><b style={{ fontSize: 18 }}>{d.partner.name}</b></div>
       </div></div>
       <div className="grid c3">
-        <div className="card kpi"><div className="label">الرصيد الحالي</div><div className="value"><Money v={d.statement.closing} /></div><div className="sub">ر.س</div></div>
-        <div className="card kpi info"><div className="label">فواتير مفتوحة</div><div className="value">{d.open.length}</div><div className="sub">بإجمالي {money(dueTotal)} ر.س</div></div>
+        <div className="card kpi"><div className="label">الرصيد الحالي</div><div className="value"><Money v={d.statement.closing} /></div><div className="sub">{CUR()}</div></div>
+        <div className="card kpi info"><div className="label">فواتير مفتوحة</div><div className="value">{d.open.length}</div><div className="sub">بإجمالي {money(dueTotal)} {CUR()}</div></div>
         <div className={"card kpi " + (d.overdue > 0 ? "danger" : "success")}><div className="label">متأخر عن موعده</div><div className="value"><Money v={d.overdue} /></div></div>
       </div>
       {!!d.open.length && <div className="card"><div className="card-h"><h3>الفواتير المستحقة</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th /></tr></thead>

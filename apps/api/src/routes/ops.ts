@@ -1,4 +1,6 @@
 import { runZatcaSelfTest } from "../zatca/selftest";
+import { IS_EG } from "../lib/country";
+import { autoSubmit } from "../eta/eta";
 import { Router } from "express";
 import { db, tx } from "../db/pool";
 import { h, bad, conflict, req as need, num, paging, today, isDate } from "../lib/core";
@@ -50,7 +52,7 @@ ops.get(
     if (req.query.maxTotal && Number(req.query.maxTotal) > 0) add("i.total<=?", Number(req.query.maxTotal));
     const total = await db.one(`SELECT COUNT(*)::int c, COALESCE(SUM(CASE WHEN i.status='POSTED' THEN CASE WHEN i.kind='CREDIT_NOTE' THEN -i.total ELSE i.total END END),0) sum FROM invoices i WHERE ${where.join(" AND ")}`, params);
     params.push(limit, offset);
-    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid, i.branch_id, (SELECT name FROM branches b WHERE b.id=i.branch_id) branch_name, i.external_ref FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const rows = await db.rows(`SELECT i.id, i.number, i.direction, i.kind, i.channel, i.date, i.due_date, i.partner_id, i.partner_name, i.partner_vat, i.invoice_type, i.status, i.payment_status, i.subtotal, i.discount_total, i.taxable, i.vat_total, i.total, i.amount_paid, i.zatca_status, i.eta_status, i.eta_kind, i.origin_id, i.supplier_ref, i.notes, i.created_at, i.is_demo, i.currency, i.exchange_rate, i.fc_total, i.fc_paid, i.branch_id, (SELECT name FROM branches b WHERE b.id=i.branch_id) branch_name, i.external_ref FROM invoices i WHERE ${where.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return { rows, total: total.c, sum: total.sum };
   }),
 );
@@ -75,6 +77,7 @@ ops.post("/invoices/:id/post", dyn(true), h(async (req) => {
   if (override) await audit(req, "CREDIT_LIMIT_OVERRIDE", "invoice", doc.id, { number: doc.number });
   await audit(req, "POST", "invoice", doc.id, { number: doc.number, total: doc.total, isDemo: doc.isDemo });
   if (doc.direction === "SALE" && doc.zatcaStatus === "PENDING") submitInvoice(req.company, doc.id).catch(() => undefined);
+  if (IS_EG && doc.direction === "SALE") await autoSubmit(req.company, doc.id);
   const full = await inv.getInvoice(db, cid(req), doc.id);
   if (!full.isDemo) emit(cid(req), "invoice.posted", invoiceDto(full));
   return full;
@@ -184,12 +187,14 @@ ops.get("/pos/session/:id/report", perm("pos.use"), h(async (req) => {
 ops.post("/pos/sale", perm("pos.use"), h(async (req) => {
   const r = await tx((t) => pos.posSale(t, req.company, { id: req.auth.userId, name: actor(req) }, req.body));
   if (r.zatcaStatus === "PENDING") submitInvoice(req.company, r.id).catch(() => undefined);
+  if (IS_EG) await autoSubmit(req.company, r.id);
   if (!(r as any).replayed) emit(cid(req), "pos.sale", invoiceDto(r));
   return r;
 }));
 ops.post("/pos/return", perm("pos.use"), h(async (req) => {
   const r = await tx((t) => pos.posReturn(t, req.company, { id: req.auth.userId, name: actor(req) }, req.body.sessionId, req.body.originId, req.body.lines || [], req.body.reason));
   if (r.zatcaStatus === "PENDING") submitInvoice(req.company, r.id).catch(() => undefined);
+  if (IS_EG) await autoSubmit(req.company, r.id);
   return r;
 }));
 

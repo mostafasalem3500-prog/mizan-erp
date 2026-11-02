@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, useFetch, Money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, useAction, useToast, useCompanyContext, fmtDT, confirmDlg } from "../lib";
@@ -185,7 +186,7 @@ function PayoutsCard({ base, pn, v, onDone }: { base: string; pn: string; v: any
   const { run, busy } = useAction();
   const [f, setF] = useState<any>(null);
   const w = can("payments.write");
-  const fees = Number(f?.fees || 0), feeVat = f?.feeVat === "" || f?.feeVat === undefined ? Math.round(fees * 15) / 100 : Number(f.feeVat), net = Number(f?.net || 0);
+  const fees = Number(f?.fees || 0), feeVat = f?.feeVat === "" || f?.feeVat === undefined ? Math.round(fees * CFG.vatRate) / 100 : Number(f.feeVat), net = Number(f?.net || 0);
   return (
     <div className="card"><div className="card-h"><div><h3>تحويلات {pn} إلى البنك</h3><div className="small muted">عند تحويل {pn} لرصيدك: يُخفَّض حساب تسوية المتجر بالإجمالي، ويُسجَّل الصافي في البنك والعمولة كمصروف (5304) وضريبتها كضريبة مدخلات قابلة للخصم.</div></div>
       {w && <button className="btn primary sm" onClick={() => setF({ date: new Date().toISOString().slice(0, 10), net: "", fees: "", feeVat: "", reference: "", bank: null })}>＋ تسجيل تحويل</button>}</div>
@@ -200,7 +201,7 @@ function PayoutsCard({ base, pn, v, onDone }: { base: string; pn: string; v: any
           <Field label="مرجع التحويل / الدفعة"><Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></Field>
           <Field label="المبلغ الواصل للبنك"><Input type="number" value={f.net} onChange={(e) => setF({ ...f, net: e.target.value })} /></Field>
           <Field label="العمولة والرسوم (قبل الضريبة)"><Input type="number" value={f.fees} onChange={(e) => setF({ ...f, fees: e.target.value })} /></Field>
-          <Field label="ضريبة العمولة" hint="فارغ = 15% من العمولة"><Input type="number" value={f.feeVat} placeholder={(Math.round(fees * 15) / 100).toFixed(2)} onChange={(e) => setF({ ...f, feeVat: e.target.value })} /></Field>
+          <Field label="ضريبة العمولة" hint={`فارغ = ${CFG.vatRate}% من العمولة`}><Input type="number" value={f.feeVat} placeholder={(Math.round(fees * CFG.vatRate) / 100).toFixed(2)} onChange={(e) => setF({ ...f, feeVat: e.target.value })} /></Field>
           <Field label="البنك المستلم"><Picker value={f.bank} onChange={(a: any) => setF({ ...f, bank: a })} fetcher={accountFetcher((a: any) => a.isCashBank && a.systemKey !== "ESTORE_CLEARING")} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
         </div>
       </Modal>}

@@ -26,6 +26,8 @@ import { CharityApp, charityDefault } from "./charity/CharityApp";
 import { ZakatPage, WhtPage } from "./pages/Round23";
 import { FinancialAnalysisPage } from "./pages/Round25";
 import { FinalAccountsPage } from "./pages/Round27";
+import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
+import { CFG } from "./shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/templates";
 
 const NAV = [
@@ -65,21 +67,24 @@ const NAV = [
   { to: "/assets", ic: "🏢", label: "الأصول الثابتة", perm: "assets.read" },
   { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
   { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
-  { to: "/tax/wht", ic: "🌍", label: "ضريبة الاستقطاع (غير المقيمين)", perm: "vat.read" },
-  { to: "/zakat", ic: "🕌", label: "احتساب الزكاة الشرعية", perm: "accounting.read" },
+  { to: "/tax/wht", ic: "🌍", label: "ضريبة الاستقطاع (غير المقيمين)", perm: "vat.read", sa: true },
+  { to: "/tax/form41", ic: "🧾", label: "الخصم تحت حساب الضريبة (نموذج 41)", perm: "vat.read", eg: true },
+  { to: "/tax/income-tax", ic: "🏛", label: "ضريبة الدخل (22.5%)", perm: "accounting.read", eg: true },
+  { to: "/zakat", ic: "🕌", label: "احتساب الزكاة الشرعية", perm: "accounting.read", sa: true },
   { to: "/analysis", ic: "📈", label: "التحليل المالي والمؤشرات", perm: "reports.read" },
   { to: "/budgets", ic: "🎯", label: "الموازنات التقديرية", perm: "reports.read" },
   { to: "/final-accounts", ic: "📚", label: "الحسابات الختامية", perm: "reports.read" },
   { to: "/reports", ic: "📊", label: "القوائم المالية", perm: "reports.read" },
   { to: "/reports-center", ic: "📈", label: "مركز التقارير", perm: "reports.read" },
   { group: "الإعدادات" },
-  { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read" },
+  { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read", sa: true },
+  { to: "/eta", ic: "🔐", label: "الفاتورة والإيصال الإلكتروني", perm: "settings.read", eg: true },
   { to: "/settings", ic: "⚙", label: "إعدادات المنشأة", perm: "settings.read" },
   { to: "/settings/integrations", ic: "🔌", label: "التكامل والربط (API)", perm: "settings.read" },
 ];
 
 // company-level screens hidden from members confined to one branch
-const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/tax/wht", "/zakat", "/analysis", "/final-accounts", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
+const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/tax/wht", "/zakat", "/tax/form41", "/tax/income-tax", "/eta", "/analysis", "/final-accounts", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
 
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
@@ -120,10 +125,10 @@ export function App() {
       ) : (
         <div className="app">
           <aside className={"sidebar" + (menu ? " open" : "")}>
-            <div className="brand"><img src="/favicon.svg" alt="" /> ميزان ERP</div>
+            <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}</div>
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
             <nav>
-              {NAV.map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
+              {NAV.filter((n: any) => !(n.sa && CFG.country !== "SA") && !(n.eg && CFG.country !== "EG")).map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
               {can("payments.read") && <NavLink to="/charity" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
               {me.superAdmin && <><div className="group">النظام</div><NavLink to="/admin"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink></>}
             </nav>
@@ -179,6 +184,9 @@ export function App() {
                 <Route path="/vat" element={<VatPage />} />
                 <Route path="/tax/wht" element={<WhtPage />} />
                 <Route path="/zakat" element={<ZakatPage />} />
+                <Route path="/eta" element={<EtaPage />} />
+                <Route path="/tax/form41" element={<Form41Page />} />
+                <Route path="/tax/income-tax" element={<IncomeTaxPage />} />
                 <Route path="/analysis" element={<FinancialAnalysisPage />} />
                 <Route path="/final-accounts" element={<FinalAccountsPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
@@ -258,11 +266,11 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
           <li>✔ قيود محاسبية آلية وقائمة الأنشطة</li>
         </ul>
       </div> : <div className="art">
-        <div className="row"><img src="/favicon.svg" width={54} alt="" /><h1>ميزان ERP</h1></div>
-        <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للمنشآت السعودية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافق مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p>
+        <div className="row"><img src="/favicon.svg" width={54} alt="" /><h1>{CFG.appName}</h1></div>
+        {CFG.country === "EG" ? <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للشركات المصرية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، رواتب وتأمينات، وتقارير مالية — متوافق مع ضريبة القيمة المضافة 14% ومنظومة الفاتورة والإيصال الإلكتروني.</p> : <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للمنشآت السعودية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافق مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p>}
         <ul>
-          <li>✔ دليل حسابات سعودي جاهز وقيود آلية لكل عملية</li>
-          <li>✔ فواتير ضريبية مع QR وربط مع منصة فاتورة (ZATCA)</li>
+          {CFG.country === "EG" ? <><li>✔ دليل حسابات مصري جاهز وقيود آلية لكل عملية</li><li>✔ الفاتورة والإيصال الإلكتروني (مصلحة الضرائب) والخصم تحت حساب الضريبة (نموذج 41)</li><li>✔ رواتب بالتأمينات (قانون 148) وضريبة كسب العمل</li></> : <><li>✔ دليل حسابات سعودي جاهز وقيود آلية لكل عملية</li>
+          <li>✔ فواتير ضريبية مع QR وربط مع منصة فاتورة (ZATCA)</li></>}
           <li>✔ نقطة بيع سريعة بالورديات ومتعددة طرق الدفع</li>
           <li>✔ مخزون بالمتوسط المرجح وكرت صنف وجرد</li>
           <li>✔ ميزان مراجعة، قائمة دخل، ميزانية، تدفقات نقدية، أعمار ديون، إقرار ضريبي</li>
@@ -278,7 +286,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
               {mode === "register" && <>
                 <Field label="الاسم الكامل"><Input required value={f.fullName} onChange={set("fullName")} /></Field>
                 <Field label="اسم المنشأة"><Input required value={f.companyName} onChange={set("companyName")} /></Field>
-                <Field label="الرقم الضريبي (اختياري)"><Input value={f.vatNumber} onChange={set("vatNumber")} placeholder="3xxxxxxxxxxxxx3" dir="ltr" /></Field>
+                <Field label={`${CFG.taxIdLabel} (اختياري)`}><Input value={f.vatNumber} onChange={set("vatNumber")} placeholder={CFG.country === "EG" ? "9 أرقام" : "3xxxxxxxxxxxxx3"} dir="ltr" /></Field>
                 <Field label="الجوال"><Input value={f.phone} onChange={set("phone")} dir="ltr" /></Field>
               </>}
               <Field label="البريد الإلكتروني"><Input required type="email" value={f.email} onChange={set("email")} dir="ltr" autoFocus /></Field>

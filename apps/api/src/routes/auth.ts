@@ -1,4 +1,5 @@
 import { verifyDesktopLicense, signDesktopLicense } from "../lib/desktopLicense";
+import { validTaxId, validPartnerTaxId, TAX_ID_MSG, CFG, IS_EG } from "../lib/country";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
@@ -17,6 +18,7 @@ export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?:
   const company = await t.insert("companies", {
     nameAr: input.nameAr.trim(), nameEn: input.nameEn || null, vatNumber: input.vatNumber || null, crNumber: input.crNumber || null, city: input.city || null, phone: input.phone || null, email: input.email || null,
     plan, subscriptionEndsAt: plan === "TRIAL" ? new Date(Date.now() + TRIAL_DAYS * 86400000) : null,
+    country: CFG.code, currency: CFG.currency, ...(IS_EG ? { vatPeriod: "MONTHLY" } : {}),
   });
   await t.insert("memberships", { companyId: company.id, userId: ownerUserId, role: "OWNER" });
   const branch = await t.insert("branches", { companyId: company.id, code: "MAIN", name: "الفرع الرئيسي", isMain: true, city: input.city || null });
@@ -24,7 +26,7 @@ export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?:
   await seedChartOfAccounts(t, company.id);
   await seedCurrencies(t, company.id);
   await ensureFiscalYear(t, company.id, today());
-  await ensureZatcaConfig(t, company.id);
+  if (!IS_EG) await ensureZatcaConfig(t, company.id);
   return company;
 }
 
@@ -51,7 +53,7 @@ auth.post(
     const companyName = String(need(b, "companyName", "اسم المنشأة"));
     if (password.length < 8) throw bad("كلمة المرور يجب أن تكون 8 أحرف على الأقل");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("البريد الإلكتروني غير صحيح");
-    if (b.vatNumber && !/^3\d{13}3$/.test(b.vatNumber)) throw bad("الرقم الضريبي يجب أن يكون 15 رقماً يبدأ وينتهي بـ 3");
+    if (b.vatNumber && !validTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
     const exists = await db.maybe(`SELECT id FROM users WHERE email=$1`, [email]);
     if (exists) throw conflict("البريد الإلكتروني مسجل مسبقاً — سجّل الدخول");
     const passwordHash = await bcrypt.hash(password, 10);

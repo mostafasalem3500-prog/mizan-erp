@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Round 27 — final accounts (الحسابات الختامية) and the year-end closing checklist. */
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -91,7 +92,7 @@ export function FinalAccountsPage({ charity = false }: { charity?: boolean }) {
         </div>
       </div>
       <div className="print-doc fin-doc" style={{ maxWidth: "none", padding: 0, margin: 0, background: "transparent" }}>
-        <div className="print-only"><h2 style={{ margin: 0 }}>{me.company.nameAr}</h2><div>الحسابات الختامية للسنة المالية {cur} ({d.fiscalYear.from} – {d.fiscalYear.to}) — المبالغ بالريال السعودي</div><hr /></div>
+        <div className="print-only"><h2 style={{ margin: 0 }}>{me.company.nameAr}</h2><div>الحسابات الختامية للسنة المالية {cur} ({d.fiscalYear.from} – {d.fiscalYear.to}) — المبالغ بال{CFG.currencyAr}</div><hr /></div>
         <div className="mini-kpis fin-kpis">
           <div><span>{L.net}</span><b className={IT.net[0] < 0 ? "neg-val" : "pos-val"}><Money v={IT.net[0]} /></b><small className="muted">السابقة: {money(IT.net[1])}</small></div>
           <div><span>إجمالي الأصول</span><b><Money v={T.assets[0]} /></b><small className="muted">السابقة: {money(T.assets[1])}</small></div>

@@ -440,3 +440,6 @@ tr.expand > td { background: var(--surface-2); padding: 0 !important; }
 tr.row-danger td { background: var(--danger-soft); }
 tr.row-warn td { background: var(--accent-soft); }
 @media print { .fin-card { break-inside: auto; } .fin-stmt tr { break-inside: avoid; } }
+
+/* ── Egypt edition ── */
+.code-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; max-height: 420px; overflow: auto; text-align: left; }

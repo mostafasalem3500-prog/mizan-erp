@@ -3,6 +3,7 @@ import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
 import { provisionTotals } from "./hr";
 import { debitNature, SUBTYPE_AR, normalizeSubtype } from "../accounting/coa";
+import { VAT_F, VAT_RATE, IS_EG, CFG } from "../lib/country";
 
 const dateRange = (q: any) => {
   const from = q.from && isDate(q.from) ? q.from : "1900-01-01";
@@ -412,20 +413,31 @@ export async function vatReturn(t: Db, companyId: string, q: any) {
   });
   const s = acc(sales, ["S"]), sz = acc(sales, ["Z"]), sx = acc(sales, ["X"]), se = acc(sales, ["E"]);
   const p = acc([...purch, ...exp], ["S"]), pim = acc([...purch, ...exp], ["IM"]), prc = acc([...purch, ...exp], ["RC"]), pz = acc([...purch, ...exp], ["Z", "E"]);
-  const rcVat = r2(prc.net * 0.15);
+  const rcVat = r2(prc.net * VAT_F);
   const assetVat = r2(assets[0]?.vat || 0);
-  const boxes = [
-    { no: 1, label: "المبيعات الخاضعة للنسبة الأساسية 15%", net: s.net, vat: s.vat },
+  const boxes = IS_EG ? [
+    { no: 1, label: `مبيعات محلية خاضعة للسعر العام ${VAT_RATE}%`, net: s.net, vat: s.vat },
+    { no: 3, label: "مبيعات محلية خاضعة لسعر الصفر", net: sz.net, vat: 0 },
+    { no: 4, label: "صادرات (سعر صفر)", net: sx.net, vat: 0 },
+    { no: 5, label: "مبيعات معفاة (الجدول المرفق بالقانون 67 لسنة 2016)", net: se.net, vat: 0 },
+    { no: 6, label: "إجمالي المبيعات وضريبة المخرجات", net: r2(s.net + sz.net + sx.net + se.net), vat: s.vat, total: true },
+    { no: 7, label: `مشتريات محلية خاضعة ${VAT_RATE}% (سلع وخدمات وآلات ومعدات)`, net: r2(p.net + assetVat / VAT_F), vat: r2(p.vat + assetVat) },
+    { no: 8, label: "واردات سلع (ضريبة مسددة للجمارك)", net: pim.net, vat: pim.vat },
+    { no: 9, label: "خدمات مستوردة من الخارج (يحاسب عليها المتلقي)", net: prc.net, vat: rcVat },
+    { no: 10, label: "مشتريات معفاة / غير خاضعة", net: pz.net, vat: 0 },
+    { no: 11, label: "إجمالي المشتريات والضريبة القابلة للخصم", net: r2(p.net + assetVat / VAT_F + pim.net + prc.net + pz.net), vat: r2(p.vat + assetVat + pim.vat + rcVat), total: true },
+  ] : [
+    { no: 1, label: `المبيعات الخاضعة للنسبة الأساسية ${VAT_RATE}%`, net: s.net, vat: s.vat },
     { no: 2, label: "المبيعات للمواطنين (الخدمات الصحية والتعليم الخاص والمسكن الأول)", net: 0, vat: 0 },
     { no: 3, label: "المبيعات المحلية الخاضعة لنسبة الصفر", net: sz.net, vat: 0 },
     { no: 4, label: "الصادرات", net: sx.net, vat: 0 },
     { no: 5, label: "المبيعات المعفاة", net: se.net, vat: 0 },
     { no: 6, label: "إجمالي المبيعات", net: r2(s.net + sz.net + sx.net + se.net), vat: s.vat, total: true },
-    { no: 7, label: "المشتريات الخاضعة للنسبة الأساسية 15%", net: r2(p.net + assetVat / 0.15), vat: r2(p.vat + assetVat) },
+    { no: 7, label: `المشتريات الخاضعة للنسبة الأساسية ${VAT_RATE}%`, net: r2(p.net + assetVat / VAT_F), vat: r2(p.vat + assetVat) },
     { no: 8, label: "الواردات الخاضعة للضريبة المدفوعة بالجمارك", net: pim.net, vat: pim.vat },
     { no: 9, label: "الواردات الخاضعة للضريبة (آلية الاحتساب العكسي)", net: prc.net, vat: rcVat },
     { no: 10, label: "المشتريات الخاضعة لنسبة الصفر / المعفاة", net: pz.net, vat: 0 },
-    { no: 11, label: "إجمالي المشتريات", net: r2(p.net + assetVat / 0.15 + pim.net + prc.net + pz.net), vat: r2(p.vat + assetVat + pim.vat + rcVat), total: true },
+    { no: 11, label: "إجمالي المشتريات", net: r2(p.net + assetVat / VAT_F + pim.net + prc.net + pz.net), vat: r2(p.vat + assetVat + pim.vat + rcVat), total: true },
   ];
   const outputVat = r2(s.vat + rcVat);
   const inputVat = r2(p.vat + assetVat + pim.vat + rcVat);
@@ -553,11 +565,15 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   const daysToVat = Math.round((Date.parse(dueDate) - Date.parse(td)) / 86400000);
   const items: { level: "err" | "warn" | "info"; text: string; to: string; count?: number }[] = [];
   if (!filed) items.push({ level: daysToVat < 0 ? "err" : daysToVat <= 15 ? "warn" : "info", text: `إقرار ضريبة القيمة المضافة عن الفترة ${periodFrom} — ${periodTo} ${daysToVat < 0 ? `متأخر ${-daysToVat} يوم` : `مستحق خلال ${daysToVat} يوم (${dueDate})`}`, to: "/vat" });
-  if (overdue.c) items.push({ level: "err", text: `${overdue.c} فاتورة مبيعات متأخرة السداد بإجمالي ${r2(overdue.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/reports/aging", count: overdue.c });
-  if (payables.c) items.push({ level: "warn", text: `${payables.c} فاتورة موردين تستحق خلال 7 أيام بإجمالي ${r2(payables.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/purchases/invoices", count: payables.c });
-  if (cheques.c) items.push({ level: "warn", text: `${cheques.c} شيك يستحق خلال 7 أيام (${r2(cheques.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س)`, to: "/cheques", count: cheques.c });
-  if (drafts.c) items.push({ level: "info", text: `${drafts.c} مستند غير مرحّل (مسودات) بقيمة ${r2(drafts.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س`, to: "/sales/invoices", count: drafts.c });
-  if (zatcaPending.c) items.push({ level: "warn", text: `${zatcaPending.c} فاتورة لم تُرسل أو رُفضت في منصة فاتورة`, to: "/zatca", count: zatcaPending.c });
+  if (overdue.c) items.push({ level: "err", text: `${overdue.c} فاتورة مبيعات متأخرة السداد بإجمالي ${r2(overdue.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}`, to: "/reports/aging", count: overdue.c });
+  if (payables.c) items.push({ level: "warn", text: `${payables.c} فاتورة موردين تستحق خلال 7 أيام بإجمالي ${r2(payables.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}`, to: "/purchases/invoices", count: payables.c });
+  if (cheques.c) items.push({ level: "warn", text: `${cheques.c} شيك يستحق خلال 7 أيام (${r2(cheques.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol})`, to: "/cheques", count: cheques.c });
+  if (drafts.c) items.push({ level: "info", text: `${drafts.c} مستند غير مرحّل (مسودات) بقيمة ${r2(drafts.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}`, to: "/sales/invoices", count: drafts.c });
+  if (IS_EG) {
+    const eta = await n(`SELECT COUNT(*)::int c FROM invoices WHERE company_id=$1 AND status='POSTED' AND eta_status IN ('PENDING','NOT_CONFIGURED','NEEDS_SIGNATURE','INVALID','REJECTED')`, [companyId]);
+    if (eta.c) items.push({ level: "warn", text: `${eta.c} مستند لم يُقبل بعد في منظومة الفاتورة/الإيصال الإلكتروني`, to: "/eta", count: eta.c });
+  }
+  if (!IS_EG && zatcaPending.c) items.push({ level: "warn", text: `${zatcaPending.c} فاتورة لم تُرسل أو رُفضت في منصة فاتورة`, to: "/zatca", count: zatcaPending.c });
   const exp = await n(`SELECT COUNT(*) FILTER (WHERE expiry_date < $2)::int expired, COUNT(*) FILTER (WHERE expiry_date BETWEEN $2 AND $3)::int soon FROM stock_lots WHERE company_id=$1 AND qty > 0`, [companyId, td, addDays(td, 30)]);
   if (exp.expired) items.push({ level: "err", text: `${exp.expired} دفعة منتهية الصلاحية ما زالت في المخزون — أتلفها أو أرجعها للمورد`, to: "/lots", count: exp.expired });
   if (exp.soon) items.push({ level: "warn", text: `${exp.soon} دفعة تنتهي صلاحيتها خلال 30 يوماً`, to: "/lots", count: exp.soon });
@@ -565,6 +581,25 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
   if (co.plan === "TRIAL" && co.subscriptionEndsAt) { const dl = Math.round((new Date(co.subscriptionEndsAt).getTime() - Date.parse(td)) / 86400000); if (dl <= 7) items.push({ level: dl < 0 ? "err" : "warn", text: dl < 0 ? "انتهت الفترة التجريبية — فعّل الترخيص" : `تنتهي الفترة التجريبية خلال ${dl} يوم`, to: "/settings/license" }); }
+  if (IS_EG) {
+    // Egypt: Form 41 — quarters with deducted tax not yet remitted (due the end of the month after the quarter)
+    const q41 = await t.rows(`SELECT to_char(p.date,'YYYY') y, EXTRACT(QUARTER FROM p.date)::int q, SUM(p.wht_amount) v FROM payments p WHERE p.company_id=$1 AND p.status='POSTED' AND p.direction='OUT' AND p.wht_amount>0 AND p.wht_return_id IS NULL GROUP BY 1,2 ORDER BY 1,2`, [companyId]);
+    for (const w of q41) {
+      const due = new Date(Date.UTC(Number(w.y), w.q * 3 + 1, 0)).toISOString().slice(0, 10), qEnd = new Date(Date.UTC(Number(w.y), w.q * 3, 0)).toISOString().slice(0, 10);
+      if (qEnd >= td) continue;
+      const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
+      items.push({ level: dl < 0 ? "err" : "warn", text: `نموذج 41 للربع ${w.y}-Q${w.q}: خصم تحت حساب الضريبة ${r2(w.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol} ${dl < 0 ? `متأخر ${-dl} يوم` : `يُورَّد حتى ${due}`}`, to: "/tax/form41" });
+    }
+    const lastFyEg = await t.maybe(`SELECT name, start_date, end_date FROM fiscal_years WHERE company_id=$1 AND end_date < $2::date ORDER BY end_date DESC LIMIT 1`, [companyId, td]);
+    if (lastFyEg) {
+      const end = String(lastFyEg.endDate).slice(0, 10), due = monthEnd(addMonths(end, 4));
+      const has = await t.maybe(`SELECT 1 FROM zakat_assessments WHERE company_id=$1 AND method='EG_CIT' AND status='POSTED' AND period_to=$2`, [companyId, end]);
+      const active = await t.maybe(`SELECT 1 FROM journal_entries WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3 LIMIT 1`, [companyId, lastFyEg.startDate, end]);
+      const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
+      if (!has && active && dl >= -60) items.push({ level: dl < 0 ? "err" : dl <= 30 ? "warn" : "info", text: `إقرار ضريبة الدخل للسنة ${lastFyEg.name} ${dl < 0 ? `متأخر ${-dl} يوم` : `يُقدَّم حتى ${due}`} — احسب المخصص وطبّق الخصم من المنبع`, to: "/tax/income-tax" });
+    }
+    return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed } };
+  }
   // withholding tax: months with tax withheld but not yet remitted (due the 10th of the next month)
   const wht = await t.rows(
     `SELECT to_char(p.date,'YYYY-MM') m, SUM(p.wht_amount) v FROM payments p
@@ -573,11 +608,11 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   for (const w of wht) {
     const [y, m] = w.m.split("-").map(Number); const due = new Date(Date.UTC(y, m, 10)).toISOString().slice(0, 10);
     const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
-    items.push({ level: dl < 0 ? "err" : "warn", text: `ضريبة استقطاع شهر ${w.m} (${r2(w.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س) ${dl < 0 ? `متأخرة ${-dl} يوم — غرامة 1% عن كل 30 يوماً` : `تُورَّد خلال ${dl} يوم (${due})`}`, to: "/tax/wht" });
+    items.push({ level: dl < 0 ? "err" : "warn", text: `ضريبة استقطاع شهر ${w.m} (${r2(w.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}) ${dl < 0 ? `متأخرة ${-dl} يوم — غرامة 1% عن كل 30 يوماً` : `تُورَّد خلال ${dl} يوم (${due})`}`, to: "/tax/wht" });
   }
   // zakat: unpaid provisions, and the return for the last closed financial year (due within 120 days of its end)
   const zUnpaid = await t.one(`SELECT COUNT(*)::int c, COALESCE(SUM(zakat-paid),0) v FROM zakat_assessments WHERE company_id=$1 AND status='POSTED' AND zakat-paid > 0.009`, [companyId]);
-  if (zUnpaid.c) items.push({ level: "warn", text: `زكاة مستحقة غير مسددة ${r2(zUnpaid.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ر.س (${zUnpaid.c} احتساب)`, to: "/zakat" });
+  if (zUnpaid.c) items.push({ level: "warn", text: `زكاة مستحقة غير مسددة ${r2(zUnpaid.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol} (${zUnpaid.c} احتساب)`, to: "/zakat" });
   const lastFy = await t.maybe(`SELECT name, start_date, end_date FROM fiscal_years WHERE company_id=$1 AND end_date < $2::date ORDER BY end_date DESC LIMIT 1`, [companyId, td]);
   if (lastFy) {
     const end = String(lastFy.endDate).slice(0, 10);

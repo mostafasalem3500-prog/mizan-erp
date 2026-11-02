@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { VAT_RATE, IS_EG } from "./country";
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 
 // ─── errors ────────────────────────────────────────────────────────────────
@@ -34,13 +35,13 @@ export const money2 = (v: any) => r2(v).toFixed(2);
 /** Sales: S standard 15%, Z zero-rated domestic, X export (zero), E exempt, O out of scope.
  *  Purchases: S standard, IM import VAT paid at customs, RC reverse charge, Z, E, O. */
 export const TAX_CODES: Record<string, { rate: number; ar: string; zatca: string }> = {
-  S: { rate: 15, ar: "خاضع 15%", zatca: "S" },
+  S: { rate: VAT_RATE, ar: `خاضع ${VAT_RATE}%`, zatca: "S" },
   Z: { rate: 0, ar: "نسبة صفرية", zatca: "Z" },
   X: { rate: 0, ar: "صادرات (صفري)", zatca: "Z" },
   E: { rate: 0, ar: "معفى", zatca: "E" },
   O: { rate: 0, ar: "خارج النطاق", zatca: "O" },
-  IM: { rate: 15, ar: "استيراد - ضريبة مدفوعة بالجمارك", zatca: "S" },
-  RC: { rate: 15, ar: "استيراد - احتساب عكسي", zatca: "S" },
+  IM: { rate: VAT_RATE, ar: "استيراد - ضريبة مدفوعة بالجمارك", zatca: "S" },
+  RC: { rate: VAT_RATE, ar: IS_EG ? "خدمات من الخارج - احتساب عكسي" : "استيراد - احتساب عكسي", zatca: "S" },
 };
 export function taxRate(code: string): number {
   const t = TAX_CODES[code];
@@ -65,7 +66,7 @@ export function calcLine(qty: number, unitPrice: number, discountPct: number, co
   const discount = pricesIncludeVat && rate > 0
     ? r2(D(r2(before)).minus(r2(gross)).div(D(1).plus(D(rate).div(100))))
     : r2(D(before).minus(gross));
-  return { net, vat, total: r2(D(net).plus(vat)), discount, rate: code === "RC" ? 15 : rate };
+  return { net, vat, total: r2(D(net).plus(vat)), discount, rate: code === "RC" ? VAT_RATE : rate };
 }
 
 // ─── dates ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,8 @@ import { applySettlement } from "./invoices";
 import { BASE, toBase, toFc } from "./currency";
 import { currentCtx } from "../lib/context";
 import { whtLines } from "./round23";
+import { egWhtLines, EG_WHT_TYPES, EG_WHT_THRESHOLD, quarterOf } from "./egypt";
+import { IS_EG, VAT_F } from "../lib/country";
 
 export interface PaymentInput {
   direction: "IN" | "OUT";
@@ -75,7 +77,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
       const amt = r2(num(a.amount));
       if (amt <= 0) continue;
       if (inv.currency !== BASE) { if (currency !== BASE && currency !== inv.currency) throw bad(`المستند ${inv.number} بعملة ${inv.currency} — استخدم نفس العملة أو الريال`); allocations.push(settleFc(inv, amt)); continue; }
-      if (currency !== BASE) throw bad(`المستند ${inv.number} بالريال — سدده بسند بالريال`);
+      if (currency !== BASE) throw bad(`المستند ${inv.number} بالعملة الأساسية — سدده بسند بالعملة الأساسية`);
       if (amt > r2(D(inv.total).minus(inv.amountPaid)) + 0.001) throw bad(`المبلغ المخصص للمستند ${inv.number} يتجاوز المتبقي عليه`);
       allocations.push({ invoiceId: inv.id, amount: amt, fcAmount: null, paidSar: amt });
     }
@@ -115,11 +117,33 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
     : [{ key: "AP", debit: partnerLine, partnerId: partner.id, description: memo }, { account: account.id, credit: amount, description: memo }];
   // withholding tax (non-resident suppliers): the bank pays the net, the tax is owed to ZATCA
   let wht: ReturnType<typeof whtLines> | null = null;
-  const whtIn: { type: string; borne?: boolean; rate?: number } | null = p.wht === undefined ? (p.direction === "OUT" && partner.isNonResident && partner.whtType ? { type: partner.whtType } : null) : p.wht;
-  if (whtIn && whtIn.type) {
+  const whtIn: { type: string; borne?: boolean; rate?: number } | null = p.wht === undefined
+    ? (IS_EG ? (p.direction === "OUT" && partner.whtType && EG_WHT_TYPES[partner.whtType] && amount > EG_WHT_THRESHOLD ? { type: partner.whtType } : null)
+             : (p.direction === "OUT" && partner.isNonResident && partner.whtType ? { type: partner.whtType } : null))
+    : p.wht;
+  if (whtIn && whtIn.type && IS_EG) {
+    // Egypt: الخصم تحت حساب الضريبة — we deduct from suppliers (payable, Form 41) or a customer deducted from us (credit)
+    if (currency !== BASE) throw bad("سند الخصم تحت حساب الضريبة يكون بالعملة الأساسية");
+    if (p.direction === "OUT") {
+      const q = quarterOf(date);
+      const filed = await t.maybe(`SELECT number FROM wht_returns WHERE company_id=$1 AND period=$2 AND status='POSTED'`, [companyId, q]);
+      if (filed) throw conflict(`نموذج 41 للربع ${q} مقدَّم (${filed.number}) — سجّل السند بتاريخ الربع الحالي أو ألغِ النموذج`);
+    }
+    // the deduction is computed on the value before VAT: allocated invoices by their own taxable/total ratio, the rest at the standard rate
+    let base = D(0);
+    if (allocations.length) {
+      const docs = await t.rows(`SELECT id, taxable, total FROM invoices WHERE id = ANY($1)`, [allocations.map((a) => a.invoiceId)]);
+      for (const a of allocations) { const d = docs.find((x) => x.id === a.invoiceId); base = base.plus(d && Number(d.total) ? D(a.amount).times(d.taxable).div(d.total) : D(a.amount).div(1 + VAT_F)); }
+    }
+    if (unalloc > 0) base = base.plus(D(unalloc).div(1 + VAT_F));
+    wht = egWhtLines({ amount, base: r2(base), type: whtIn.type, rate: whtIn.rate, direction: p.direction, memo }) as any;
+    const bankLine = lines.find((l) => l.account === account.id)!;
+    if (p.direction === "OUT") bankLine.credit = wht!.net; else bankLine.debit = wht!.net;
+    lines.push(...(wht!.extra as Line[]));
+  } else if (whtIn && whtIn.type) {
     if (p.direction !== "OUT") throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات للموردين فقط");
     if (!partner.isNonResident) throw bad("ضريبة الاستقطاع تُطبّق على المدفوعات لغير المقيمين — فعّل «مورد غير مقيم» في بيانات المورد");
-    if (currency !== BASE) throw bad("سند الصرف مع ضريبة الاستقطاع يكون بالريال");
+    if (currency !== BASE) throw bad("سند الصرف مع ضريبة الاستقطاع يكون بالعملة الأساسية");
     const filed = await t.maybe(`SELECT number FROM wht_returns WHERE company_id=$1 AND period=$2 AND status='POSTED'`, [companyId, date.slice(0, 7)]);
     if (filed) throw conflict(`إقرار الاستقطاع لشهر ${date.slice(0, 7)} مقدَّم (${filed.number}) — سجّل السند بتاريخ الشهر الحالي أو ألغِ الإقرار وأعد تقديمه`);
     wht = whtLines({ amount, type: whtIn.type, borne: !!whtIn.borne, rate: whtIn.rate, memo });
@@ -146,7 +170,7 @@ export async function createPayment(t: Db, companyId: string, user: string, p: P
 export async function cancelPayment(t: Db, companyId: string, user: string, id: string, date?: string) {
   const pay = await t.one(`SELECT * FROM payments WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "السند غير موجود");
   if (pay.status !== "POSTED") throw conflict("السند ملغى مسبقاً");
-  if (pay.whtReturnId) throw conflict("ضريبة الاستقطاع على هذا السند سُدّدت ضمن إقرار الشهر — ألغِ إقرار الاستقطاع أولاً");
+  if (pay.whtReturnId) throw conflict(IS_EG ? "الخصم على هذا السند ورِّد ضمن نموذج 41 — ألغِ النموذج أولاً" : "ضريبة الاستقطاع على هذا السند سُدّدت ضمن إقرار الشهر — ألغِ إقرار الاستقطاع أولاً");
   for (const a of pay.allocations || []) await applySettlement(t, a.invoiceId, -a.amount, a.fcAmount ? -a.fcAmount : undefined);
   const rev = await reverse(t, companyId, pay.journalId, date || today(), `إلغاء السند ${pay.number}`, user);
   await t.exec(`UPDATE payments SET status='CANCELLED', allocated=0, allocations='[]' WHERE id=$1`, [id]);

@@ -8,7 +8,8 @@
  */
 import { Db } from "../db/pool";
 import { AppError, bad, conflict, r2, D, AR_MONTHS, monthEnd } from "../lib/core";
-import { SAUDI_COA, TYPE_BY_CLASS } from "./coa";
+import { COUNTRY_COA, TYPE_BY_CLASS } from "./coa";
+import { IS_EG } from "../lib/country";
 import { currentCtx } from "../lib/context";
 
 export interface Line {
@@ -99,7 +100,7 @@ export async function accountByKey(t: Db, companyId: string, key: string) {
 
 // ─── branches ──────────────────────────────────────────────────────────────
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEAD_OFFICE_TYPES = new Set(["CLOSING", "VAT_SETTLEMENT", "ZAKAT", "WHT"]);
+const HEAD_OFFICE_TYPES = new Set(["CLOSING", "VAT_SETTLEMENT", "ZAKAT", "WHT", "INCOME_TAX"]);
 
 export async function mainBranchId(t: Db, companyId: string): Promise<string> {
   const b = await t.maybe(`SELECT id FROM branches WHERE company_id=$1 ORDER BY is_main DESC, code LIMIT 1`, [companyId]);
@@ -232,8 +233,9 @@ export async function reverse(t: Db, companyId: string, entryId: string, date: s
 // ─── company bootstrap ─────────────────────────────────────────────────────
 export async function seedChartOfAccounts(t: Db, companyId: string) {
   const idByCode: Record<string, string> = {};
-  const codes = SAUDI_COA.map((r) => r[0]);
-  for (const [code, nameAr, nameEn, subtype, opts] of SAUDI_COA) {
+  const COA = COUNTRY_COA(IS_EG);
+  const codes = COA.map((r) => r[0]);
+  for (const [code, nameAr, nameEn, subtype, opts] of COA) {
     const parentCode = code.length === 1 ? null : code.length === 2 ? code[0] : code.slice(0, code.length - 2);
     const isGroup = codes.some((c) => c !== code && c.startsWith(code) && c.length > code.length);
     const level = code.length === 1 ? 1 : code.length === 2 ? 2 : code.length === 4 ? 3 : 4;

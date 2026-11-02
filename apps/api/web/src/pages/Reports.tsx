@@ -1,3 +1,4 @@
+import { CUR } from "../shared/country";
 import React, { useState } from "react";
 import { useNavigate, useParams , Link } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, DateRange, monthStart, today, yearStart, addMonths, fmtDate, confirmDlg , SearchBox, FilterInfo, matches, TYPE_AR, productFetcher } from "../lib";
@@ -351,7 +352,7 @@ export function VatPage() {
       <div className="card">
         <div className="card-h"><div><h3>إقرار ضريبة القيمة المضافة</h3><div className="small muted">بصيغة نموذج هيئة الزكاة والضريبة والجمارك</div></div><div className="row no-print"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /><PrintBtn /></div></div>
         {!d ? <Loading /> : <>
-          <div className="table-wrap"><table className="tbl compact"><thead><tr><th>#</th><th>البند</th><th className="n">المبلغ (ر.س)</th><th className="n">التعديل</th><th className="n">مبلغ الضريبة</th></tr></thead>
+          <div className="table-wrap"><table className="tbl compact"><thead><tr><th>#</th><th>البند</th><th className="n">المبلغ ({CUR()})</th><th className="n">التعديل</th><th className="n">مبلغ الضريبة</th></tr></thead>
             <tbody>{d.boxes.map((b: any) => <tr key={b.no} className={b.total ? "group" : ""}><td className="num">{b.no}</td><td>{b.label}</td><td className="n"><Money v={b.net} /></td><td className="n">0.00</td><td className="n"><Money v={b.vat} /></td></tr>)}
               <tr><td>12</td><td>إجمالي ضريبة القيمة المضافة المستحقة عن الفترة الحالية</td><td colSpan={2} /><td className="n"><Money v={d.outputVat} /></td></tr>
               <tr><td>13</td><td>إجمالي ضريبة المدخلات القابلة للخصم</td><td colSpan={2} /><td className="n"><Money v={d.inputVat} /></td></tr>

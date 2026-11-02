@@ -1,4 +1,5 @@
 /** Round 6 routes: currencies, landed costs, price lists, bank statement import. */
+import { BASE } from "../services/currency";
 import { Router } from "express";
 import { db, tx } from "../db/pool";
 import { h, bad, req as need, isDate, today } from "../lib/core";
@@ -89,7 +90,7 @@ r6.post("/inventory/reorder/orders", perm("purchases.write"), h(async (req) => {
       let sid = supplierId;
       if (!sid) { const s = await t.maybe(`SELECT id FROM partners WHERE company_id=$1 AND is_supplier AND is_active ORDER BY created_at LIMIT 1`, [cid(req)]); if (!s) throw bad("حدد المورد للأصناف التي ليس لها مورد سابق"); sid = s.id; }
       const sup = await t.one(`SELECT currency FROM partners WHERE id=$1 AND company_id=$2`, [sid, cid(req)], "المورد غير موجود");
-      const rate = sup.currency && sup.currency !== "SAR" ? await rateFor(t, cid(req), sup.currency) : 1; // last prices are in SAR → convert to the supplier's currency
+      const rate = sup.currency && sup.currency !== BASE ? await rateFor(t, cid(req), sup.currency) : 1; // last prices are in SAR → convert to the supplier's currency
       const d = await saveDraft(t, req.company, actor(req), { direction: "PURCHASE", kind: "ORDER", partnerId: sid, notes: "أمر شراء من اقتراحات إعادة الطلب", currency: sup.currency || "SAR", exchangeRate: rate, lines: list.map((it) => ({ productId: it.productId, qty: Number(it.qty), unitPrice: rate !== 1 ? Math.round(((Number(it.price) || 0) / rate) * 10000) / 10000 : Number(it.price) || 0, taxCode: "S" })) });
       created.push({ id: d.id, number: d.number, partnerName: d.partnerName, lines: list.length });
     }

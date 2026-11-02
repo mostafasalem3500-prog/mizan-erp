@@ -1,5 +1,6 @@
 /** Round 2 routes: public invoice links, bank reconciliation, bulk import, backup export, extra reports. */
 import { Router } from "express";
+import { validTaxId, validPartnerTaxId, TAX_ID_MSG } from "../lib/country";
 import { db, tx } from "../db/pool";
 import { h, bad, notFound, num, isDate, today, TAX_CODES, r2, D } from "../lib/core";
 import { authenticate, perm, cid, actor, p } from "../lib/auth";
@@ -139,7 +140,7 @@ extra.post(
         try {
           const name = String(r.name || "").trim();
           if (!name) throw new Error("الاسم مطلوب");
-          if (r.vatNumber && !/^3\d{13}3$/.test(String(r.vatNumber))) throw new Error("رقم ضريبي غير صحيح");
+          if (r.vatNumber && !validPartnerTaxId(r.vatNumber)) throw new Error("رقم ضريبي غير صحيح");
           const data = { name, nameEn: r.nameEn || null, kind: String(r.kind || "").includes("فرد") || String(r.kind).toUpperCase() === "INDIVIDUAL" ? "INDIVIDUAL" : "COMPANY", vatNumber: r.vatNumber ? String(r.vatNumber) : null, crNumber: r.crNumber ? String(r.crNumber) : null, phone: r.phone ? String(r.phone) : null, email: r.email || null, street: r.street || null, buildingNo: r.buildingNo ? String(r.buildingNo) : null, district: r.district || null, city: r.city || null, postalCode: r.postalCode ? String(r.postalCode) : null, creditLimit: num(r.creditLimit), paymentTerms: Math.round(num(r.paymentTerms)), isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER" };
           const code = String(r.code || "").trim();
           const existing = code ? await t.maybe(`SELECT id FROM partners WHERE company_id=$1 AND code=$2`, [cid(req), code]) : await t.maybe(`SELECT id FROM partners WHERE company_id=$1 AND name=$2`, [cid(req), name]);

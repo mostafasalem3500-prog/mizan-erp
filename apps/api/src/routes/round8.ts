@@ -1,5 +1,6 @@
 /** Round 8: integrations — API keys & webhooks management, public REST API v1, customer portal. */
 import { Router, Request, Response, NextFunction } from "express";
+import { validTaxId, validPartnerTaxId, TAX_ID_MSG } from "../lib/country";
 import { randomUUID } from "crypto";
 import { db, tx } from "../db/pool";
 import { h, bad, AppError, notFound, num, isDate, today, addDays, r2 } from "../lib/core";
@@ -113,7 +114,7 @@ async function upsertCustomer(t: any, companyId: string, c: any) {
   const phone = c.phone ? String(c.phone).replace(/\s/g, "") : null;
   const found = phone ? await t.maybe(`SELECT * FROM partners WHERE company_id=$1 AND phone=$2 AND is_customer LIMIT 1`, [companyId, phone]) : c.email ? await t.maybe(`SELECT * FROM partners WHERE company_id=$1 AND lower(email)=lower($2) LIMIT 1`, [companyId, c.email]) : null;
   if (found) return found;
-  if (c.vatNumber && !/^3\d{13}3$/.test(c.vatNumber)) throw bad("الرقم الضريبي للعميل غير صحيح");
+  if (c.vatNumber && !validPartnerTaxId(c.vatNumber)) throw bad("الرقم الضريبي للعميل غير صحيح");
   const code = await nextCode(companyId, "C");
   return t.insert("partners", { companyId, code, name: String(c.name || phone), isCustomer: true, kind: c.vatNumber ? "COMPANY" : "INDIVIDUAL", phone, email: c.email || null, vatNumber: c.vatNumber || null, city: c.city || null, district: c.district || null, street: c.street || null, buildingNo: c.buildingNo || null, postalCode: c.postalCode || null, notes: "أُنشئ عبر الواجهة البرمجية" });
 }

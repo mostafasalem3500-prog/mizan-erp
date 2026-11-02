@@ -3,6 +3,8 @@ import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, isDate, today, monthEnd } from "../lib/core";
 import { post } from "../accounting/engine";
 import { loanInstallments, applyLoanInstallments } from "./hr";
+import { IS_EG } from "../lib/country";
+import { computeLineEG } from "./egypt";
 
 // GOSI (2024+ new rates for Saudis: total 21.5% on basic+housing → 9.75% employee / 11.75% employer incl. hazards & SANED;
 // non-Saudis: 2% occupational hazards, employer only). Rates are configurable per company later; sane defaults here.
@@ -40,9 +42,9 @@ export async function createRun(t: Db, companyId: string, user: string, r: RunIn
   const emps = await t.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [companyId]);
   if (!emps.length) throw bad("لا يوجد موظفون نشطون");
   const loans = await loanInstallments(t, companyId, r.period);
-  const lines = emps.map((e) => computeLine(e, r.adjustments?.[e.id], loans[e.id] || []));
+  const lines = emps.map((e) => (IS_EG ? computeLineEG : computeLine)(e, r.adjustments?.[e.id], loans[e.id] || []));
   const sum = (k: string) => r2(lines.reduce((a, l: any) => a + l[k], 0));
-  return t.insert("payroll_runs", { companyId, period: r.period, date, lines, totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence") + sum("loan")), totalNet: sum("net"), notes: r.notes || null, isDemo: !!r.isDemo, createdBy: user });
+  return t.insert("payroll_runs", { companyId, period: r.period, date, lines, totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence") + sum("loan")), totalNet: sum("net"), totalSalaryTax: IS_EG ? sum("salaryTax") : 0, totalMartyrs: IS_EG ? sum("martyrs") : 0, notes: r.notes || null, isDemo: !!r.isDemo, createdBy: user });
 }
 
 /** Accrual: Dr salaries (basic) + allowances + GOSI employer / Cr salaries payable (net) + GOSI payable (emp+er) + other deductions → salaries payable is net only; deductions reduce expense? No: deductions/absence reduce the expense (unpaid days). */
@@ -62,6 +64,12 @@ export async function postRun(t: Db, companyId: string, user: string, id: string
     { key: "GOSI_PAYABLE", credit: r2(gosiEmp + gosiEr), description: `تأمينات مستحقة ${run.period}` },
     { key: "EMP_ADVANCES", credit: loans, description: `أقساط سلف الموظفين ${run.period}` },
   ];
+  if (IS_EG) {
+    const tax = r2(L.reduce((a, l) => a + (l.salaryTax || 0), 0)), mart = r2(L.reduce((a, l) => a + (l.martyrs || 0), 0));
+    lines[2].description = `حصة صاحب العمل في التأمينات الاجتماعية ${run.period}`;
+    lines[4].description = `التأمينات الاجتماعية المستحقة (عامل + صاحب عمل) ${run.period}`;
+    lines.push({ key: "SALARY_TAX_PAYABLE", credit: tax, description: `ضريبة كسب العمل ${run.period}` }, { key: "MARTYRS_PAYABLE", credit: mart, description: `صندوق تكريم الشهداء 0.05% ${run.period}` });
+  }
   const e = await post(t, companyId, { date: run.date, type: "PAYROLL", sourceType: "PAYROLL", sourceId: run.id, reference: run.period, memo: `مسير رواتب ${run.period}`, createdBy: user, isDemo: run.isDemo, lines });
   await applyLoanInstallments(t, companyId, L.flatMap((l) => l.loanItems || []));
   return t.update("payroll_runs", { id }, { status: "POSTED", journalId: e!.id });

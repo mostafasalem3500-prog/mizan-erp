@@ -2,24 +2,31 @@
 import { Db } from "../db/pool";
 import { bad, r2, r4, r6, D, num, isDate, today } from "../lib/core";
 
-export const BASE = "SAR";
-export const DEFAULT_CURRENCIES: [string, string, string, number, number][] = [
+import { BASE_CURRENCY, IS_EG, CFG } from "../lib/country";
+export const BASE = BASE_CURRENCY;
+const SA_CURRENCIES: [string, string, string, number, number][] = [
   ["SAR", "ريال سعودي", "ر.س", 1, 2], ["USD", "دولار أمريكي", "$", 3.75, 2], ["EUR", "يورو", "€", 4.05, 2], ["GBP", "جنيه إسترليني", "£", 4.75, 2],
   ["AED", "درهم إماراتي", "د.إ", 1.0209, 2], ["KWD", "دينار كويتي", "د.ك", 12.2, 3], ["BHD", "دينار بحريني", "د.ب", 9.95, 3], ["QAR", "ريال قطري", "ر.ق", 1.03, 2],
   ["OMR", "ريال عماني", "ر.ع", 9.74, 3], ["EGP", "جنيه مصري", "ج.م", 0.078, 2], ["INR", "روبية هندية", "₹", 0.045, 2], ["CNY", "يوان صيني", "¥", 0.52, 2], ["TRY", "ليرة تركية", "₺", 0.11, 2],
 ];
+/** Egypt: rates in EGP per unit — indicative defaults only, the company updates them from its bank. */
+const EG_CURRENCIES: [string, string, string, number, number][] = [
+  ["EGP", "جنيه مصري", "ج.م", 1, 2], ["USD", "دولار أمريكي", "$", 48.5, 2], ["EUR", "يورو", "€", 52.5, 2], ["GBP", "جنيه إسترليني", "£", 61.5, 2],
+  ["SAR", "ريال سعودي", "ر.س", 12.93, 2], ["AED", "درهم إماراتي", "د.إ", 13.2, 2], ["KWD", "دينار كويتي", "د.ك", 158, 3], ["CNY", "يوان صيني", "¥", 6.7, 2], ["TRY", "ليرة تركية", "₺", 1.2, 2],
+];
+export const DEFAULT_CURRENCIES = IS_EG ? EG_CURRENCIES : SA_CURRENCIES;
 
 export async function seedCurrencies(t: Db, companyId: string) {
   await t.insertMany("currencies", DEFAULT_CURRENCIES.map(([code, nameAr, symbol, rate, decimals]) => ({ companyId, code, nameAr, symbol, rate, decimals })));
 }
 
 export async function listCurrencies(t: Db, companyId: string) {
-  return t.rows(`SELECT * FROM currencies WHERE company_id=$1 ORDER BY code='SAR' DESC, code`, [companyId]);
+  return t.rows(`SELECT * FROM currencies WHERE company_id=$1 ORDER BY code=$2 DESC, code`, [companyId, BASE]);
 }
 
 export async function getCurrency(t: Db, companyId: string, code: string) {
   const c = String(code || BASE).toUpperCase();
-  if (c === BASE) return { code: BASE, nameAr: "ريال سعودي", symbol: "ر.س", rate: 1, decimals: 2, isActive: true };
+  if (c === BASE) return { code: BASE, nameAr: CFG.currencyAr, symbol: CFG.currencySymbol, rate: 1, decimals: 2, isActive: true };
   const row = await t.maybe(`SELECT * FROM currencies WHERE company_id=$1 AND code=$2`, [companyId, c]);
   if (!row) throw bad(`العملة ${c} غير معرفة — أضفها من الإعدادات`);
   return row;
@@ -38,7 +45,7 @@ export async function rateFor(t: Db, companyId: string, code: string, date?: str
 export async function upsertCurrency(t: Db, companyId: string, b: any) {
   const code = String(b.code || "").toUpperCase().trim();
   if (!/^[A-Z]{3}$/.test(code)) throw bad("رمز العملة يجب أن يكون 3 أحرف (ISO)");
-  if (code === BASE) throw bad("الريال السعودي هو العملة الأساسية ولا يُعدَّل");
+  if (code === BASE) throw bad(`${CFG.currencyAr} هو العملة الأساسية ولا يُعدَّل`);
   const rate = r6(num(b.rate));
   if (rate <= 0) throw bad("سعر الصرف يجب أن يكون أكبر من صفر");
   const row = await t.maybe(`SELECT * FROM currencies WHERE company_id=$1 AND code=$2`, [companyId, code]);

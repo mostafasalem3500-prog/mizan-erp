@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Round 19 charity screens: sponsorships, in-kind donations, volunteers, alerts. */
 import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -79,7 +80,7 @@ export function SponsorshipsPage() {
             <td className={"n " + (r.overdue ? "neg-val" : "")}>{r.overdue ? <><Money v={r.overdueAmount} /><div className="small">{r.overdue} قسط</div></> : "—"}</td>
             <td className="row" style={{ gap: 4 }}>
               {can("payments.write") && r.status !== "ENDED" && <button className="btn sm primary" onClick={() => setCol(r)}>تحصيل</button>}
-              {r.overdue > 0 && r.sponsorPhone && <a className="btn sm" target="_blank" rel="noreferrer" href={waLink(r.sponsorPhone, `السلام عليكم ${r.sponsorName}،\nنذكّركم بقسط ${SP_KIND[r.kind]}${r.beneficiaryName ? " لـ " + r.beneficiaryName : ""} بمبلغ ${money(r.amount)} ريال (${r.overdue} قسط مستحق).\nجزاكم الله خيراً على عطائكم.`)}>واتساب تذكير</a>}
+              {r.overdue > 0 && r.sponsorPhone && <a className="btn sm" target="_blank" rel="noreferrer" href={waLink(r.sponsorPhone, `السلام عليكم ${r.sponsorName}،\nنذكّركم بقسط ${SP_KIND[r.kind]}${r.beneficiaryName ? " لـ " + r.beneficiaryName : ""} بمبلغ ${money(r.amount)} ${CFG.words.one} (${r.overdue} قسط مستحق).\nجزاكم الله خيراً على عطائكم.`)}>واتساب تذكير</a>}
               <button className="btn sm" onClick={() => nav(`/charity/receipts?q=${encodeURIComponent(r.number)}`)} title="سندات التحصيل">السجل</button>
               {can("payments.write") && <button className="btn sm ghost" onClick={() => setEdit(r)}>تعديل</button>}
             </td>

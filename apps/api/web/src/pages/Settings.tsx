@@ -1,3 +1,4 @@
+import { CUR, CFG } from "../shared/country";
 import { CurrenciesTab } from "./Pricing";
 import { IntegrationsTab } from "./Integrations";
 import { BranchesTab, SallaTab, ZidTab, BranchSelect } from "./Branches";
@@ -45,7 +46,7 @@ function CompanyForm() {
       <div className="form-grid">
         <Field label="الاسم بالعربية" span2><Input value={f.nameAr || ""} onChange={s("nameAr")} /></Field>
         <Field label="الاسم بالإنجليزية"><Input value={f.nameEn || ""} onChange={s("nameEn")} dir="ltr" /></Field>
-        <Field label="الرقم الضريبي" hint="15 رقماً — مطلوب للفوترة الإلكترونية"><Input value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" /></Field>
+        <Field label={CFG.taxIdLabel} hint={`${CFG.taxIdHint} — مطلوب للفوترة الإلكترونية`}><Input value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" /></Field>
         <Field label="السجل التجاري"><Input value={f.crNumber || ""} onChange={s("crNumber")} dir="ltr" /></Field>
         <Field label="الهاتف"><Input value={f.phone || ""} onChange={s("phone")} dir="ltr" /></Field>
         <Field label="البريد"><Input value={f.email || ""} onChange={s("email")} dir="ltr" /></Field>
@@ -61,7 +62,7 @@ function CompanyForm() {
         <Field label="الصلاحية"><label className="check"><input type="checkbox" checked={f.blockExpiredSales !== false} onChange={s("blockExpiredSales")} /> منع بيع الدفعات المنتهية الصلاحية</label></Field>
         <Field label="التسعير"><label className="check"><input type="checkbox" checked={!!f.pricesIncludeVat} onChange={s("pricesIncludeVat")} /> أسعار البيع شاملة الضريبة (للتجزئة)</label></Field>
         <Field label="البريد الصادر (SMTP)" hint="يُضبط من متغيرات الخادم SMTP_HOST/PORT/USER/PASS/FROM ثم يظهر زر «بريد» في الفواتير وشاشة التحصيل"><MailStatus /></Field>
-        <Field label="دورية الإقرار الضريبي" hint="ربع سنوي للمنشآت دون 40 مليون ر.س، وشهري لمن فوقها"><Select value={f.vatPeriod || "QUARTERLY"} onChange={s("vatPeriod")}><option value="QUARTERLY">ربع سنوي</option><option value="MONTHLY">شهري</option></Select></Field>
+        <Field label="دورية الإقرار الضريبي" hint={CFG.country === "EG" ? "إقرار ضريبة القيمة المضافة في مصر شهري (يُقدَّم خلال الشهر التالي)" : `ربع سنوي للمنشآت دون 40 مليون ${CUR()}، وشهري لمن فوقها`}><Select value={f.vatPeriod || "QUARTERLY"} onChange={s("vatPeriod")}><option value="QUARTERLY">ربع سنوي</option><option value="MONTHLY">شهري</option></Select></Field>
         <Field label="الشعار"><div className="row"><label className="btn sm">رفع شعار<input type="file" accept="image/*" hidden onChange={async (e) => { const file = e.target.files?.[0]; if (file) setF({ ...f, logo: await fileToDataUrl(file, 400) }); }} /></label>{f.logo && <><img src={f.logo} style={{ height: 40 }} alt="" /><button className="btn ghost sm" onClick={() => setF({ ...f, logo: null })}>✕</button></>}</div></Field>
       </div>
       {can("settings.write") && <button className="btn primary mt" disabled={busy} onClick={() => run(async () => { await api("/settings", { method: "PUT", body: f }); reload(); }, "تم الحفظ")}>حفظ</button>}

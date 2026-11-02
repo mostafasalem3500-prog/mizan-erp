@@ -3,6 +3,8 @@ import { r22 } from "./routes/round22";
 import { r23 } from "./routes/round23";
 import { r25 } from "./routes/round25";
 import { r27 } from "./routes/round27";
+import { egr } from "./routes/egypt";
+import { publicConfig, COUNTRY } from "./lib/country";
 import { r16 } from "./routes/round16";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -51,10 +53,11 @@ app.set("trust proxy", 1);
 app.use(compression());
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
+app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });
 app.get("/api/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ ok: true, version: "2.0.0", time: new Date() });
+    res.json({ ok: true, version: "2.0.0", country: COUNTRY, time: new Date() });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -85,6 +88,7 @@ app.use("/api", r22);
 app.use("/api", r23);
 app.use("/api", r25);
 app.use("/api", r27);
+app.use("/api", egr);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 
