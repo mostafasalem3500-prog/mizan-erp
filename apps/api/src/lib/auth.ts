@@ -4,7 +4,7 @@ import { AppError, forbidden } from "./core";
 import { db } from "../db/pool";
 import { reqCtx } from "./context";
 import { applyBranchScope } from "./branchScope";
-import { currentDeviceId } from "./desktopLicense";
+import { currentDeviceId, deviceMatches } from "./desktopLicense";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "mizan-dev-secret-change-me";
 
@@ -98,7 +98,7 @@ export function subscriptionState(company: any): { active: boolean; readOnly: bo
   if (company.status === "SUSPENDED") return { active: false, readOnly: true, daysLeft: 0, reason: "SUSPENDED" };
   // desktop: a licence bound to another PC (e.g. the data folder was copied) does not run here
   const dev = currentDeviceId();
-  if (dev && company.licensedDevice && company.licensedDevice !== dev) return { active: false, readOnly: true, daysLeft: 0, reason: "DEVICE" };
+  if (dev && company.licensedDevice && !deviceMatches(company.licensedDevice, dev)) return { active: false, readOnly: true, daysLeft: 0, reason: "DEVICE" };
   if (!company.subscriptionEndsAt) return { active: true, readOnly: false, daysLeft: null };
   const days = Math.ceil((new Date(company.subscriptionEndsAt).getTime() - Date.now()) / 86400000);
   if (days < 0) return { active: false, readOnly: true, daysLeft: days, reason: "EXPIRED" };

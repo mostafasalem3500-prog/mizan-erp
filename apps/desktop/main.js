@@ -27,25 +27,61 @@ function readCfg() { try { return JSON.parse(fs.readFileSync(cfgFile, "utf8")); 
 function writeCfg(c) { fs.mkdirSync(userData, { recursive: true }); fs.writeFileSync(cfgFile, JSON.stringify(c, null, 2)); }
 
 // ── device fingerprint (licence binding) ───────────────────────────────────
-// Windows: MachineGuid (stable across app reinstalls, changes only with a Windows reinstall).
-function machineSource() {
+// ID = A-B-C-K: A = motherboard/BIOS, B = CPU, C = system disk, K = checksum. The licence keeps working while
+// 2 of the 3 parts match, so reinstalling Windows changes nothing and one replaced part does not stop the program.
+const { execFile } = require("child_process");
+const HW_PS = [
+  "$ErrorActionPreference='SilentlyContinue'",
+  "$p=Get-CimInstance Win32_ComputerSystemProduct",
+  "$bb=Get-CimInstance Win32_BaseBoard",
+  "$c=Get-CimInstance Win32_Processor | Select-Object -First 1",
+  "$d=(Get-Partition -DriveLetter $env:SystemDrive.Substring(0,1) | Get-Disk).SerialNumber",
+  "if(-not $d){$d=(Get-CimInstance Win32_DiskDrive | Where-Object {$_.Index -eq 0}).SerialNumber}",
+  "[pscustomobject]@{uuid=$p.UUID;board=$bb.SerialNumber;boardMaker=$bb.Manufacturer;cpu=$c.ProcessorId;cpuName=$c.Name;disk=$d} | ConvertTo-Json -Compress",
+].join(";");
+const PS_ARGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", HW_PS];
+const clean = (v) => {
+  const s = String(v == null ? "" : v).trim();
+  const bare = s.replace(/[\s.:-]/g, "");
+  if (!bare || /^(0+|f+|none|null|na|notapplicable|defaultstring|tobefilledbyoem|systemserialnumber|oem|123456789|03000200040005000006000700080009)$/i.test(bare)) return "";
+  return s.toUpperCase();
+};
+function machineGuid() {
   try {
     if (process.platform === "win32") {
       const out = execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], { encoding: "utf8", windowsHide: true });
       const m = /MachineGuid\s+REG_\w+\s+([0-9a-f-]+)/i.exec(out);
-      if (m) return "win:" + m[1].toLowerCase();
+      if (m) return m[1].toLowerCase();
     } else {
-      for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) if (fs.existsSync(f)) return "nix:" + fs.readFileSync(f, "utf8").trim();
+      for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) if (fs.existsSync(f)) return fs.readFileSync(f, "utf8").trim();
     }
-  } catch (e) { log("machine id", e.message); }
-  const mac = Object.values(os.networkInterfaces()).flat().find((i) => i && !i.internal && i.mac && i.mac !== "00:00:00:00:00:00");
-  return "host:" + os.hostname() + "|" + (mac ? mac.mac : "");
+  } catch (e) { log("machine guid", e.message); }
+  return os.hostname();
 }
+let _hw = null; // hardware info from PowerShell (warmed up asynchronously at start)
+function parseHw(out) { try { return JSON.parse(String(out).trim()) || {}; } catch { return {}; } }
+function hwInfoSync() {
+  if (_hw) return _hw;
+  if (process.platform !== "win32") return (_hw = {});
+  try { _hw = parseHw(execFileSync("powershell.exe", PS_ARGS, { encoding: "utf8", windowsHide: true, timeout: 20000 })); }
+  catch (e) { log("hw info", e.message); _hw = {}; }
+  return _hw;
+}
+if (process.platform === "win32") execFile("powershell.exe", PS_ARGS, { windowsHide: true, timeout: 20000 }, (err, out) => { if (!_hw) _hw = err ? null : parseHw(out); });
+const h4 = (x) => crypto.createHash("sha256").update(x).digest("hex").slice(0, 4).toUpperCase();
 let _deviceId = null;
 function deviceId() {
   if (_deviceId) return _deviceId;
-  const h = crypto.createHash("sha256").update("mizan-erp-device|" + machineSource()).digest("hex").slice(0, 16).toUpperCase();
-  return (_deviceId = h.match(/.{4}/g).join("-"));
+  const hw = hwInfoSync();
+  const mg = machineGuid(); // fallback for a part that reports no serial (changes only with a Windows reinstall)
+  const parts = [
+    clean(hw.uuid) || (clean(hw.board) && clean(hw.boardMaker) + "|" + clean(hw.board)) || "mg:" + mg,
+    (clean(hw.cpu) && clean(hw.cpu) + "|" + clean(hw.cpuName)) || "mg:" + mg + ":cpu",
+    clean(hw.disk) || "mg:" + mg + ":disk",
+  ];
+  log("device parts", parts.map((p, i) => (p.startsWith("mg:") ? `${i}:fallback` : `${i}:hw`)).join(" "));
+  const abc = parts.map((p, i) => h4(`mizan-part-${i}|${p}`)).join("-");
+  return (_deviceId = abc + "-" + h4("mizan-dev-ck|" + abc));
 }
 function lanUrls(port) {
   return Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => `http://${i.address}:${port}`);

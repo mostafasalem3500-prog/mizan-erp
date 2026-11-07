@@ -1,4 +1,4 @@
-import { verifyDesktopLicense, signDesktopLicense, isDesktopLocal, currentDeviceId, normalizeDeviceId, DEVICE_ID_RE } from "../lib/desktopLicense";
+import { verifyDesktopLicense, signDesktopLicense, signRebindKey, isDesktopLocal, currentDeviceId, normalizeDeviceId, validDeviceId, deviceMatches, licenseServer, TRANSFERS_PER_YEAR, DesktopLicense } from "../lib/desktopLicense";
 import os from "os";
 
 /** Desktop (local) edition info for the licence screen: this PC's fingerprint and its LAN addresses when shared. */
@@ -117,6 +117,39 @@ auth.get(
   h(async () => (process.env.DEMO_EMAIL ? { email: process.env.DEMO_EMAIL, password: process.env.DEMO_PASSWORD } : { email: null })),
 );
 
+/**
+ * Cloud: self-service move of a desktop licence to a new PC (customer restored a backup on new hardware).
+ * Needs the original signed key (kept in the customer's database); limited per year; subscription dates are not touched.
+ */
+auth.post(
+  "/license/desktop-transfer",
+  h(async (req) => {
+    if (isDesktopLocal()) throw bad("هذه الخدمة على خادم التراخيص فقط");
+    const b = req.body || {};
+    const lic = verifyDesktopLicense(String(b.key || ""));
+    if (!lic || lic.type === "rebind") throw bad("مفتاح الترخيص غير صحيح");
+    const to = normalizeDeviceId(b.toDevice);
+    if (!validDeviceId(to)) throw bad("معرّف الجهاز الجديد غير صحيح");
+    return tx(async (t) => {
+      const rec = await t.maybe(`SELECT * FROM license_keys WHERE key=$1 AND desktop FOR UPDATE`, [String(b.key).trim()]);
+      if (!rec) throw bad("هذا الترخيص غير مسجل لدى خادم التراخيص — تواصل مع مزود النظام لنقله");
+      if (!rec.deviceId) throw bad("هذا الترخيص غير مرتبط بجهاز ولا يحتاج إلى نقل");
+      const cur = rec.currentDevice || rec.deviceId;
+      const log: any[] = rec.transferLog || [];
+      const last = log[log.length - 1];
+      // already moved here (e.g. the transfer key was lost) → issue it again without counting
+      if (deviceMatches(cur, to) && last && deviceMatches(last.to, to)) return { rebindKey: signRebindKey(last.from, to, rec.note), fromDevice: last.from, toDevice: to, remaining: null };
+      if (deviceMatches(cur, to)) throw bad("الترخيص يعمل على هذا الجهاز بالفعل — لا حاجة للنقل");
+      const yearAgo = Date.now() - 365 * 86400000;
+      const used = log.filter((x) => x.by === "self" && new Date(x.at).getTime() > yearAgo).length;
+      if (used >= TRANSFERS_PER_YEAR()) throw new AppError(429, `تم استخدام الحد المسموح لنقل الترخيص ذاتياً (${TRANSFERS_PER_YEAR()} مرات في السنة). تواصل مع مزود النظام لنقله.`, "TRANSFER_LIMIT");
+      log.push({ at: new Date().toISOString(), from: cur, to, by: "self", computer: String(b.computer || "").slice(0, 80) });
+      await t.exec(`UPDATE license_keys SET current_device=$2, transfer_log=$3 WHERE id=$1`, [rec.id, to, JSON.stringify(log)]);
+      return { rebindKey: signRebindKey(cur, to, rec.note), fromDevice: cur, toDevice: to, remaining: TRANSFERS_PER_YEAR() - used - 1 };
+    });
+  }),
+);
+
 auth.use(authenticate);
 
 auth.get(
@@ -174,7 +207,8 @@ auth.post(
     if (offline && !isDesktopLocal()) throw bad("هذا مفتاح لنسخة سطح المكتب المحلية — لا يُفعَّل على النسخة السحابية. اطلب مفتاحاً سحابياً MZN-…");
     if (!offline && isDesktopLocal() && rawKey.toUpperCase().startsWith("MZN-")) throw bad("هذا مفتاح للنسخة السحابية — النسخة المحلية تُفعَّل بمفتاح سطح المكتب MZD-…");
     const device = currentDeviceId();
-    if (offline?.deviceId && offline.deviceId !== device) throw bad(`هذا المفتاح صادر لجهاز آخر (${offline.deviceId}). معرّف هذا الجهاز: ${device || "غير معروف"} — أرسله لمزود النظام لإصدار مفتاح له`);
+    if (offline?.deviceId && !deviceMatches(offline.deviceId, device)) throw bad(`هذا المفتاح صادر لجهاز آخر (${offline.deviceId}). معرّف هذا الجهاز: ${device || "غير معروف"} — أرسله لمزود النظام لإصدار مفتاح له`);
+    if (offline?.type === "rebind") return applyRebind(req, offline);
     const key = offline ? rawKey : rawKey.toUpperCase();
     return tx(async (t) => {
       if (offline && !(await t.maybe(`SELECT id FROM license_keys WHERE key=$1`, [key])))
@@ -193,6 +227,51 @@ auth.post(
       await t.insert("audit_logs", { companyId: c.id, userId: req.auth.userId, userName: req.auth.userName, action: "LICENSE_ACTIVATED", entity: "company", entityId: c.id, details: { plan: lic.plan, months: lic.months, ends } });
       return { plan: lic.plan, maxUsers: lic.maxUsers, subscriptionEndsAt: ends };
     });
+  }),
+);
+
+/** Desktop: apply a transfer key — companies licensed on the old PC continue on this one (dates unchanged). */
+async function applyRebind(req: any, k: DesktopLicense) {
+  const device = currentDeviceId()!;
+  return tx(async (t) => {
+    const all = await t.rows(`SELECT id, name_ar, licensed_device FROM companies WHERE licensed_device IS NOT NULL`);
+    const moved = all.filter((c: any) => deviceMatches(c.licensedDevice, k.fromDevice) && !deviceMatches(c.licensedDevice, device));
+    if (!moved.length) {
+      if (req.company?.licensedDevice && deviceMatches(req.company.licensedDevice, device)) return { rebound: 0, message: "الترخيص يعمل على هذا الجهاز بالفعل" };
+      throw bad(`مفتاح النقل صادر لترخيص الجهاز ${k.fromDevice} ولا توجد على هذا الجهاز بيانات مرخّصة له — استعد النسخة الاحتياطية من الجهاز القديم أولاً`);
+    }
+    for (const c of moved) {
+      await t.exec(`UPDATE companies SET licensed_device=$2, updated_at=now() WHERE id=$1`, [c.id, device]);
+      await t.insert("audit_logs", { companyId: c.id, userId: req.auth.userId, userName: req.auth.userName, action: "LICENSE_TRANSFERRED", entity: "company", entityId: c.id, details: { from: c.licensedDevice, to: device } });
+    }
+    return { rebound: moved.length, toDevice: device };
+  });
+}
+
+/** Desktop: move this company's licence to the current PC through the cloud licence server (needs internet once). */
+auth.post(
+  "/license/transfer-here",
+  h(async (req) => {
+    if (!isDesktopLocal()) throw bad("متاح في نسخة سطح المكتب فقط");
+    if (!req.company) throw bad("اختر المنشأة أولاً");
+    if (!["OWNER", "ADMIN"].includes(req.auth.role || "") && !req.auth.superAdmin) throw new AppError(403, "المالك فقط يمكنه نقل الترخيص");
+    const device = currentDeviceId();
+    if (!device) throw bad("تعذّر قراءة معرّف هذا الجهاز");
+    if (!req.company.licensedDevice || deviceMatches(req.company.licensedDevice, device)) throw bad("الترخيص يعمل على هذا الجهاز — لا حاجة للنقل");
+    const k = await db.maybe(`SELECT key FROM license_keys WHERE company_id=$1 AND desktop AND activated_at IS NOT NULL ORDER BY activated_at DESC LIMIT 1`, [req.company.id]);
+    if (!k) throw bad("لم يُعثر على مفتاح الترخيص الأصلي في البيانات — تواصل مع مزود النظام");
+    let r: Response;
+    try {
+      r = await fetch(licenseServer() + "/api/auth/license/desktop-transfer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: k.key, toDevice: device, fromDevice: req.company.licensedDevice, computer: os.hostname() }), signal: AbortSignal.timeout(20000) });
+    } catch {
+      throw new AppError(503, `تعذّر الاتصال بخادم التراخيص. تأكد من الإنترنت وأعد المحاولة، أو أرسل لمزود النظام: الجهاز السابق ${req.company.licensedDevice} ← هذا الجهاز ${device} ليرسل لك «مفتاح نقل» تلصقه في خانة التفعيل.`, "OFFLINE");
+    }
+    const j: any = await r.json().catch(() => ({}));
+    if (!r.ok) throw new AppError(r.status === 429 ? 429 : 400, j.message || "رفض خادم التراخيص طلب النقل");
+    const rk = verifyDesktopLicense(j.rebindKey);
+    if (!rk || rk.type !== "rebind" || !deviceMatches(rk.deviceId, device)) throw bad("استجابة غير صحيحة من خادم التراخيص");
+    const out = await applyRebind(req, rk);
+    return { ...out, remaining: j.remaining };
   }),
 );
 
@@ -218,7 +297,7 @@ admin.post(
     const months = Math.max(1, Math.min(60, Number(req.body.months) || 12));
     const maxUsers = Math.max(1, Math.min(500, Number(req.body.maxUsers) || (plan === "BASIC" ? 3 : plan === "PRO" ? 10 : 100)));
     const deviceId = req.body.desktop && req.body.deviceId ? normalizeDeviceId(req.body.deviceId) : null;
-    if (deviceId && !DEVICE_ID_RE.test(deviceId)) throw bad("معرّف الجهاز غير صحيح — الصيغة XXXX-XXXX-XXXX-XXXX كما يظهر في شاشة الترخيص لدى العميل");
+    if (deviceId && !validDeviceId(deviceId)) throw bad("معرّف الجهاز غير صحيح — تأكد من نسخه كما يظهر في شاشة الترخيص لدى العميل (XXXX-XXXX-XXXX-XXXX)");
     const count = deviceId ? 1 : Math.max(1, Math.min(50, Number(req.body.count) || 1));
     const out: any[] = [];
     for (let i = 0; i < count; i++) {
@@ -231,6 +310,25 @@ admin.post(
       } else out.push(await db.insert("license_keys", { key, plan, months, maxUsers, note: req.body.note || null }));
     }
     return out;
+  }),
+);
+
+/** Provider-side transfer of a desktop licence to a new PC (no yearly limit) — for customers without internet. */
+admin.post(
+  "/license-keys/:id/transfer",
+  h(async (req) => {
+    const to = normalizeDeviceId(req.body?.deviceId);
+    if (!validDeviceId(to)) throw bad("معرّف الجهاز الجديد غير صحيح");
+    return tx(async (t) => {
+      const rec = await t.maybe(`SELECT * FROM license_keys WHERE id=$1 AND desktop FOR UPDATE`, [req.params.id]);
+      if (!rec) throw bad("المفتاح غير موجود أو ليس مفتاح سطح مكتب");
+      if (!rec.deviceId) throw bad("هذا المفتاح غير مرتبط بجهاز");
+      const cur = rec.currentDevice || rec.deviceId;
+      const log: any[] = rec.transferLog || [];
+      log.push({ at: new Date().toISOString(), from: cur, to, by: "admin", user: req.auth.email });
+      await t.exec(`UPDATE license_keys SET current_device=$2, transfer_log=$3 WHERE id=$1`, [rec.id, to, JSON.stringify(log)]);
+      return { key: signRebindKey(cur, to, rec.note), fromDevice: cur, toDevice: to };
+    });
   }),
 );
 
