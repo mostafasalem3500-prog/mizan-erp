@@ -184,6 +184,17 @@ function runPending(cfg) {
   }
 }
 
+// ── startup watchdog: rejects on timeout or on an uncaught error raised while a startup step is pending ──
+let startupFail = null;
+function guarded(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const done = (fn, v) => { clearTimeout(timer); startupFail = null; fn(v); };
+    const timer = setTimeout(() => done(reject, new Error(`${label}: انتهت مهلة الانتظار (${Math.round(ms / 60000)} دقائق)`)), ms);
+    startupFail = (e) => done(reject, new Error(`${label}: ${e && e.message ? e.message : e}`));
+    promise.then((v) => done(resolve, v), (e) => done(reject, e));
+  });
+}
+
 // ── local mode: embedded PostgreSQL + Mizan server in this process ─────────
 async function startLocal(cfg) {
   const EmbeddedPostgres = require("embedded-postgres").default || require("embedded-postgres");
@@ -199,9 +210,12 @@ async function startLocal(cfg) {
   if (lan && (await freePort(appPort)) !== appPort) throw new Error(`المنفذ ${appPort} مستخدم من برنامج آخر — أغلقه أو أوقف المشاركة على الشبكة`);
   const fresh = !fs.existsSync(path.join(dataDir, "PG_VERSION"));
   showStatus(fresh ? "تهيئة قاعدة البيانات المحلية لأول مرة…" : "تشغيل قاعدة البيانات المحلية…");
+  // an earlier first run that failed half-way leaves a directory initdb refuses to reuse
+  if (fresh && fs.existsSync(dataDir)) { log("removing incomplete pgdata"); fs.rmSync(dataDir, { recursive: true, force: true }); }
   pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
-  if (fresh) await pg.initialise();
-  await pg.start();
+  // never wait forever: a failure to launch the database binaries surfaces as an uncaught error, not a rejection
+  if (fresh) await guarded(pg.initialise(), 4 * 60000, "تعذّر تهيئة قاعدة البيانات المحلية");
+  await guarded(pg.start(), 3 * 60000, "تعذّر تشغيل قاعدة البيانات المحلية");
   if (fresh) await pg.createDatabase("mizan").catch((e) => log("createDatabase", e.message));
   showStatus("تشغيل خادم ميزان المحلي…");
   process.env.DATABASE_URL = `postgresql://mizan:${cfg.local.dbPassword}@127.0.0.1:${dbPort}/mizan`;
@@ -360,4 +374,4 @@ app.on("before-quit", async (e) => {
   await stopLocal();
   app.quit();
 });
-process.on("uncaughtException", (e) => log("uncaught", e.stack || e.message));
+process.on("uncaughtException", (e) => { log("uncaught", e.stack || e.message); if (startupFail) startupFail(e); });

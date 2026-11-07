@@ -10,3 +10,6 @@ fs.rmSync(out, { recursive: true, force: true });
 for (const [from, to] of need) fs.cpSync(path.join(api, from), path.join(out, to), { recursive: true });
 fs.writeFileSync(path.join(out, "package.json"), JSON.stringify({ name: "mizan-server", private: true, main: "dist/server.js" }, null, 2));
 console.log("server prepared in", out);
+
+// make sure the packaged app can execute the PostgreSQL binaries (see patch-embedded-postgres.js)
+require("./patch-embedded-postgres.js");
