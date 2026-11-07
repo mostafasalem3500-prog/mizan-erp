@@ -1,4 +1,16 @@
-import { verifyDesktopLicense, signDesktopLicense } from "../lib/desktopLicense";
+import { verifyDesktopLicense, signDesktopLicense, isDesktopLocal, currentDeviceId, normalizeDeviceId, DEVICE_ID_RE } from "../lib/desktopLicense";
+import os from "os";
+
+/** Desktop (local) edition info for the licence screen: this PC's fingerprint and its LAN addresses when shared. */
+function desktopInfo() {
+  if (!isDesktopLocal()) return null;
+  const lan = process.env.HOST === "0.0.0.0";
+  const port = process.env.PORT;
+  const urls = lan
+    ? Object.values(os.networkInterfaces()).flat().filter((i: any) => i && i.family === "IPv4" && !i.internal).map((i: any) => `http://${i.address}:${port}`)
+    : [];
+  return { deviceId: currentDeviceId(), lan, urls, computer: os.hostname() };
+}
 import { validTaxId, validPartnerTaxId, TAX_ID_MSG, CFG, IS_EG } from "../lib/country";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
@@ -114,7 +126,7 @@ auth.get(
     const companies = await companiesOf(u.id);
     const company = req.company ? { ...req.company, memberRole: undefined, memberBranchId: undefined, memberRestrict: undefined } : null;
     const branch = req.auth.branchId ? await db.maybe(`SELECT id, code, name FROM branches WHERE id=$1`, [req.auth.branchId]) : null;
-    return { user: publicUser(u), companies, company, role: req.auth.role, branch, lockedBranch: req.auth.lockedBranchId ? branch : null, subscription: subscriptionState(req.company), roles: Object.fromEntries(Object.entries(ROLES).map(([k, v]) => [k, v.ar])), superAdmin: !!u.isSuperAdmin };
+    return { user: publicUser(u), companies, company, role: req.auth.role, branch, lockedBranch: req.auth.lockedBranchId ? branch : null, subscription: subscriptionState(req.company), roles: Object.fromEntries(Object.entries(ROLES).map(([k, v]) => [k, v.ar])), superAdmin: !!u.isSuperAdmin, desktop: desktopInfo() };
   }),
 );
 
@@ -159,10 +171,14 @@ auth.post(
     // desktop licences are self-verifying (signed) — registered locally on first use so they cannot be reused
     const offline = rawKey.startsWith("MZD-") ? verifyDesktopLicense(rawKey) : null;
     if (rawKey.startsWith("MZD-") && !offline) throw bad("مفتاح ترخيص سطح المكتب غير صحيح أو معدَّل");
+    if (offline && !isDesktopLocal()) throw bad("هذا مفتاح لنسخة سطح المكتب المحلية — لا يُفعَّل على النسخة السحابية. اطلب مفتاحاً سحابياً MZN-…");
+    if (!offline && isDesktopLocal() && rawKey.toUpperCase().startsWith("MZN-")) throw bad("هذا مفتاح للنسخة السحابية — النسخة المحلية تُفعَّل بمفتاح سطح المكتب MZD-…");
+    const device = currentDeviceId();
+    if (offline?.deviceId && offline.deviceId !== device) throw bad(`هذا المفتاح صادر لجهاز آخر (${offline.deviceId}). معرّف هذا الجهاز: ${device || "غير معروف"} — أرسله لمزود النظام لإصدار مفتاح له`);
     const key = offline ? rawKey : rawKey.toUpperCase();
     return tx(async (t) => {
       if (offline && !(await t.maybe(`SELECT id FROM license_keys WHERE key=$1`, [key])))
-        await t.insert("license_keys", { key, plan: offline.plan, months: offline.months, maxUsers: offline.maxUsers, note: `ترخيص سطح المكتب ${offline.issuedAt}` });
+        await t.insert("license_keys", { key, plan: offline.plan, months: offline.months, maxUsers: offline.maxUsers, deviceId: offline.deviceId || null, desktop: true, note: `ترخيص سطح المكتب ${offline.issuedAt}${offline.note ? " — " + offline.note : ""}` });
       const lic = await t.maybe(`SELECT * FROM license_keys WHERE key=$1 FOR UPDATE`, [key]);
       if (!lic) throw bad("مفتاح الترخيص غير صحيح");
       if (lic.activatedAt) throw conflict("هذا المفتاح مستخدم مسبقاً");
@@ -172,6 +188,8 @@ auth.post(
       ends.setMonth(ends.getMonth() + lic.months);
       await t.exec(`UPDATE companies SET plan=$2, max_users=$3, subscription_ends_at=$4, status='ACTIVE', updated_at=now() WHERE id=$1`, [c.id, lic.plan, lic.maxUsers, ends]);
       await t.exec(`UPDATE license_keys SET company_id=$2, activated_at=now() WHERE id=$1`, [lic.id, c.id]);
+      // bind the company to this PC so a copied data folder runs read-only elsewhere
+      if (offline?.deviceId) await t.exec(`UPDATE companies SET licensed_device=$2 WHERE id=$1`, [c.id, offline.deviceId]);
       await t.insert("audit_logs", { companyId: c.id, userId: req.auth.userId, userName: req.auth.userName, action: "LICENSE_ACTIVATED", entity: "company", entityId: c.id, details: { plan: lic.plan, months: lic.months, ends } });
       return { plan: lic.plan, maxUsers: lic.maxUsers, subscriptionEndsAt: ends };
     });
@@ -199,14 +217,18 @@ admin.post(
     if (!["BASIC", "PRO", "ENTERPRISE"].includes(plan)) throw bad("الخطة غير صحيحة");
     const months = Math.max(1, Math.min(60, Number(req.body.months) || 12));
     const maxUsers = Math.max(1, Math.min(500, Number(req.body.maxUsers) || (plan === "BASIC" ? 3 : plan === "PRO" ? 10 : 100)));
-    const count = Math.max(1, Math.min(50, Number(req.body.count) || 1));
+    const deviceId = req.body.desktop && req.body.deviceId ? normalizeDeviceId(req.body.deviceId) : null;
+    if (deviceId && !DEVICE_ID_RE.test(deviceId)) throw bad("معرّف الجهاز غير صحيح — الصيغة XXXX-XXXX-XXXX-XXXX كما يظهر في شاشة الترخيص لدى العميل");
+    const count = deviceId ? 1 : Math.max(1, Math.min(50, Number(req.body.count) || 1));
     const out: any[] = [];
     for (let i = 0; i < count; i++) {
       const raw = randomBytes(10).toString("hex").toUpperCase();
       const key = `MZN-${plan.slice(0, 3)}-${raw.slice(0, 5)}-${raw.slice(5, 10)}-${raw.slice(10, 15)}-${raw.slice(15, 20)}`;
-      out.push(req.body.desktop
-        ? { key: signDesktopLicense({ plan, months, maxUsers, note: req.body.note || null }), plan, months, maxUsers, note: req.body.note || null, desktop: true, createdAt: new Date() }
-        : await db.insert("license_keys", { key, plan, months, maxUsers, note: req.body.note || null }));
+      if (req.body.desktop) {
+        // signed offline key; a record is kept here for the provider (it cannot be activated on the cloud)
+        const k = signDesktopLicense({ plan, months, maxUsers, note: req.body.note || null, deviceId });
+        out.push({ ...(await db.insert("license_keys", { key: k, plan, months, maxUsers, note: req.body.note || null, deviceId, desktop: true })), desktop: true });
+      } else out.push(await db.insert("license_keys", { key, plan, months, maxUsers, note: req.body.note || null }));
     }
     return out;
   }),

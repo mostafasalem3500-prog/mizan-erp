@@ -10,6 +10,8 @@ const fs = require("fs");
 const net = require("net");
 const http = require("http");
 const crypto = require("crypto");
+const os = require("os");
+const { execFileSync } = require("child_process");
 
 const DEFAULT_CLOUD = "https://mizan-api-production-7c00.up.railway.app";
 const APP_TITLE = "ميزان ERP";
@@ -23,6 +25,31 @@ const log = (...a) => { try { fs.appendFileSync(logFile, `[${new Date().toISOStr
 
 function readCfg() { try { return JSON.parse(fs.readFileSync(cfgFile, "utf8")); } catch { return {}; } }
 function writeCfg(c) { fs.mkdirSync(userData, { recursive: true }); fs.writeFileSync(cfgFile, JSON.stringify(c, null, 2)); }
+
+// ── device fingerprint (licence binding) ───────────────────────────────────
+// Windows: MachineGuid (stable across app reinstalls, changes only with a Windows reinstall).
+function machineSource() {
+  try {
+    if (process.platform === "win32") {
+      const out = execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], { encoding: "utf8", windowsHide: true });
+      const m = /MachineGuid\s+REG_\w+\s+([0-9a-f-]+)/i.exec(out);
+      if (m) return "win:" + m[1].toLowerCase();
+    } else {
+      for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) if (fs.existsSync(f)) return "nix:" + fs.readFileSync(f, "utf8").trim();
+    }
+  } catch (e) { log("machine id", e.message); }
+  const mac = Object.values(os.networkInterfaces()).flat().find((i) => i && !i.internal && i.mac && i.mac !== "00:00:00:00:00:00");
+  return "host:" + os.hostname() + "|" + (mac ? mac.mac : "");
+}
+let _deviceId = null;
+function deviceId() {
+  if (_deviceId) return _deviceId;
+  const h = crypto.createHash("sha256").update("mizan-erp-device|" + machineSource()).digest("hex").slice(0, 16).toUpperCase();
+  return (_deviceId = h.match(/.{4}/g).join("-"));
+}
+function lanUrls(port) {
+  return Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => `http://${i.address}:${port}`);
+}
 
 let win = null;
 let pg = null; // embedded postgres instance (local mode)
@@ -52,14 +79,88 @@ function showStatus(text) {
   if (win && !win.isDestroyed()) win.webContents.send("status", text);
 }
 
+// ── full backups of the local database (the pgdata folder, copied while PostgreSQL is stopped) ──
+const dataDirOf = () => path.join(userData, "pgdata");
+const autoBackupDir = () => path.join(userData, "backups");
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+function writeBackup(destRoot) {
+  const src = dataDirOf();
+  if (!fs.existsSync(path.join(src, "PG_VERSION"))) throw new Error("لا توجد قاعدة بيانات محلية بعد");
+  const dest = path.join(destRoot, `Mizan-Backup-${stamp()}`);
+  fs.mkdirSync(dest, { recursive: true });
+  fs.cpSync(src, path.join(dest, "pgdata"), { recursive: true, filter: (f) => !/postmaster\.pid$/.test(f) });
+  const c = readCfg();
+  // the database password lives in the config — it is needed to open these files again
+  fs.writeFileSync(path.join(dest, "mizan-backup.json"), JSON.stringify({ app: "Mizan ERP", version: app.getVersion(), createdAt: new Date().toISOString(), computer: os.hostname(), deviceId: deviceId(), dbPassword: c.local && c.local.dbPassword, jwtSecret: c.local && c.local.jwtSecret }, null, 2));
+  return dest;
+}
+/** Daily automatic copy into %APPDATA%\Mizan ERP\backups before the database starts; keeps the last 7. */
+function autoBackup(cfg) {
+  try {
+    if (!fs.existsSync(path.join(dataDirOf(), "PG_VERSION"))) return;
+    const last = cfg.local && cfg.local.lastAutoBackup ? new Date(cfg.local.lastAutoBackup).getTime() : 0;
+    if (Date.now() - last < 20 * 3600 * 1000) return;
+    showStatus("نسخة احتياطية يومية تلقائية…");
+    const d = writeBackup(autoBackupDir());
+    cfg.local.lastAutoBackup = new Date().toISOString(); writeCfg(cfg);
+    const all = fs.readdirSync(autoBackupDir()).filter((n) => n.startsWith("Mizan-Backup-")).sort();
+    for (const old of all.slice(0, Math.max(0, all.length - 7))) fs.rmSync(path.join(autoBackupDir(), old), { recursive: true, force: true });
+    log("auto backup", d);
+  } catch (e) { log("auto backup failed", e.message); }
+}
+async function backupNow() {
+  const r = await dialog.showOpenDialog(win, { title: "اختر مجلد حفظ النسخة الاحتياطية (يفضَّل فلاشة أو قرص خارجي أو OneDrive)", properties: ["openDirectory", "createDirectory"] });
+  if (r.canceled || !r.filePaths[0]) return;
+  const ok = await dialog.showMessageBox(win, { type: "question", buttons: ["إلغاء", "متابعة"], defaultId: 1, cancelId: 0, title: APP_TITLE, message: "سيُغلق البرنامج قاعدة البيانات لحظياً لأخذ نسخة كاملة ثم يعيد التشغيل.", detail: "إذا كانت المشاركة على الشبكة مفعّلة فأبلغ المستخدمين الآخرين بحفظ عملهم أولاً." });
+  if (ok.response !== 1) return;
+  const c = readCfg(); c.pendingBackup = r.filePaths[0]; writeCfg(c);
+  quitting = true; await stopLocal(); app.relaunch(); app.exit(0);
+}
+async function restoreBackup() {
+  const r = await dialog.showOpenDialog(win, { title: "اختر مجلد النسخة الاحتياطية (Mizan-Backup-…)", properties: ["openDirectory"], defaultPath: autoBackupDir() });
+  if (r.canceled || !r.filePaths[0]) return;
+  const dir = r.filePaths[0];
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(path.join(dir, "mizan-backup.json"), "utf8")); } catch { meta = null; }
+  if (!meta || !fs.existsSync(path.join(dir, "pgdata", "PG_VERSION"))) return dialog.showErrorBox(APP_TITLE, "هذا المجلد ليس نسخة احتياطية من ميزان (يجب أن يحتوي على pgdata و mizan-backup.json).");
+  const ok = await dialog.showMessageBox(win, { type: "warning", buttons: ["إلغاء", "استعادة"], defaultId: 0, cancelId: 0, title: APP_TITLE, message: `استعادة النسخة المأخوذة في ${String(meta.createdAt).slice(0, 16).replace("T", " ")}؟`, detail: "ستحل محل البيانات الحالية. البيانات الحالية لا تُحذف بل تُنقل إلى مجلد pgdata-before-restore-… داخل مجلد البرنامج." });
+  if (ok.response !== 1) return;
+  const c = readCfg(); c.pendingRestore = dir; writeCfg(c);
+  quitting = true; await stopLocal(); app.relaunch(); app.exit(0);
+}
+/** Runs queued backup/restore while PostgreSQL is not running (start of local mode). */
+function runPending(cfg) {
+  if (cfg.pendingBackup) {
+    const to = cfg.pendingBackup; delete cfg.pendingBackup; writeCfg(cfg);
+    try { const d = writeBackup(to); dialog.showMessageBox({ type: "info", title: APP_TITLE, message: "تم حفظ النسخة الاحتياطية", detail: d }); }
+    catch (e) { dialog.showErrorBox(APP_TITLE, "تعذّر حفظ النسخة الاحتياطية:\n" + e.message); }
+  }
+  if (cfg.pendingRestore) {
+    const from = cfg.pendingRestore; delete cfg.pendingRestore; writeCfg(cfg);
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(from, "mizan-backup.json"), "utf8"));
+      if (fs.existsSync(dataDirOf())) fs.renameSync(dataDirOf(), path.join(userData, `pgdata-before-restore-${stamp()}`));
+      fs.cpSync(path.join(from, "pgdata"), dataDirOf(), { recursive: true });
+      cfg.local = { ...cfg.local, dbPassword: meta.dbPassword || cfg.local.dbPassword, jwtSecret: meta.jwtSecret || cfg.local.jwtSecret };
+      writeCfg(cfg);
+      log("restored from", from);
+    } catch (e) { dialog.showErrorBox(APP_TITLE, "تعذّرت الاستعادة:\n" + e.message); }
+  }
+}
+
 // ── local mode: embedded PostgreSQL + Mizan server in this process ─────────
 async function startLocal(cfg) {
   const EmbeddedPostgres = require("embedded-postgres").default || require("embedded-postgres");
   const dataDir = path.join(userData, "pgdata");
   if (!cfg.local) cfg.local = { dbPassword: crypto.randomBytes(18).toString("hex"), jwtSecret: crypto.randomBytes(32).toString("hex"), dbPort: 54329, appPort: 3517 };
   writeCfg(cfg);
+  runPending(cfg);
+  autoBackup(cfg);
   const dbPort = await freePort(cfg.local.dbPort);
-  const appPort = await freePort(cfg.local.appPort);
+  const lan = !!cfg.local.lan;
+  // a shared (LAN) server keeps a fixed port so the other PCs always find it
+  const appPort = lan ? cfg.local.appPort : await freePort(cfg.local.appPort);
+  if (lan && (await freePort(appPort)) !== appPort) throw new Error(`المنفذ ${appPort} مستخدم من برنامج آخر — أغلقه أو أوقف المشاركة على الشبكة`);
   const fresh = !fs.existsSync(path.join(dataDir, "PG_VERSION"));
   showStatus(fresh ? "تهيئة قاعدة البيانات المحلية لأول مرة…" : "تشغيل قاعدة البيانات المحلية…");
   pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
@@ -72,8 +173,10 @@ async function startLocal(cfg) {
   process.env.JWT_SECRET = cfg.local.jwtSecret;
   process.env.TRIAL_DAYS = process.env.TRIAL_DAYS || "30";
   process.env.MIZAN_EDITION = "desktop-local";
-  process.env.PUBLIC_URL = `http://127.0.0.1:${appPort}`;
-  process.env.HOST = "127.0.0.1"; // not exposed to the network
+  process.env.MIZAN_DEVICE_ID = deviceId();
+  // local only by default; "share on the local network" lets the office PCs connect to this one
+  process.env.HOST = lan ? "0.0.0.0" : "127.0.0.1";
+  process.env.PUBLIC_URL = (lan && lanUrls(appPort)[0]) || `http://127.0.0.1:${appPort}`;
   const serverEntry = path.join(__dirname, "server", "dist", "server.js");
   require(serverEntry);
   localUrl = `http://127.0.0.1:${appPort}`;
@@ -140,6 +243,32 @@ function buildMenu() {
           const c = readCfg(); delete c.mode; writeCfg(c);
           app.relaunch(); app.quit();
         } },
+        { label: "معرّف الجهاز (للترخيص)…", click: async () => {
+          const r = await dialog.showMessageBox(win, { type: "info", buttons: ["إغلاق", "نسخ المعرّف"], defaultId: 1, cancelId: 0, title: APP_TITLE, message: `معرّف هذا الجهاز: ${deviceId()}`, detail: `اسم الجهاز: ${os.hostname()}\n\nأرسل هذا المعرّف لمزود النظام للحصول على مفتاح ترخيص (MZD-…) يعمل على هذا الجهاز فقط، ثم فعّله من الإعدادات ← الاشتراك والترخيص.` });
+          if (r.response === 1) require("electron").clipboard.writeText(deviceId());
+        } },
+        ...(cfg.mode === "local" ? [
+          { label: "مشاركة على الشبكة المحلية (جهاز رئيسي)", type: "checkbox", checked: !!(cfg.local && cfg.local.lan), click: async (item) => {
+            const on = item.checked;
+            const r = await dialog.showMessageBox(win, { type: "question", buttons: ["إلغاء", on ? "تفعيل وإعادة التشغيل" : "إيقاف وإعادة التشغيل"], defaultId: 1, cancelId: 0, title: APP_TITLE,
+              message: on ? "السماح لأجهزة الشبكة بالاتصال بهذا الجهاز؟" : "إيقاف المشاركة على الشبكة؟",
+              detail: on ? "يصبح هذا الجهاز خادماً للأجهزة الأخرى في نفس الشبكة (كل مستخدم بحسابه وصلاحياته). عند ظهور تنبيه جدار حماية ويندوز اختر «السماح» للشبكات الخاصة. يجب أن يبقى هذا الجهاز يعمل أثناء عمل الآخرين." : "لن تتمكن الأجهزة الأخرى من الاتصال، والبيانات تبقى كما هي." });
+            if (r.response !== 1) { item.checked = !on; return; }
+            const c = readCfg(); c.local = { ...(c.local || {}), lan: on }; writeCfg(c);
+            quitting = true; await stopLocal(); app.relaunch(); app.exit(0);
+          } },
+          { label: "عنوان الاتصال من الأجهزة الأخرى…", enabled: !!(cfg.local && cfg.local.lan), click: () => {
+            const urls = lanUrls(readCfg().local.appPort);
+            dialog.showMessageBox(win, { type: "info", title: APP_TITLE, message: "عنوان هذا الجهاز على الشبكة", detail: (urls.join("\n") || "لا يوجد اتصال بشبكة") + "\n\nعلى الأجهزة الأخرى: ثبّت ميزان ← «الوضع السحابي» ← «خادم مخصص أو جهاز رئيسي» والصق العنوان، أو افتحه من المتصفح." });
+          } },
+        ] : []),
+        ...(cfg.mode === "local" ? [
+          { type: "separator" },
+          { label: "نسخة احتياطية كاملة الآن…", click: () => backupNow() },
+          { label: "استعادة نسخة احتياطية…", click: () => restoreBackup() },
+          { label: "فتح مجلد النسخ التلقائية", click: () => { fs.mkdirSync(autoBackupDir(), { recursive: true }); shell.openPath(autoBackupDir()); } },
+        ] : []),
+        { type: "separator" },
         { label: "فتح مجلد بيانات البرنامج", click: () => shell.openPath(userData) },
         { type: "separator" },
         { label: "خروج", accelerator: "Alt+F4", role: "quit" },
@@ -157,7 +286,7 @@ function buildMenu() {
 }
 
 // ── IPC from the launcher page ─────────────────────────────────────────────
-ipcMain.handle("get-config", () => ({ ...readCfg(), defaultCloud: DEFAULT_CLOUD, version: app.getVersion() }));
+ipcMain.handle("get-config", () => { const c = readCfg(); return { mode: c.mode, cloudUrl: c.cloudUrl, defaultCloud: DEFAULT_CLOUD, version: app.getVersion(), deviceId: deviceId() }; });
 ipcMain.handle("choose-mode", async (_e, { mode, cloudUrl }) => {
   const c = readCfg();
   c.mode = mode === "local" ? "local" : "cloud";

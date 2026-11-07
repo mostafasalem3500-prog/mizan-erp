@@ -8,14 +8,24 @@ import { randomBytes } from "crypto";
 
 export const LICENSE_PUBLIC_KEY = "2e3cc4051759fbd8d3d7f2b3ae14493aebc9a09387e616a17293dab4fcee7bc0";
 
-export interface DesktopLicense { plan: string; months: number; maxUsers: number; nonce: string; issuedAt: string; note?: string | null }
+export interface DesktopLicense { plan: string; months: number; maxUsers: number; nonce: string; issuedAt: string; note?: string | null; deviceId?: string | null }
+
+/** Device fingerprint as shown by the desktop app: XXXX-XXXX-XXXX-XXXX (hex). */
+export const DEVICE_ID_RE = /^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/;
+export const normalizeDeviceId = (v: any) => String(v || "").trim().toUpperCase().replace(/\s+/g, "");
+
+export const isDesktopLocal = () => process.env.MIZAN_EDITION === "desktop-local";
+/** The fingerprint of the PC this server runs on (set by the desktop shell), or null on the cloud. */
+export const currentDeviceId = () => (isDesktopLocal() ? normalizeDeviceId(process.env.MIZAN_DEVICE_ID) || null : null);
 
 const b64u = (b: Uint8Array | Buffer) => Buffer.from(b).toString("base64url");
 
 export function signDesktopLicense(p: Omit<DesktopLicense, "nonce" | "issuedAt">): string {
   const sk = process.env.LICENSE_SIGNING_KEY;
   if (!sk || !/^[0-9a-f]{64}$/i.test(sk)) throw new Error("مفتاح توقيع التراخيص (LICENSE_SIGNING_KEY) غير مضبوط على الخادم");
-  const payload: DesktopLicense = { ...p, nonce: randomBytes(6).toString("hex"), issuedAt: new Date().toISOString().slice(0, 10) };
+  const deviceId = p.deviceId ? normalizeDeviceId(p.deviceId) : null;
+  if (deviceId && !DEVICE_ID_RE.test(deviceId)) throw new Error("معرّف الجهاز غير صحيح — الصيغة XXXX-XXXX-XXXX-XXXX كما يظهر في البرنامج");
+  const payload: DesktopLicense = { ...p, deviceId, nonce: randomBytes(6).toString("hex"), issuedAt: new Date().toISOString().slice(0, 10) };
   const body = Buffer.from(JSON.stringify(payload), "utf8");
   const sig = ed25519.sign(body, Buffer.from(sk, "hex"));
   return `MZD-${b64u(body)}.${b64u(sig)}`;

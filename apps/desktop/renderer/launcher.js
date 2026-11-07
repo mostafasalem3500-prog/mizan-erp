@@ -1,6 +1,7 @@
 (async () => {
   const cfg = await window.mizanDesktop.getConfig();
   document.getElementById("ver").textContent = `الإصدار ${cfg.version}`;
+  document.getElementById("dev").textContent = `معرّف الجهاز: ${cfg.deviceId}`;
   const url = document.getElementById("cloudUrl");
   url.value = cfg.cloudUrl || cfg.defaultCloud;
   const go = async (mode, btn) => {

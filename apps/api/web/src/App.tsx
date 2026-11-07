@@ -214,7 +214,7 @@ export function App() {
 function SubscriptionLine({ me }: { me: any }) {
   const s = me.subscription;
   if (!s) return null;
-  if (s.readOnly) return <div style={{ color: "#fca5a5" }}>⚠ {s.reason === "SUSPENDED" ? "الحساب موقوف" : "انتهى الاشتراك — قراءة فقط"}</div>;
+  if (s.readOnly) return <div style={{ color: "#fca5a5" }}>⚠ {s.reason === "SUSPENDED" ? "الحساب موقوف" : s.reason === "DEVICE" ? "الترخيص لجهاز آخر — قراءة فقط" : "انتهى الاشتراك — قراءة فقط"}</div>;
   if (s.daysLeft !== null && s.daysLeft <= 30) return <div style={{ color: "#fcd34d" }}>{me.company.plan === "TRIAL" ? "تجريبي" : me.company.plan} · متبقٍ {s.daysLeft} يوم</div>;
   return <div>الخطة: {me.company.plan === "TRIAL" ? "تجريبية" : me.company.plan}</div>;
 }
