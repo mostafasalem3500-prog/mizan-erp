@@ -132,5 +132,7 @@ migrate()
   })
   .catch((e) => {
     console.error("migration failed", e);
+    // inside the desktop app the server shares the Electron process: report instead of killing the whole app
+    if (process.env.MIZAN_EDITION === "desktop-local") { (global as any).__mizanBootError = e; return; }
     process.exit(1);
   });

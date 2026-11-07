@@ -106,7 +106,7 @@ function waitHealth(url, timeoutMs = 90000) {
     const tick = () => {
       http.get(url + "/api/health", (res) => { res.resume(); if (res.statusCode === 200) resolve(); else retry(); }).on("error", retry);
     };
-    const retry = () => (Date.now() - started > timeoutMs ? reject(new Error("لم يبدأ الخادم المحلي خلال الوقت المتوقع")) : setTimeout(tick, 400));
+    const retry = () => (global.__mizanBootError ? reject(new Error("تعذّر تجهيز قاعدة البيانات: " + (global.__mizanBootError.message || global.__mizanBootError))) : Date.now() - started > timeoutMs ? reject(new Error("لم يبدأ الخادم المحلي خلال الوقت المتوقع")) : setTimeout(tick, 400));
     tick();
   });
 }
@@ -195,6 +195,40 @@ function guarded(promise, ms, label) {
   });
 }
 
+/** A postgres left running by a crashed earlier start keeps the data directory locked: stop it first. */
+function killStalePostmaster(dataDir) {
+  const pidFile = path.join(dataDir, "postmaster.pid");
+  if (!fs.existsSync(pidFile)) return;
+  const pid = Number(String(fs.readFileSync(pidFile, "utf8")).split(/\r?\n/)[0]);
+  let alive = false;
+  try { if (pid > 0) { process.kill(pid, 0); alive = true; } } catch {}
+  if (alive) {
+    log("stopping stale postgres", pid);
+    try { require("child_process").execFileSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" }); } catch (e) { try { process.kill(pid); } catch {} }
+  }
+  try { fs.rmSync(pidFile, { force: true }); } catch {}
+}
+
+/** The application database must be UTF8. Creates it from template0; replaces an empty one created with another encoding. */
+async function ensureUtf8Database(pgInst) {
+  const admin = pgInst.getPgClient("postgres");
+  await admin.connect();
+  try {
+    const row = (await admin.query(`SELECT pg_encoding_to_char(encoding) enc FROM pg_database WHERE datname='mizan'`)).rows[0];
+    if (row && row.enc === "UTF8") return;
+    if (row) {
+      const app = pgInst.getPgClient("mizan");
+      await app.connect();
+      let rows = 0;
+      try { const t = (await app.query(`SELECT to_regclass('public.companies') t`)).rows[0].t; if (t) rows = Number((await app.query(`SELECT COUNT(*) c FROM companies`)).rows[0].c); } finally { await app.end(); }
+      if (rows > 0) throw new Error(`قاعدة البيانات المحلية بترميز ${row.enc} وتحتوي بيانات — تواصل مع الدعم لتحويلها إلى UTF8`);
+      log("recreating database as UTF8 (was", row.enc + ")");
+      await admin.query(`DROP DATABASE mizan`);
+    }
+    await admin.query(`CREATE DATABASE mizan TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`);
+  } finally { await admin.end(); }
+}
+
 // ── local mode: embedded PostgreSQL + Mizan server in this process ─────────
 async function startLocal(cfg) {
   const EmbeddedPostgres = require("embedded-postgres").default || require("embedded-postgres");
@@ -212,11 +246,14 @@ async function startLocal(cfg) {
   showStatus(fresh ? "تهيئة قاعدة البيانات المحلية لأول مرة…" : "تشغيل قاعدة البيانات المحلية…");
   // an earlier first run that failed half-way leaves a directory initdb refuses to reuse
   if (fresh && fs.existsSync(dataDir)) { log("removing incomplete pgdata"); fs.rmSync(dataDir, { recursive: true, force: true }); }
-  pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
+  // UTF8 + C locale regardless of the Windows language: an Arabic Windows otherwise creates a WIN1256 cluster
+  // that rejects Arabic/Unicode text the server sends (e.g. the box-drawing comments of the first migration)
+  pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, initdbFlags: ["--encoding=UTF8", "--lc-collate=C", "--lc-ctype=C"], onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
+  if (!fresh) killStalePostmaster(dataDir);
   // never wait forever: a failure to launch the database binaries surfaces as an uncaught error, not a rejection
   if (fresh) await guarded(pg.initialise(), 4 * 60000, "تعذّر تهيئة قاعدة البيانات المحلية");
   await guarded(pg.start(), 3 * 60000, "تعذّر تشغيل قاعدة البيانات المحلية");
-  if (fresh) await pg.createDatabase("mizan").catch((e) => log("createDatabase", e.message));
+  await ensureUtf8Database(pg);
   showStatus("تشغيل خادم ميزان المحلي…");
   process.env.DATABASE_URL = `postgresql://mizan:${cfg.local.dbPassword}@127.0.0.1:${dbPort}/mizan`;
   process.env.PORT = String(appPort);
@@ -273,6 +310,7 @@ async function launch() {
     await win.loadURL(url);
   } catch (e) {
     log("local start failed", e.stack || e.message);
+    await stopLocal(); // never leave an orphan postgres holding the data directory
     dialog.showErrorBox(APP_TITLE, `تعذّر تشغيل الوضع المحلي:\n${e.message}\n\nيمكنك التحويل إلى الوضع السحابي من قائمة «ميزان».\nسجل الأخطاء: ${logFile}`);
     win.loadFile(path.join(__dirname, "renderer", "launcher.html"));
   }
