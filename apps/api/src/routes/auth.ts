@@ -150,6 +150,20 @@ auth.post(
   }),
 );
 
+/** Cloud: is this desktop licence still on the asking PC? (used by online desktops to lock a PC the licence left) */
+auth.post(
+  "/license/desktop-status",
+  h(async (req) => {
+    if (isDesktopLocal()) throw bad("هذه الخدمة على خادم التراخيص فقط");
+    const lic = verifyDesktopLicense(String(req.body?.key || ""));
+    if (!lic || lic.type === "rebind") throw bad("مفتاح الترخيص غير صحيح");
+    const rec = await db.maybe(`SELECT device_id, current_device FROM license_keys WHERE key=$1 AND desktop`, [String(req.body.key).trim()]);
+    if (!rec || !rec.deviceId) return { state: "unknown" };
+    const cur = rec.currentDevice || rec.deviceId;
+    return { state: deviceMatches(cur, normalizeDeviceId(req.body.device)) ? "ok" : "moved", currentDevice: cur };
+  }),
+);
+
 auth.use(authenticate);
 
 auth.get(
