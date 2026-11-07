@@ -1,7 +1,7 @@
 import { CFG } from "../shared/country";
 /** Round 20 screens: product profile, treasury (cash & bank accounts), journal entry page, inventory count sheet & operations summary. */
 import React, { useContext, useMemo, useState } from "react";
-import { ChCtx } from "../charity/CharityApp";
+import { ChCtx } from "../charity/ctx";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, useAction, useCompanyContext, today, fmtDate, fmtDT, SearchBox, matches, useSorted, Th, exportExcel, PdfBtn, PrintBtn, useBase, confirmDlg, JTYPE_AR, sourceLink, TAX_AR, PeriodFilter, monthStart } from "../lib";
 import { ProductEditor, AdjustmentModal, StockCardModal } from "./Master";

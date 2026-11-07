@@ -253,21 +253,8 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   );
 }
 
-export function QuickPartner({ role, onClose }: { role: "CUSTOMER" | "SUPPLIER"; onClose: (p?: any) => void }) {
-  const { run, busy } = useAction();
-  const [f, setF] = useState<any>({ name: "", phone: "", vatNumber: "", kind: "INDIVIDUAL", city: "" });
-  return (
-    <Modal narrow title={role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { const p = await api("/partners", { body: { ...f, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER" } }); onClose(p); })}>حفظ</button></>}>
-      <div className="grid">
-        <Field label="الاسم"><Input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="النوع"><Select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="INDIVIDUAL">فرد</option><option value="COMPANY">منشأة</option></Select></Field>
-        <Field label="الجوال"><Input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} dir="ltr" /></Field>
-        <Field label="الرقم الضريبي" hint="مطلوب للفاتورة الضريبية القياسية (B2B)"><Input value={f.vatNumber} onChange={(e) => setF({ ...f, vatNumber: e.target.value })} dir="ltr" /></Field>
-        <Field label="المدينة"><Input value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} /></Field>
-      </div>
-    </Modal>
-  );
-}
+export { QuickPartner } from "./PartnerEditor";
+import { QuickPartner } from "./PartnerEditor";
 
 // ─── view / print ──────────────────────────────────────────────────────────
 export function DocumentView() {
@@ -466,7 +453,12 @@ export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicVie
             {qr && <div style={{ textAlign: "center" }}><img src={qr} alt="QR" style={{ width: 120, height: 120 }} />{d.etaUuid && <div className="small num" dir="ltr" style={{ fontSize: 9, maxWidth: 140, wordBreak: "break-all" }}>{d.etaUuid}</div>}</div>}
           </div>
           <div className="grid c2 mb">
-            <div><div className="muted small">{isSale ? "العميل" : "المورد"}</div><b>{d.partnerName}</b>{d.partner && <div className="small">{[d.partner.buildingNo, d.partner.street, d.partner.district, d.partner.city].filter(Boolean).join("، ")}{d.partner.vatNumber && <> · الرقم الضريبي: <span className="num">{d.partner.vatNumber}</span></>}{d.partner.phone && <> · <span className="num">{d.partner.phone}</span></>}</div>}</div>
+            <div><div className="muted small">{isSale ? "العميل" : "المورد"}</div><b>{d.partnerName}</b>{d.partner && <div className="small">
+              {[d.partner.buildingNo && `مبنى ${d.partner.buildingNo}`, d.partner.street, d.partner.district, d.partner.city, d.partner.postalCode, d.partner.additionalNo && `إضافي ${d.partner.additionalNo}`].filter(Boolean).join("، ")}
+              {d.partner.vatNumber ? <div>الرقم الضريبي: <span className="num">{d.partner.vatNumber}</span></div> : (d.partner.idType && d.partner.idType !== "CRN" ? d.partner.idNumber : d.partner.crNumber) ? <div>{({ CRN: "السجل التجاري", NAT: "الهوية الوطنية", IQA: "الإقامة", "700": "الرقم الموحد", PAS: "جواز السفر", GCC: "هوية خليجية" } as any)[d.partner.idType || "CRN"] || "رقم الهوية"}: <span className="num">{d.partner.idType && d.partner.idType !== "CRN" ? d.partner.idNumber : d.partner.crNumber}</span></div> : null}
+              {d.partner.vatNumber && d.partner.crNumber && <div>السجل التجاري: <span className="num">{d.partner.crNumber}</span></div>}
+              {(d.partner.phone || d.partner.email) && <div>{d.partner.phone && <span className="num">{d.partner.phone}</span>}{d.partner.phone && d.partner.email && " · "}{d.partner.email && <span dir="ltr">{d.partner.email}</span>}</div>}
+            </div>}</div>
             {d.reason && <div><div className="muted small">سبب الإشعار</div>{d.reason}</div>}
           </div>
           <table><thead><tr><th>#</th><th>البيان</th><th>الكمية</th><th>سعر الوحدة</th>{d.lines.some((l: any) => Number(l.discountPct)) && <th>خصم</th>}<th>المبلغ قبل الضريبة</th>{showVat && <><th>الضريبة</th><th>الإجمالي</th></>}</tr></thead>

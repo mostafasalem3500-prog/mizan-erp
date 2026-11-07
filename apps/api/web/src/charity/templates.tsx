@@ -9,9 +9,8 @@ export type Col = { k: string; label: string; w?: string; n?: boolean };
 export type Section = { id: string; title: string; fields?: Field[]; checks?: { k: string; options: string[]; multi?: boolean; label?: string }[]; text?: string; big?: boolean; sign?: boolean; thumb?: boolean; noteLines?: number; table?: { k: string; cols: Col[]; rows: number }; after?: boolean };
 export type Tpl = { key: string; code: string; title: string; subtitle?: string; sections: Section[]; signatures: string[]; note: string; seal?: boolean; pageBreak?: string; letter?: boolean };
 
-export const DEFAULT_NAME = "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة";
-export const DEFAULT_LOGO = "/charity/logo.png";
-export const DEFAULT_LICENSE = "1000888600";
+import { DEFAULT_NAME, DEFAULT_LOGO, DEFAULT_LICENSE } from "./ctx";
+export { DEFAULT_NAME, DEFAULT_LOGO, DEFAULT_LICENSE };
 export const ROLES: Record<string, string> = { preparer: "المُعِد / المحاسب", cashier: "أمين الصندوق", finance: "المدير المالي", authority: "صاحب الصلاحية", requester: "مقدم الطلب", receiver: "مستلم المبلغ", executive: "المدير التنفيذي", procurement: "مسؤول المشتريات", committee: "المستلم / ممثل الإدارة المستفيدة", custodian: "صاحب العهدة", volunteer: "المتطوع المستلِم للمبلغ", programLead: "مسؤول البرنامج / المبادرة", storekeeper: "أمين المستودع", chairman: "رئيس مجلس الإدارة", researcher: "الباحث الاجتماعي", aidCommittee: "لجنة المساعدات" };
 
 const amount = (k = "amount"): Field[] => [{ k, label: `المبلغ رقماً (${CFG.words.one})`, kind: "amount" }, { k: k + "Words", label: "المبلغ كتابةً", span: 2, kind: "words" }];

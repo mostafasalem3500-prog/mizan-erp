@@ -2,9 +2,10 @@
 <html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ميزان ERP</title><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"><link rel="stylesheet" href="style.css"></head>
 <body><div class="wrap">
   <div class="brand"><img src="../assets/icon.png" alt=""><h1>مرحباً بك في ميزان ERP</h1></div>
-  <p class="lead">اختر طريقة تشغيل البرنامج على هذا الجهاز. يمكنك تغييرها لاحقاً من قائمة «ميزان».</p>
+  <p class="lead">اختر طريقة التشغيل لهذه الجلسة. الحسابات والبيانات في الوضع المحلي مستقلة تماماً عن السحابي.</p>
+  <p class="last" id="last" hidden></p>
   <div class="cards">
-    <div class="card">
+    <div class="card" id="c-cloud">
       <h2>☁️ الوضع السحابي <span class="tag">موصى به</span></h2>
       <ul>
         <li>نفس حساباتك وبياناتك على كل أجهزتك وفروعك</li>
@@ -15,7 +16,7 @@
       <details><summary>خادم مخصص أو جهاز رئيسي على الشبكة؟</summary><input id="cloudUrl" placeholder="https://… أو http://192.168.1.10:3517" dir="ltr" /></details>
       <button class="btn" id="cloud">تشغيل سحابي</button>
     </div>
-    <div class="card">
+    <div class="card" id="c-local">
       <h2>💻 الوضع المحلي <span class="tag">دون إنترنت</span></h2>
       <ul>
         <li>قاعدة بيانات على هذا الجهاز فقط</li>
@@ -25,8 +26,10 @@
         <li>النسخ الاحتياطي من الإعدادات ← النسخ الاحتياطي (مسؤوليتك)</li>
       </ul>
       <button class="btn ghost" id="local">تشغيل محلي</button>
+      <p class="hint" id="localHint"></p>
     </div>
   </div>
+  <label class="remember"><input type="checkbox" id="remember"> تذكّر اختياري وافتح مباشرة في المرات القادمة (يمكن التغيير من قائمة «ميزان» ← تغيير وضع التشغيل)</label>
   <p class="foot" id="ver"></p>
   <p class="foot" id="dev" dir="ltr"></p>
 </div>

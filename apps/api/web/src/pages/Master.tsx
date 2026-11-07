@@ -56,7 +56,7 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
         {loading && !data ? <Loading /> : !filtered.length ? <Empty text={active ? "لا نتائج مطابقة للفلاتر" : "لا توجد بيانات"} /> : (
           <div className="table-wrap"><table className="tbl"><thead><tr><Th k="code" s={s}>الكود</Th><Th k="name" s={s}>الاسم</Th><th>النوع</th><th>الرقم الضريبي</th><th>الجوال</th><Th k="city" s={s}>المدينة</Th><th>شروط السداد</th><Th k="lastDocDate" s={s}>آخر حركة</Th><Th k="overdue" s={s} n>المتأخر</Th><Th k="balance" s={s} n>الرصيد</Th><th /></tr></thead>
             <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
-              <td className="dt">{p.code}</td><td><b className="link" style={{ cursor: "pointer", color: "var(--primary)" }} onClick={() => nav(`/${isCust ? "customers" : "suppliers"}/${p.id}`)}>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}{isCust && Number(p.creditLimit) > 0 && Number(p.balance) > Number(p.creditLimit) && <span className="badge red" style={{ marginInlineStart: 4 }}>تجاوز الحد</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td><td className="small dt">{fmtDate(p.lastDocDate)}</td>
+              <td className="dt">{p.code}</td><td><b className="link" style={{ cursor: "pointer", color: "var(--primary)" }} onClick={() => nav(`/${isCust ? "customers" : "suppliers"}/${p.id}`)}>{p.name}</b>{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}{p.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}{isCust && CFG.country === "SA" && p.kind === "COMPANY" && p.taxReady === false && <span className="badge amber" style={{ marginInlineStart: 4 }} title={`ناقص للفاتورة الضريبية: ${(p.taxMissing || []).join("، ")}`}>بيانات ناقصة</span>}{isCust && Number(p.creditLimit) > 0 && Number(p.balance) > Number(p.creditLimit) && <span className="badge red" style={{ marginInlineStart: 4 }}>تجاوز الحد</span>}</td><td>{p.kind === "COMPANY" ? "منشأة" : "فرد"}</td><td className="num">{p.vatNumber}</td><td className="num">{p.phone}</td><td>{p.city}</td><td>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</td><td className="small dt">{fmtDate(p.lastDocDate)}</td>
               <td className="n">{Number(p.overdue) > 0 ? <span className="neg-val"><Money v={p.overdue} /></span> : ""}</td>
               <td className="n"><Money v={p.balance} sign /></td>
               <td className="row" style={{ gap: 4 }}><button className="btn sm primary" onClick={() => nav(`/${isCust ? "customers" : "suppliers"}/${p.id}`)}>الملف</button><button className="btn sm" onClick={() => setStmt(p)}>كشف حساب</button>{can("partners.write") && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}</td>
@@ -71,49 +71,8 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   );
 }
 
-export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onClose: (s?: boolean) => void }) {
-  const { run, busy } = useAction();
-  const toast = useToast();
-  const { data: currencies } = useFetch("/currencies");
-  const { data: priceLists } = useFetch("/price-lists");
-  const EG = CFG.country === "EG";
-  const whtTypes = useFetch<any>(role === "SUPPLIER" || p.isSupplier ? (EG ? "/tax/eg-wht/types" : "/tax/wht/types") : null);
-  const [f, setF] = useState<any>({ kind: "COMPANY", country: CFG.country, paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, ...p });
-  const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  return (
-    <Modal title={p.id ? `تعديل: ${p.name}` : role === "CUSTOMER" ? "عميل جديد" : "مورد جديد"} onClose={() => onClose()} footer={<>
-      {p.id && <button className="btn danger sm" onClick={() => run(async () => { if (!confirmDlg("حذف / إيقاف؟")) return; const r = await api(`/partners/${p.id}`, { method: "DELETE" }); if (r.message) toast(r.message); onClose(true); })}>حذف</button>}
-      <div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { p.id ? await api(`/partners/${p.id}`, { method: "PUT", body: f }) : await api("/partners", { body: f }); onClose(true); }, "تم الحفظ")}>حفظ</button></>}>
-      <div className="form-grid">
-        <Field label="الاسم" span2><Input autoFocus value={f.name || ""} onChange={s("name")} /></Field>
-        <Field label="النوع"><Select value={f.kind} onChange={s("kind")}><option value="COMPANY">منشأة</option><option value="INDIVIDUAL">فرد</option></Select></Field>
-        <Field label="الكود (تلقائي)"><Input value={f.code || ""} onChange={s("code")} dir="ltr" /></Field>
-        <Field label={CFG.taxIdLabel} hint={EG ? "9 أرقام للشركات، أو الرقم القومي 14 رقماً للأفراد" : CFG.taxIdHint}><Input value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" /></Field>
-        <Field label="السجل التجاري"><Input value={f.crNumber || ""} onChange={s("crNumber")} dir="ltr" /></Field>
-        <Field label="الجوال"><Input value={f.phone || ""} onChange={s("phone")} dir="ltr" /></Field>
-        <Field label="البريد"><Input value={f.email || ""} onChange={s("email")} dir="ltr" /></Field>
-        <Field label="الشارع"><Input value={f.street || ""} onChange={s("street")} /></Field>
-        <Field label="رقم المبنى"><Input value={f.buildingNo || ""} onChange={s("buildingNo")} dir="ltr" /></Field>
-        <Field label="الحي"><Input value={f.district || ""} onChange={s("district")} /></Field>
-        <Field label="المدينة"><Input value={f.city || ""} onChange={s("city")} /></Field>
-        <Field label="الرمز البريدي"><Input value={f.postalCode || ""} onChange={s("postalCode")} dir="ltr" /></Field>
-        <Field label="الدولة"><Input value={f.country || CFG.country} onChange={s("country")} dir="ltr" /></Field>
-        {EG && <Field label="المحافظة"><Input value={f.governate || ""} onChange={s("governate")} list="eg-gov" /><datalist id="eg-gov">{["القاهرة", "الجيزة", "الإسكندرية", "القليوبية", "الشرقية", "الدقهلية", "الغربية", "المنوفية", "البحيرة", "دمياط", "بورسعيد", "الإسماعيلية", "السويس", "أسيوط", "سوهاج", "قنا", "الأقصر", "أسوان"].map((g) => <option key={g} value={g} />)}</datalist></Field>}
-        {EG && <Field label="نوع المتعامل في الفاتورة الإلكترونية"><Select value={f.etaType || ""} onChange={s("etaType")}><option value="">تلقائي (من البيانات)</option><option value="B">شركة / منشأة (B)</option><option value="P">شخص طبيعي (P)</option><option value="F">أجنبي (F)</option></Select></Field>}
-        {EG && <Field label="الرقم القومي / رقم الهوية" hint="مطلوب للأفراد في فواتير 50,000 جنيه فأكثر"><Input value={f.idNumber || ""} onChange={s("idNumber")} dir="ltr" /></Field>}
-        <Field label="أيام السداد (0 = نقدي)"><NumInput value={f.paymentTerms} onChange={s("paymentTerms")} /></Field>
-        <Field label="حد الائتمان"><NumInput value={f.creditLimit} onChange={s("creditLimit")} /></Field>
-        <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || CFG.currency} onChange={s("currency")}>{(currencies || [{ code: CFG.currency, nameAr: CFG.currencyAr }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
-        <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
-        <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>
-        {EG && !!f.isSupplier && <Field label="الخصم تحت حساب الضريبة (الافتراضي في سندات الصرف)" hint="يُخصم من المدفوعات للمورد ويورَّد بنموذج 41 (للتعاملات فوق 300 جنيه)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— لا يُخصم —</option>{Object.entries(whtTypes.data?.types || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(1).replace(/\.0$/, "")}%</option>)}</Select></Field>}
-        {!EG && !!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country })} /> مورد غير مقيم في المملكة</label></Field>}
-        {!EG && !!f.isSupplier && !!f.isNonResident && <Field label="نوع الدفعات الافتراضي (نسبة الاستقطاع)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— يُحدد في كل سند —</option>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>}
-        <Field label="ملاحظات" span3><textarea className="input" value={f.notes || ""} onChange={s("notes")} /></Field>
-      </div>
-    </Modal>
-  );
-}
+export { PartnerEditor } from "./PartnerEditor";
+import { PartnerEditor } from "./PartnerEditor";
 
 /** Kept for existing imports — the full statement lives in Statements.tsx. */
 export const StatementModal = PartnerStatement;

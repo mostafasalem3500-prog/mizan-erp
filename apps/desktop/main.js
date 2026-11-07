@@ -230,6 +230,17 @@ async function ensureUtf8Database(pgInst) {
 }
 
 // ── local mode: embedded PostgreSQL + Mizan server in this process ─────────
+/** PostgreSQL settings sized to this PC (defaults are tuned for a tiny server). Durability (fsync, full writes) is kept. */
+function pgTuning() {
+  const mb = Math.floor(os.totalmem() / 1048576);
+  const shared = Math.max(128, Math.min(1024, Math.floor(mb / 8)));
+  const set = {
+    shared_buffers: `${shared}MB`, effective_cache_size: `${Math.max(512, Math.floor(mb / 2))}MB`, work_mem: "16MB", maintenance_work_mem: "128MB",
+    wal_buffers: "16MB", max_connections: "40", checkpoint_timeout: "15min", max_wal_size: "1GB", checkpoint_completion_target: "0.9",
+    random_page_cost: "1.1", effective_io_concurrency: "0", jit: "off", log_checkpoints: "off", synchronous_commit: "on",
+  };
+  return Object.entries(set).flatMap(([k, v]) => ["-c", `${k}=${v}`]);
+}
 async function startLocal(cfg) {
   const EmbeddedPostgres = require("embedded-postgres").default || require("embedded-postgres");
   const dataDir = path.join(userData, "pgdata");
@@ -248,7 +259,7 @@ async function startLocal(cfg) {
   if (fresh && fs.existsSync(dataDir)) { log("removing incomplete pgdata"); fs.rmSync(dataDir, { recursive: true, force: true }); }
   // UTF8 + C locale regardless of the Windows language: an Arabic Windows otherwise creates a WIN1256 cluster
   // that rejects Arabic/Unicode text the server sends (e.g. the box-drawing comments of the first migration)
-  pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, initdbFlags: ["--encoding=UTF8", "--lc-collate=C", "--lc-ctype=C"], onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
+  pg = new EmbeddedPostgres({ databaseDir: dataDir, user: "mizan", password: cfg.local.dbPassword, port: dbPort, persistent: true, initdbFlags: ["--encoding=UTF8", "--lc-collate=C", "--lc-ctype=C"], postgresFlags: pgTuning(), onLog: (m) => log("[pg]", String(m).trim()), onError: (m) => log("[pg:err]", String(m).trim()) });
   if (!fresh) killStalePostmaster(dataDir);
   // never wait forever: a failure to launch the database binaries surfaces as an uncaught error, not a rejection
   if (fresh) await guarded(pg.initialise(), 4 * 60000, "تعذّر تهيئة قاعدة البيانات المحلية");
@@ -300,9 +311,14 @@ function createWindow() {
   buildMenu();
 }
 
+let firstLaunch = true;
 async function launch() {
   const cfg = readCfg();
-  if (!cfg.mode) return win.loadFile(path.join(__dirname, "renderer", "launcher.html"));
+  // the mode screen opens on every start unless the user ticked «تذكّر اختياري»
+  const ask = !cfg.mode || (firstLaunch && !cfg.remember && !cfg.skipAsk);
+  if (firstLaunch && cfg.skipAsk) { delete cfg.skipAsk; writeCfg(cfg); }
+  firstLaunch = false;
+  if (ask) return win.loadFile(path.join(__dirname, "renderer", "launcher.html"));
   if (cfg.mode === "cloud") return win.loadURL(cfg.cloudUrl || DEFAULT_CLOUD);
   await win.loadFile(path.join(__dirname, "renderer", "starting.html"));
   try {
@@ -328,7 +344,8 @@ function buildMenu() {
         { label: "تغيير وضع التشغيل…", click: async () => {
           const r = await dialog.showMessageBox(win, { type: "question", buttons: ["إلغاء", "تغيير"], defaultId: 1, cancelId: 0, title: APP_TITLE, message: "تغيير وضع التشغيل؟", detail: "البيانات المحلية لا تُحذف عند التحويل، ويمكنك العودة إليها في أي وقت. سيُعاد تشغيل البرنامج." });
           if (r.response !== 1) return;
-          const c = readCfg(); delete c.mode; writeCfg(c);
+          const c = readCfg(); delete c.mode; c.remember = false; writeCfg(c);
+          quitting = true; await stopLocal();
           app.relaunch(); app.quit();
         } },
         { label: "معرّف الجهاز (للترخيص)…", click: async () => {
@@ -374,10 +391,14 @@ function buildMenu() {
 }
 
 // ── IPC from the launcher page ─────────────────────────────────────────────
-ipcMain.handle("get-config", () => { const c = readCfg(); return { mode: c.mode, cloudUrl: c.cloudUrl, defaultCloud: DEFAULT_CLOUD, version: app.getVersion(), deviceId: deviceId() }; });
-ipcMain.handle("choose-mode", async (_e, { mode, cloudUrl }) => {
+ipcMain.handle("get-config", () => { const c = readCfg(); return { mode: c.mode, remember: !!c.remember, hasLocalData: fs.existsSync(path.join(dataDirOf(), "PG_VERSION")), cloudUrl: c.cloudUrl, defaultCloud: DEFAULT_CLOUD, version: app.getVersion(), deviceId: deviceId() }; });
+ipcMain.handle("choose-mode", async (_e, { mode, cloudUrl, remember }) => {
   const c = readCfg();
-  c.mode = mode === "local" ? "local" : "cloud";
+  const next = mode === "local" ? "local" : "cloud";
+  const restart = !!pg && next === "cloud"; // local server already running in this process: restart cleanly into the cloud
+  c.mode = next;
+  c.remember = !!remember;
+  if (restart) { c.skipAsk = true; writeCfg(c); quitting = true; await stopLocal(); app.relaunch(); app.exit(0); return true; }
   if (c.mode === "cloud") c.cloudUrl = (cloudUrl || DEFAULT_CLOUD).replace(/\/+$/, "");
   writeCfg(c);
   buildMenu();

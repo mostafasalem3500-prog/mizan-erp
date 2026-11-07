@@ -1,6 +1,7 @@
 /** Go-live checklist for a company: what is configured, what is still missing, with the screen that fixes it. */
 import { Db } from "../db/pool";
 import { IS_EG } from "../lib/country";
+import { checkPartner } from "../lib/partnerRules";
 
 export async function readiness(t: Db, companyId: string, company: any) {
   const n = async (sql: string) => Number((await t.one(sql, [companyId])).c);
@@ -13,6 +14,11 @@ export async function readiness(t: Db, companyId: string, company: any) {
     { key: "products", label: "الأصناف والخدمات", ok: (await n(`SELECT COUNT(*) c FROM products WHERE company_id=$1 AND is_active AND NOT is_demo`)) > 0, to: "/products" },
     { key: "images", label: "صور الأصناف لنقطة البيع", ok: (await n(`SELECT COUNT(*) c FROM products WHERE company_id=$1 AND is_active AND NOT is_demo AND image IS NOT NULL`)) > 0, to: "/products", optional: true },
     { key: "customers", label: "العملاء", ok: (await n(`SELECT COUNT(*) c FROM partners WHERE company_id=$1 AND is_customer AND NOT is_demo`)) > 0, to: "/customers", optional: true },
+    ...(IS_EG ? [] : [await (async () => {
+      const cs = await t.rows(`SELECT * FROM partners WHERE company_id=$1 AND is_customer AND is_active AND NOT is_demo AND kind='COMPANY'`, [companyId]);
+      const bad = cs.filter((p: any) => !checkPartner(p).standardReady).length;
+      return { key: "customerTax", label: "بيانات الفاتورة الضريبية لعملاء المنشآت (الرقم الضريبي والعنوان الوطني والجوال)", ok: bad === 0, to: "/customers", optional: !cs.length, hint: bad ? `${bad} عميل بيانات ناقصة — تظهر عليهم علامة «بيانات ناقصة» في قائمة العملاء` : undefined };
+    })()]),
     { key: "suppliers", label: "الموردون", ok: (await n(`SELECT COUNT(*) c FROM partners WHERE company_id=$1 AND is_supplier AND NOT is_demo`)) > 0, to: "/suppliers", optional: true },
     { key: "bank", label: "حساب بنكي واحد على الأقل بحركات", ok: (await n(`SELECT COUNT(*) c FROM accounts a WHERE a.company_id=$1 AND a.subtype='BANK' AND EXISTS (SELECT 1 FROM journal_lines l WHERE l.account_id=a.id)`)) > 0, to: "/accounts", optional: true },
     { key: "users", label: "مستخدمون بأدوار (كاشير، محاسب…)", ok: (await n(`SELECT COUNT(*) c FROM memberships WHERE company_id=$1 AND is_active`)) > 1, to: "/settings/users", optional: true },

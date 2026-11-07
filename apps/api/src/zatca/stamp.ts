@@ -1,3 +1,4 @@
+import { buyerId } from "../lib/partnerRules";
 /**
  * Stamps a posted sales invoice/credit/debit note:
  *   phase 1 → phase-1 QR only.
@@ -40,7 +41,7 @@ export function invoiceToUbl(company: any, inv: any, lines: any[], cfg: any, ori
       additionalNo: company.additionalNo, district: company.district, city: company.city, postalCode: company.postalCode, country: company.country,
     },
     customer: inv.partner
-      ? { name: inv.partner.name, vat: inv.partner.vatNumber, cr: inv.partner.crNumber, street: inv.partner.street, buildingNo: inv.partner.buildingNo, district: inv.partner.district, city: inv.partner.city, postalCode: inv.partner.postalCode, country: inv.partner.country }
+      ? { name: inv.partner.name, vat: inv.partner.vatNumber, cr: buyerId(inv.partner), idScheme: inv.partner.idType || "CRN", street: inv.partner.street, buildingNo: inv.partner.buildingNo, additionalNo: inv.partner.additionalNo, district: inv.partner.district, city: inv.partner.city, postalCode: inv.partner.postalCode, country: inv.partner.country || "SA" }
       : inv.invoiceType === "SIMPLIFIED" ? null : { name: inv.partnerName || "عميل", vat: inv.partnerVat },
     billingReference: origin?.number || null,
     reason: inv.reason,

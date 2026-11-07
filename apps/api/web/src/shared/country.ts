@@ -4,6 +4,8 @@ export const CFG = {
   vatRate: 15, currency: "SAR", currencyAr: "ريال سعودي", currencySymbol: "ر.س",
   words: { one: "ريال", two: "ريالان", plural: "ريالات", acc: "ريالاً", sub: "هللة", subTwo: "هللتان", subPlural: "هللات" },
   taxAuthority: "هيئة الزكاة والضريبة والجمارك", taxIdLabel: "الرقم الضريبي", taxIdPattern: "^3\\d{13}3$", taxIdHint: "15 رقماً يبدأ وينتهي بـ 3",
+  /** charity-association interface enabled on this server; desktop = the embedded server of the desktop app (data on this PC) */
+  charity: false, desktop: false,
   modules: { zatca: true, zakat: true, saWht: true, egWht: false, eta: false, egPayroll: false, incomeTax: false, salla: true, wps: true } as Record<string, boolean>,
 };
 export const IS_EG = () => CFG.country === "EG";

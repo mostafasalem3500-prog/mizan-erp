@@ -443,3 +443,9 @@ tr.row-warn td { background: var(--accent-soft); }
 
 /* ── Egypt edition ── */
 .code-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; max-height: 420px; overflow: auto; text-align: left; }
+
+/* partner form sections & live validation */
+.form-sec { font-weight: 700; color: var(--primary); border-bottom: 1px solid var(--border); padding: 10px 0 4px; margin-top: 4px; font-size: 13.5px; }
+.form-grid > .form-sec:first-child { padding-top: 0; margin-top: 0; }
+.input.invalid { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,.12); }
+.field:has(.input.invalid) .hint { color: #b91c1c; }

@@ -19,6 +19,8 @@ export interface UblParty {
   street?: string | null;
   buildingNo?: string | null;
   additionalNo?: string | null;
+  /** PartyIdentification scheme (BR-KSA-14): CRN, MOM, MLS, 700, SAG, NAT, GCC, IQA, PAS, OTH */
+  idScheme?: string | null;
   district?: string | null;
   city?: string | null;
   postalCode?: string | null;
@@ -69,7 +71,7 @@ function party(p: UblParty, isSupplier: boolean) {
   const idBlock = p.cr
     ? `
       <cac:PartyIdentification>
-        <cbc:ID schemeID="CRN">${esc(p.cr)}</cbc:ID>
+        <cbc:ID schemeID="${esc(p.idScheme || "CRN")}">${esc(p.cr)}</cbc:ID>
       </cac:PartyIdentification>`
     : "";
   const taxBlock = p.vat

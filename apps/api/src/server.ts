@@ -4,7 +4,7 @@ import { r23 } from "./routes/round23";
 import { r25 } from "./routes/round25";
 import { r27 } from "./routes/round27";
 import { egr } from "./routes/egypt";
-import { publicConfig, COUNTRY } from "./lib/country";
+import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP } from "./lib/country";
 import { r16 } from "./routes/round16";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -70,6 +70,8 @@ app.use("/api/v1", v1);
 app.use("/api/hooks", hooks);
 app.use("/api/auth", auth);
 app.use("/api/admin", admin);
+// the charity interface is a separate product, enabled per server (MIZAN_CHARITY=1)
+app.use("/api/charity", (_req, res, next) => (CHARITY ? next() : res.status(404).json({ message: "واجهة الجمعيات غير متاحة في هذا الإصدار", code: "NOT_FOUND" })));
 app.use("/api", master);
 app.use("/api", ops);
 app.use("/api", extra);
@@ -121,11 +123,13 @@ migrate()
     app.listen(port, process.env.HOST || "0.0.0.0", () => console.log(`Mizan ERP v2 listening on :${port}`));
     seedDemoAccount().catch((e) => console.error("[demo-account]", e));
     // every boot re-proves the accounting engine on a throw-away company (rolled back, nothing stored)
-    runAccountingSelfCheck().then((r) => {
+    // on the desktop the check waits until the user has started working, so the first screen opens at full speed
+    const selfCheck = () => runAccountingSelfCheck().then((r) => {
       console.log(`[selfcheck] ${r.ok ? "PASS" : "FAIL"} ${r.passed}/${r.passed + r.failed} in ${r.durationMs}ms`);
       for (const c of r.checks.filter((x) => !x.ok)) console.log(`[selfcheck] ✘ [${c.group}] ${c.name} expected=${JSON.stringify(c.expected)} actual=${JSON.stringify(c.actual)}`);
       if (r.error) console.log(`[selfcheck] error ${r.error}`);
     }).catch((e) => console.error("[selfcheck]", e));
+    if (IS_DESKTOP) setTimeout(selfCheck, 3 * 60_000).unref(); else selfCheck();
     if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
     startDesktopLicenseCheck();

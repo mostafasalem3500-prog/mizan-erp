@@ -22,13 +22,14 @@ import { GlobalSearch } from "./pages/Search";
 import { ReportCenterPage } from "./pages/ReportCenter";
 import { PartnerProfilePage } from "./pages/PartnerProfile";
 import { ProductProfilePage, TreasuryPage, JournalView, CountSheetPage } from "./pages/Round20";
-import { CharityApp, charityDefault } from "./charity/CharityApp";
+const CharityApp = React.lazy(() => import("./charity/CharityApp").then((m) => ({ default: m.CharityApp })));
+const charityDefault = async () => (CFG.charity ? (await import("./charity/CharityApp")).charityDefault() : false);
 import { ZakatPage, WhtPage } from "./pages/Round23";
 import { FinancialAnalysisPage } from "./pages/Round25";
 import { FinalAccountsPage } from "./pages/Round27";
 import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
 import { CFG } from "./shared/country";
-import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/templates";
+import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
 const NAV = [
   { group: "الرئيسية" },
@@ -116,7 +117,7 @@ export function App() {
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
   const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") ? "/charity" : "/login"); };
-  if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return <AppCtx.Provider value={{ me, reload, can }}><CharityApp onLogout={logout} /></AppCtx.Provider>;
+  if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return CFG.charity ? <AppCtx.Provider value={{ me, reload, can }}><React.Suspense fallback={<div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>}><CharityApp onLogout={logout} /></React.Suspense></AppCtx.Provider> : <Navigate to="/" replace />;
   const isPos = loc.pathname === "/pos";
   return (
     <AppCtx.Provider value={{ me, reload, can }}>
@@ -125,11 +126,11 @@ export function App() {
       ) : (
         <div className="app">
           <aside className={"sidebar" + (menu ? " open" : "")}>
-            <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}</div>
+            <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}{CFG.desktop && <span className="badge" title="قاعدة البيانات على هذا الجهاز" style={{ marginInlineStart: 6, fontSize: 11 }}>💻 محلي</span>}</div>
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
             <nav>
               {NAV.filter((n: any) => !(n.sa && CFG.country !== "SA") && !(n.eg && CFG.country !== "EG")).map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
-              {can("payments.read") && <NavLink to="/charity" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
+              {CFG.charity && can("payments.read") && <NavLink to="/charity" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
               {me.superAdmin && <><div className="group">النظام</div><NavLink to="/admin"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink></>}
             </nav>
             <div className="foot">
@@ -251,7 +252,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
   useEffect(() => { api("/auth/demo-credentials").then(setDemo).catch(() => undefined); }, []);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   const loc = useLocation();
-  const charity = loc.pathname.startsWith("/charity");
+  const charity = !!CFG.charity && loc.pathname.startsWith("/charity");
   useEffect(() => { if (!charity) return; document.title = DEFAULT_NAME; const l = document.querySelector<HTMLLinkElement>('link[rel~="icon"]'); const h = l?.href, ty = l?.type; if (l) { l.href = DEFAULT_LOGO; l.type = "image/png"; } return () => { document.title = "ميزان ERP"; if (l && h) { l.href = h; l.type = ty || ""; } }; }, [charity]);
   const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { const r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
   return (
@@ -267,7 +268,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
         </ul>
       </div> : <div className="art">
         <div className="row"><img src="/favicon.svg" width={54} alt="" /><h1>{CFG.appName}</h1></div>
-        {CFG.country === "EG" ? <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للشركات المصرية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، رواتب وتأمينات، وتقارير مالية — متوافق مع ضريبة القيمة المضافة 14% ومنظومة الفاتورة والإيصال الإلكتروني.</p> : <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للمنشآت السعودية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافق مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p>}
+        {CFG.country === "EG" ? <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للشركات المصرية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، رواتب وتأمينات، وتقارير مالية — متوافق مع ضريبة القيمة المضافة 14% ومنظومة الفاتورة والإيصال الإلكتروني.</p> : CFG.desktop ? <p style={{ fontSize: 17, opacity: .95 }}>نسخة سطح المكتب — تعمل على هذا الجهاز دون إنترنت، وبياناتك محفوظة عليه فقط. محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافقة مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p> : <p style={{ fontSize: 17, opacity: .95 }}>نظام محاسبي سحابي متكامل للمنشآت السعودية: محاسبة عامة، مبيعات ومشتريات، نقاط بيع، مخزون، أصول، وتقارير مالية — متوافق مع ضريبة القيمة المضافة والفوترة الإلكترونية (المرحلتان الأولى والثانية).</p>}
         <ul>
           {CFG.country === "EG" ? <><li>✔ دليل حسابات مصري جاهز وقيود آلية لكل عملية</li><li>✔ الفاتورة والإيصال الإلكتروني (مصلحة الضرائب) والخصم تحت حساب الضريبة (نموذج 41)</li><li>✔ رواتب بالتأمينات (قانون 148) وضريبة كسب العمل</li></> : <><li>✔ دليل حسابات سعودي جاهز وقيود آلية لكل عملية</li>
           <li>✔ فواتير ضريبية مع QR وربط مع منصة فاتورة (ZATCA)</li></>}
@@ -281,6 +282,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
         <form className="box card" onSubmit={submit}>
           <div className="card-b">
             {charity && <div className="ch-auth-m"><img src={DEFAULT_LOGO} alt="" /><b>{DEFAULT_NAME}</b></div>}<h2 className="mb">{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h2>
+            {CFG.desktop && !charity && <div className="alert info small">💻 <b>الوضع المحلي:</b> قاعدة البيانات على هذا الجهاز — الحسابات هنا مستقلة عن حسابات السحابة. {mode === "login" ? "أول مرة؟ أنشئ حساب منشأتك من «إنشاء حساب جديد»." : ""}</div>}
             {charity && <div className="alert info small">الدخول إلى منصة {DEFAULT_NAME} — بحساب ميزان ERP نفسه</div>}
             <div className="grid">
               {mode === "register" && <>

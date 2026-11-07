@@ -1,3 +1,4 @@
+import { CFG } from "../shared/country";
 /** Customer / supplier profile: KPIs, tabs (invoices, quotations, payments, statement) and every action from one place. */
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -45,7 +46,7 @@ export function PartnerProfilePage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) 
             <div>
               <h2>{p.name} <span className="small muted num">{p.code}</span> {p.isActive ? <span className="badge green">نشط</span> : <span className="badge red">موقوف</span>}</h2>
               <div className="meta">
-                {p.phone && <span>📞 <span className="num">{p.phone}</span></span>}{p.vatNumber && <span>الرقم الضريبي <span className="num">{p.vatNumber}</span></span>}{p.city && <span>📍 {p.city}</span>}
+                {p.phone && <span>📞 <span className="num">{p.phone}</span></span>}{p.vatNumber && <span>الرقم الضريبي <span className="num">{p.vatNumber}</span></span>}{(p.city || p.street) && <span>📍 {[p.buildingNo, p.street, p.district, p.city, p.postalCode, p.additionalNo && `إضافي ${p.additionalNo}`].filter(Boolean).join("، ")}</span>}{p.email && <span dir="ltr">✉ {p.email}</span>}{p.contactPerson && <span>👤 {p.contactPerson}</span>}{CFG.country === "SA" && p.isCustomer && p.kind === "COMPANY" && (p.taxReady ? <span className="badge green">✓ جاهز للفاتورة الضريبية</span> : <span className="badge amber" title={(p.taxMissing || []).join("، ")}>بيانات ضريبية ناقصة: {(p.taxMissing || []).join("، ")}</span>)}
                 <span>فترة السداد: <b>{p.paymentTerms ? `${p.paymentTerms} يوم` : "نقدي"}</b></span>
                 {isC && <span>حد الائتمان: <b>{Number(p.creditLimit) ? money(p.creditLimit) : "بدون"}</b></span>}
                 {isC && <span>المندوب: <b>{p.salesperson || "—"}</b></span>}

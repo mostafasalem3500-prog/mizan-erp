@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { validTaxId, validPartnerTaxId, TAX_ID_MSG } from "../lib/country";
+import { checkPartner, enforcePartner, normPhone, ID_TYPES, REGIONS } from "../lib/partnerRules";
 import { WHT_TYPES } from "../services/round23";
 import bcrypt from "bcryptjs";
 import { db, tx } from "../db/pool";
@@ -18,6 +19,16 @@ export async function audit(req: any, action: string, entity: string, entityId: 
 }
 
 // ─── partners ──────────────────────────────────────────────────────────────
+const AR_DIGITS = (v: any) => (v == null ? v : String(v).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).trim());
+/** Numeric fields typed with Arabic-Indic digits or spaces are stored as plain digits. */
+function cleanPartnerBody(b: any) {
+  for (const k of ["vatNumber", "crNumber", "idNumber", "buildingNo", "additionalNo", "postalCode"]) if (typeof b[k] === "string") b[k] = AR_DIGITS(b[k]).replace(/\s+/g, "") || null;
+  for (const k of ["phone", "phone2"]) if (typeof b[k] === "string") b[k] = normPhone(b[k]);
+  if (typeof b.email === "string") b.email = b.email.trim().toLowerCase() || null;
+  if (b.idType !== undefined && !ID_TYPES[b.idType]) b.idType = null;
+  return b;
+}
+master.get("/partners/meta", perm("partners.read"), h(async () => ({ idTypes: Object.fromEntries(Object.entries(ID_TYPES).map(([k, v]) => [k, { ar: v.ar, hint: v.hint || null }])), regions: REGIONS })));
 master.get(
   "/partners",
   perm("partners.read"),
@@ -39,20 +50,22 @@ master.get(
        FROM partners p WHERE ${where.join(" AND ")} ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
+    for (const r of rows) { const c = checkPartner(r); r.taxReady = c.taxReady; r.taxMissing = c.missing; }
     return rows;
   }),
 );
 
-master.get("/partners/:id", perm("partners.read"), h(async (req) => db.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الطرف غير موجود")));
+master.get("/partners/:id", perm("partners.read"), h(async (req) => { const r = await db.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الطرف غير موجود"); const c = checkPartner(r); return { ...r, taxReady: c.taxReady, taxMissing: c.missing, taxErrors: c.errors }; }));
 
 master.post(
   "/partners",
   perm("partners.write"),
   h(async (req) => {
-    const b = req.body || {};
+    const b = cleanPartnerBody(req.body || {});
     const name = String(need(b, "name", "الاسم")).trim();
     if (!b.isCustomer && !b.isSupplier) b.isCustomer = true;
     if (b.vatNumber && !validPartnerTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
+    if (!IS_EG) { const err = enforcePartner({ kind: "COMPANY", country: COUNTRY, ...b, name }, { strict: b.strict !== false }); if (err) throw bad(err); }
     const code = b.code?.trim() || (await nextCode(cid(req), b.isSupplier && !b.isCustomer ? "S" : "C"));
     const row = await db.insert("partners", {
       companyId: cid(req), code, name, nameEn: b.nameEn || null, isCustomer: !!b.isCustomer, isSupplier: !!b.isSupplier, kind: b.kind === "INDIVIDUAL" ? "INDIVIDUAL" : "COMPANY",
@@ -61,6 +74,7 @@ master.post(
       currency: /^[A-Z]{3}$/.test(String(b.currency || "").toUpperCase()) ? String(b.currency).toUpperCase() : BASE_CURRENCY, priceListId: b.priceListId || null,
       isNonResident: !!b.isNonResident, whtType: IS_EG ? (EG_WHT_TYPES[b.whtType] ? b.whtType : null) : b.isNonResident && WHT_TYPES[b.whtType] ? b.whtType : null,
       etaType: ["B", "P", "F"].includes(b.etaType) ? b.etaType : null, governate: b.governate || null, idNumber: b.idNumber || null,
+      additionalNo: b.additionalNo || null, region: b.region || null, phone2: b.phone2 || null, contactPerson: b.contactPerson || null, idType: b.idType || null, vatExemptReason: b.vatExemptReason || null,
     }).catch((e) => { if (e.code === "23505") throw conflict("كود العميل/المورد مستخدم مسبقاً"); throw e; });
     await audit(req, "CREATE", "partner", row.id, { name });
     return row;
@@ -71,8 +85,16 @@ master.put(
   "/partners/:id",
   perm("partners.write"),
   h(async (req) => {
-    const b = req.body || {};
+    const b = cleanPartnerBody(req.body || {});
     if (b.vatNumber && !validPartnerTaxId(b.vatNumber)) throw bad(TAX_ID_MSG);
+    if (!IS_EG) {
+      const cur = await db.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الطرف غير موجود");
+      const merged = { ...cur, ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) };
+      // the full-data rule applies when the customer form is saved, not to quick toggles (e.g. activate / deactivate)
+      const formSave = ["street", "vatNumber", "phone", "buildingNo"].some((k) => k in b);
+      const err = enforcePartner(merged, { strict: formSave && b.strict !== false && merged.isActive !== false });
+      if (err) throw bad(err);
+    }
     const row = await db.update("partners", { id: p(req).id, companyId: cid(req) }, {
       name: b.name, nameEn: b.nameEn, isCustomer: b.isCustomer, isSupplier: b.isSupplier, kind: b.kind, vatNumber: b.vatNumber ?? null, crNumber: b.crNumber ?? null, phone: b.phone ?? null, email: b.email ?? null,
       street: b.street ?? null, buildingNo: b.buildingNo ?? null, district: b.district ?? null, city: b.city ?? null, postalCode: b.postalCode ?? null, country: b.country, creditLimit: b.creditLimit === undefined ? undefined : num(b.creditLimit),
@@ -80,6 +102,8 @@ master.put(
       currency: b.currency === undefined ? undefined : /^[A-Z]{3}$/.test(String(b.currency).toUpperCase()) ? String(b.currency).toUpperCase() : BASE_CURRENCY, priceListId: b.priceListId === undefined ? undefined : b.priceListId || null,
       isNonResident: b.isNonResident === undefined ? undefined : !!b.isNonResident, whtType: b.whtType === undefined ? undefined : IS_EG ? (EG_WHT_TYPES[b.whtType] ? b.whtType : null) : b.isNonResident !== false && WHT_TYPES[b.whtType] ? b.whtType : null,
       etaType: b.etaType === undefined ? undefined : ["B", "P", "F"].includes(b.etaType) ? b.etaType : null, governate: b.governate === undefined ? undefined : b.governate || null, idNumber: b.idNumber === undefined ? undefined : b.idNumber || null,
+      additionalNo: b.additionalNo === undefined ? undefined : b.additionalNo || null, region: b.region === undefined ? undefined : b.region || null, phone2: b.phone2 === undefined ? undefined : b.phone2 || null,
+      contactPerson: b.contactPerson === undefined ? undefined : b.contactPerson || null, idType: b.idType === undefined ? undefined : b.idType || null, vatExemptReason: b.vatExemptReason === undefined ? undefined : b.vatExemptReason || null,
     });
     if (!row) throw notFound();
     await audit(req, "UPDATE", "partner", row.id, { name: row.name });

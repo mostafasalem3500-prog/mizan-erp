@@ -24,8 +24,8 @@ function swapFavicon(href: string) {
   return () => prev.forEach(([l, h, t]) => { l.href = h; l.type = t; });
 }
 
-export const ChCtx = createContext<{ settings: any; reload: () => void; projects: any[]; reloadProjects: () => void }>({ settings: null, reload: () => undefined, projects: [], reloadProjects: () => undefined });
-export const useCharity = () => useContext(ChCtx);
+import { ChCtx, useCharity } from "./ctx";
+export { ChCtx, useCharity };
 
 export const CH_NAV: any[] = [
   { group: "الرئيسية" },

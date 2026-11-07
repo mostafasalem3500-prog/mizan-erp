@@ -23,3 +23,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .center { text-align: center; }
 .spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: s 0.9s linear infinite; margin: 18px auto; }
 @keyframes s { to { transform: rotate(360deg); } }
+
+.card.chosen { border-color: var(--primary); box-shadow: 0 0 0 3px var(--soft); }
+.last { text-align: center; color: var(--primary); font-weight: 600; margin: -6px 0 12px; }
+.hint { font-size: 12px; opacity: .75; margin: 0; }
+.remember { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 18px auto 0; font-size: 13px; cursor: pointer; }
