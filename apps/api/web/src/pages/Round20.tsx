@@ -1,4 +1,5 @@
 import { CFG } from "../shared/country";
+import { Attachments } from "./Round28";
 /** Round 20 screens: product profile, treasury (cash & bank accounts), journal entry page, inventory count sheet & operations summary. */
 import React, { useContext, useMemo, useState } from "react";
 import { ChCtx } from "../charity/ctx";
@@ -214,6 +215,7 @@ export function JournalView() {
         <div className="small muted mt">أُنشئ بواسطة {e.createdBy || "—"} · {fmtDT(e.createdAt)}</div>
         <div className="jv-sign"><div>المُعِد / المحاسب</div><div>المراجع</div><div>المعتمد</div></div>
       </div>
+      {base !== "/charity" && <Attachments entity="journal" id={e.id} />}
     </div>
   );
 }

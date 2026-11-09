@@ -3,6 +3,10 @@ import { Db } from "../db/pool";
 import { bad, conflict, r2, D, num, today } from "../lib/core";
 import { post, nextNumber, warehouseBranch } from "../accounting/engine";
 import { saveDraft, postInvoice, getInvoice, defaultWarehouse } from "./invoices";
+import { promotionHits } from "./promotions";
+import { combinePct } from "./promoEngine";
+import { checkRedemption, recordRedemption } from "./loyalty";
+import { calcLine } from "../lib/core";
 
 export async function openSession(t: Db, companyId: string, user: { id: string; name: string }, openingCash: number, warehouseId?: string) {
   const open = await t.maybe(`SELECT id, number FROM pos_sessions WHERE company_id=$1 AND user_id=$2 AND status='OPEN'`, [companyId, user.id]);
@@ -26,6 +30,8 @@ export interface PosSaleInput {
   date?: string;
   clientRef?: string; // offline-queued sale id → idempotent replay
   issuedAt?: string; // ISO time the sale actually happened (offline)
+  applyPromotions?: boolean; // default true: active offers are applied by the server (same engine as the POS screen)
+  redeemPoints?: number; // loyalty points the customer uses on this ticket
 }
 
 async function walkInCustomer(t: Db, companyId: string) {
@@ -49,13 +55,27 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   const products = await t.rows(`SELECT * FROM products WHERE company_id=$1 AND id = ANY($2) AND is_active`, [companyId, ids]);
   const pm = new Map(products.map((p) => [p.id, p]));
   const ticketDisc = num(s.discountPct);
-  const lines = s.lines.map((l) => {
+  const base = s.lines.map((l) => {
     const p = pm.get(l.productId);
     if (!p) throw bad("صنف غير موجود أو موقوف");
     const unit = l.unitPrice !== undefined && l.unitPrice !== null ? num(l.unitPrice) : Number(p.salePrice);
-    const disc = r2(100 - (100 - num(l.discountPct)) * (100 - ticketDisc) / 100);
-    return { productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: disc, taxCode: p.taxCode, uomId: l.uomId || null };
+    return { p, l, unit };
   });
+  // offers valid at the moment of the sale (an offline sale keeps the offers of the time it was made)
+  const hits = s.applyPromotions === false ? base.map(() => null) : await promotionHits(t, companyId, base.map((b) => ({ productId: b.p.id, qty: num(b.l.qty), unitPrice: b.unit })), issuedAt || new Date(), "POS");
+  let lines: any[] = base.map(({ p, l, unit }, i) => ({
+    productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: combinePct(num(l.discountPct), hits[i]?.pct || 0, ticketDisc), taxCode: p.taxCode, uomId: l.uomId || null,
+    promotionId: hits[i]?.promotionId || null, promoPct: hits[i]?.pct || 0,
+  }));
+  // loyalty points: their value comes off the ticket as an even extra discount on every line
+  let redeem: { points: number; value: number } | null = null;
+  if (num(s.redeemPoints) > 0) {
+    const incl = !!company.pricesIncludeVat;
+    const pre = lines.reduce((a, l) => a + calcLine(l.qty, l.unitPrice, l.discountPct, l.taxCode, incl).total, 0);
+    redeem = await checkRedemption(t, company, partner, num(s.redeemPoints), pre);
+    const extra = (redeem.value / pre) * 100;
+    lines = lines.map((l) => ({ ...l, discountPct: combinePct(l.discountPct, extra) }));
+  }
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "INVOICE", channel: "POS", date: saleDate, partnerId: partner.id, warehouseId: session.warehouseId,
     invoiceType: partner.vatNumber ? "STANDARD" : "SIMPLIFIED", notes: s.notes || null, lines, isDemo: !!s.isDemo,
@@ -102,6 +122,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   const cardPart = r2(postTenders.filter((x) => x.method !== "CASH").reduce((a, x) => a + x.amount, 0));
   await t.exec(`UPDATE pos_sessions SET cash_sales=cash_sales+$2, card_sales=card_sales+$3, orders_count=orders_count+1 WHERE id=$1`, [session.id, cashPart, cardPart]);
   if (s.clientRef) await t.exec(`UPDATE invoices SET client_ref=$2 WHERE id=$1`, [posted.id, s.clientRef]);
+  if (redeem) await recordRedemption(t, companyId, partner.id, posted.id, redeem.points, r2(redeem.value), user.name);
   return { ...(await getInvoice(t, companyId, posted.id)), cashChange };
 }
 
@@ -114,7 +135,7 @@ export async function posReturn(t: Db, company: any, user: { id: string; name: s
   const retLines = lines.map((l) => {
     const ol = origin.lines.find((x: any) => x.productId === l.productId);
     if (!ol) throw bad("الصنف غير موجود في الفاتورة الأصلية");
-    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description, uomId: ol.uomId || null };
+    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description, uomId: ol.uomId || null, promotionId: ol.promotionId || null, promoDiscount: Number(ol.qty) ? r2(Number(ol.promoDiscount || 0) * num(l.qty) / Number(ol.qty)) : 0 };
   });
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "CREDIT_NOTE", channel: "POS", date: today(), partnerId: origin.partnerId, warehouseId: session.warehouseId,

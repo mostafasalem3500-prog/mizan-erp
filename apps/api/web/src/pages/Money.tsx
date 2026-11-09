@@ -1,4 +1,5 @@
 import { CUR, CFG, VATF } from "../shared/country";
+import { Attachments } from "./Round28";
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
@@ -160,12 +161,14 @@ export function VoucherPrint({ p, direction, onClose }: { p: any; direction: str
         </tbody></table>
         <div className="row between mt" style={{ marginTop: 40 }}><div>المحاسب: ____________</div><div>المستلم: ____________</div><div>المدير: ____________</div></div>
       </div>
+      {p.id && <Attachments entity="payment" id={p.id} />}
     </Modal>
   );
 }
 
 // ─── expenses ──────────────────────────────────────────────────────────────
 export function ExpensesPage() {
+  const [att, setAtt] = useState<any>(null);
   const { can } = useCompanyContext();
   const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
@@ -196,11 +199,12 @@ export function ExpensesPage() {
           {data && <FilterInfo shown={data.length} total={data.length} active={active} onClear={clear} />}
           <div className="grow" />{data && <ExportBtn name="المصروفات" rows={() => data.map((e: any) => ({ الرقم: e.number, التاريخ: e.date, الحساب: `${e.accountCode} ${e.accountName}`, البيان: e.description, المستفيد: e.payee, "المبلغ": e.amount, الضريبة: e.vatAmount, الإجمالي: e.total, "طريقة الدفع": e.payAccountName || "آجل", الحالة: e.status }))} />}</div>
         {loading && !data ? <Loading /> : !data?.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>حساب المصروف</th><th>البيان</th><th>المستفيد</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th>الدفع</th><th /></tr></thead>
-          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td className="dt">{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
+          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td className="dt">{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td><button className="btn sm ghost" title="المرفقات (الإيصال، الفاتورة…)" onClick={() => setAtt(e)}>📎</button>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
           <tfoot><tr><td colSpan={5}>الإجمالي</td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.amount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.vatAmount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.total), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}
       </div>
       {edit && <ExpenseEditor onClose={(s) => { setEdit(false); if (s) reload(); }} />}
       {ledger && <AccountLedger account={ledger} onClose={() => setLedger(null)} />}
+      {att && <Modal narrow title={`مرفقات المصروف ${att.number}`} onClose={() => setAtt(null)}><div className="muted small">{att.description} · <Money v={att.total} /></div><Attachments entity="expense" id={att.id} canWrite={can("expenses.write")} /></Modal>}
     </div>
   );
 }

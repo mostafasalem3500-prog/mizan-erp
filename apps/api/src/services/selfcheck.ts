@@ -16,6 +16,8 @@ import { stockAdjustment, manualJournal, fileVatReturn } from "./misc";
 import { closeFiscalYear } from "./closing";
 import { reverse } from "../accounting/engine";
 import { openSession, posSale, closeSession } from "./pos";
+import { savePromotion } from "./promotions";
+import { pointsBalance } from "./loyalty";
 import { createAsset, runDepreciation } from "./assets";
 import * as rep from "./reports";
 import { fileWht, zakatCompute, zakatPost, zakatPay } from "./round23";
@@ -297,6 +299,26 @@ export async function runAccountingSelfCheck(): Promise<SelfCheckResult> {
       const dp = fan.dupont;
       eq("التحليل المالي", "ديبونت: الهامش × الدوران × المضاعف = العائد على حقوق الملكية", true, dp.roe === null || Math.abs((dp.netMargin! / 100) * dp.assetTurnover! * dp.equityMultiplier! * 100 - dp.roe) < 0.3);
       scenario.push("20) التحليل المالي لسنة 2026 يطابق الميزانية وقائمة الدخل وتتسق مكونات ديبونت");
+
+      // ── Round 28: offers and loyalty points (own savepoint, rolled back so the year figures above stay fixed) ──
+      try {
+        await t.savepoint(async () => {
+          const promo = await savePromotion(t, C, { name: "اشترِ 2 واحصل على 1", kind: "BUY_X_GET_Y", buyQty: 2, getQty: 1, scope: "PRODUCTS", productIds: [P2.id] });
+          const coL = { ...co, loyalty: { enabled: true, earnRate: 1, pointValue: 0.1, minRedeem: 10, maxRedeemPct: 50, expiryMonths: 12 } };
+          const s2 = await openSession(t, C, { id: user.id, name: U }, 0, wh);
+          const ps1 = await posSale(t, coL, { id: user.id, name: U }, { sessionId: s2.id, partnerId: cusY.id, lines: [{ productId: P2.id, qty: 3 }], tenders: [{ method: "CASH", amount: null }] } as any);
+          eq("العروض ونقاط الولاء", "اشترِ 2 واحصل على 1: 3 × 300 تُحاسب 600 + 15%", 690, Number(ps1.total));
+          eq("العروض ونقاط الولاء", "قيمة خصم العرض المسجلة على السطر", 300, Number(ps1.lines[0].promoDiscount));
+          eq("العروض ونقاط الولاء", "السطر مرتبط بالعرض", promo.id, ps1.lines[0].promotionId);
+          eq("العروض ونقاط الولاء", "نقاط مكتسبة = 1 لكل ريال (690)", 690, await pointsBalance(t, C, cusY.id));
+          const ps2 = await posSale(t, coL, { id: user.id, name: U }, { sessionId: s2.id, partnerId: cusY.id, redeemPoints: 100, lines: [{ productId: P2.id, qty: 1 }], tenders: [{ method: "CASH", amount: null }] } as any);
+          eq("العروض ونقاط الولاء", "استبدال 100 نقطة (10 ريال) من فاتورة 345", 335, Number(ps2.total));
+          eq("العروض ونقاط الولاء", "الرصيد: 690 − 100 + 335 مكتسبة", 925, await pointsBalance(t, C, cusY.id));
+          await rejects(t, "العروض ونقاط الولاء", "رفض استبدال نقاط أكثر من الرصيد", () => posSale(t, coL, { id: user.id, name: U }, { sessionId: s2.id, partnerId: cusY.id, redeemPoints: 5000, lines: [{ productId: P2.id, qty: 100 }], tenders: [{ method: "CASH", amount: null }] } as any));
+          scenario.push("22) عرض «اشترِ 2 واحصل على 1» في نقطة البيع، واكتساب نقاط الولاء واستبدالها كخصم يخفّض الإيراد والضريبة");
+          throw new Rollback();
+        });
+      } catch (e) { if (!(e instanceof Rollback)) throw e; }
 
       // ── Round 27: final accounts tie together, before and after closing 2025 ──
       const fyRows = await t.rows(`SELECT id, name FROM fiscal_years WHERE company_id=$1 ORDER BY start_date`, [C]);

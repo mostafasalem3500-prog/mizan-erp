@@ -6,6 +6,7 @@ import { r27 } from "./routes/round27";
 import { egr } from "./routes/egypt";
 import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP } from "./lib/country";
 import { r16 } from "./routes/round16";
+import { r28 } from "./routes/round28";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
 import express from "express";
@@ -52,6 +53,8 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(compression());
+// attachments carry files (base64): their own, larger body limit; parsed bodies are skipped by the general parser
+app.use("/api/attachments", express.json({ limit: "14mb" }));
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });
@@ -91,6 +94,7 @@ app.use("/api", r22);
 app.use("/api", r23);
 app.use("/api", r25);
 app.use("/api", r27);
+app.use("/api", r28);
 app.use("/api", egr);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
@@ -99,6 +103,7 @@ app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غ�
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof AppError) return res.status(err.status).json({ message: err.message, code: err.code, details: err.details });
   if (err?.status === 404) return res.status(404).json({ message: err.message, code: "NOT_FOUND" });
+  if (err?.type === "entity.too.large") return res.status(413).json({ message: "حجم البيانات المرسلة أكبر من المسموح", code: "TOO_LARGE" });
   if (err?.type === "entity.parse.failed") return res.status(400).json({ message: "JSON غير صحيح", code: "BAD_JSON" });
   if (err?.code === "23505") return res.status(409).json({ message: "قيمة مكررة — السجل موجود مسبقاً", code: "CONFLICT" });
   if (err?.code === "23503") return res.status(409).json({ message: "لا يمكن الحذف — السجل مرتبط بسجلات أخرى", code: "CONFLICT" });

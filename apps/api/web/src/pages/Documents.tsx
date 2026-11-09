@@ -1,4 +1,5 @@
 import { CUR, CFG } from "../shared/country";
+import { Attachments } from "./Round28";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
@@ -92,7 +93,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
 }
 
 // ─── editor ────────────────────────────────────────────────────────────────
-type Line = { key: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; lotNo?: string; expiryDate?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
+type Line = { key: number; promotionId?: string | null; promoPct?: number; promoName?: string; baseDisc?: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; lotNo?: string; expiryDate?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
 const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S", uom: null });
 
 function calc(l: Line, incl: boolean) {
@@ -146,7 +147,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
       setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
       setCurrency(d.currency || CFG.currency); setRate(Number(d.exchangeRate) || 1); setWarehouseId(d.warehouseId || "");
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
-      setLines(d.lines.map((l: any) => ({ key: Math.random(), product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
+      setLines(d.lines.map((l: any) => ({ key: Math.random(), promotionId: l.promotionId || null, promoPct: l.promotionId && Number(l.qty) * Number(l.unitPrice) ? Math.round((Number(l.promoDiscount || 0) / (Number(l.qty) * Number(l.unitPrice))) * 1e6) / 1e4 : 0, product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
       setLoaded(true);
     }).catch((e) => toast(e.message, "err"));
   }, [id]);
@@ -172,7 +173,21 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
     upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
   const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
-    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null })) });
+    lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, promotionId: l.promotionId || null, promoPct: l.promoPct || 0 })) });
+  /** Sales: apply the offers valid on the document date (best offer per line, on top of the manual discount). */
+  const applyOffers = () => run(async () => {
+    const ls = lines.filter((l) => l.product);
+    if (!ls.length) throw new Error("أضف أصنافاً أولاً");
+    const r = await api("/promotions/apply", { body: { date, lines: ls.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice })) } });
+    let n = 0;
+    setLines((all) => all.map((l) => {
+      const i = ls.findIndex((x) => x.key === l.key); if (i < 0) return l;
+      const h = r.hits[i]; const base = l.baseDisc ?? (l.promotionId && (l.promoPct || 0) < 100 ? Math.max(0, Math.round((100 - ((100 - l.discountPct) * 100) / (100 - (l.promoPct || 0))) * 1e4) / 1e4) : l.discountPct);
+      if (h) n++;
+      return h ? { ...l, baseDisc: base, promotionId: h.promotionId, promoPct: h.pct, promoName: h.name, discountPct: combinePct(base, h.pct) } : { ...l, baseDisc: undefined, promotionId: null, promoPct: 0, promoName: undefined, discountPct: base };
+    }));
+    toast(n ? `طُبّق ${n} عرض على الأصناف` : "لا توجد عروض سارية على هذه الأصناف في تاريخ المستند", n ? "ok" : "info");
+  });
   const saveRevision = () => run(async () => {
     if (!partner) throw new Error("اختر المورد");
     if (revReason.trim().length < 5) throw new Error("اكتب سبب التعديل (5 أحرف على الأقل) — يُحفظ في سجل المراجعة");
@@ -246,7 +261,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
           </tr>); })}
         </tbody>
       </table></div>
-      <div className="row mt"><button className="btn sm" onClick={() => setLines((ls) => [...ls, newLine()])}>＋ سطر</button></div>
+      <div className="row mt"><button className="btn sm" onClick={() => setLines((ls) => [...ls, newLine()])}>＋ سطر</button>{direction === "SALE" && ["INVOICE", "QUOTATION", "ORDER"].includes(kind) && <button className="btn sm" disabled={busy} onClick={applyOffers}>🎁 تطبيق العروض</button>}{lines.some((l) => l.promotionId) && <span className="small muted">{lines.filter((l) => l.promotionId).map((l) => l.promoName).filter(Boolean).join("، ") || "عروض مطبقة"}</span>}</div>
       <Field label="ملاحظات"><textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       {newPartner && <QuickPartner role={isSale ? "CUSTOMER" : "SUPPLIER"} onClose={(p) => { setNewPartner(false); if (p) setPartner(p); }} />}
     </Modal>
@@ -255,6 +270,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
 
 export { QuickPartner } from "./PartnerEditor";
 import { QuickPartner } from "./PartnerEditor";
+import { combinePct } from "../shared/promoEngine";
 
 // ─── view / print ──────────────────────────────────────────────────────────
 export function DocumentView() {
@@ -342,6 +358,7 @@ export function DocumentView() {
           {isSale && d.zatcaResponse && <div className="card"><div className="card-h"><h3>استجابة هيئة الزكاة والضريبة</h3></div><div className="card-b small" dir="ltr" style={{ fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{JSON.stringify(d.zatcaResponse, null, 1)}</div></div>}
         </div>
       </div>
+      <Attachments entity="invoice" id={d.id} canWrite={can(d.direction === "SALE" ? "sales.write" : "purchases.write")} />
       {cn && <DocEditor direction={d.direction} kind="CREDIT_NOTE" id={cn.id} originId={d.id} onClose={(s) => { setCn(null); if (s) reload(); }} />}
       {pay && <QuickPayment doc={d} onClose={(s) => { setPay(false); if (s) reload(); }} />}
       {landed && <LandedCostModal doc={d} onClose={(s) => { setLanded(false); if (s) reload(); }} />}
@@ -501,6 +518,8 @@ export function Thermal({ d, qr }: { d: any; qr: string }) {
         <div className="row between"><span>ضريبة القيمة المضافة {CFG.vatRate}%</span><span className="num">{money(d.vatTotal)}</span></div>
         <div className="row between" style={{ fontWeight: 700, fontSize: 15, borderTop: "1px solid #000", paddingTop: 3 }}><span>الإجمالي</span><span className="num">{money(d.total)} {CUR()}</span></div>
         {d.tenders?.map((t: any, i: number) => <div key={i} className="row between"><span>{METHOD_AR[t.method] || t.method}</span><span className="num">{money(t.amount)}</span></div>)}
+        {Number(d.pointsRedeemed) > 0 && <div className="row between"><span>⭐ استبدال {Number(d.pointsRedeemed)} نقطة ولاء</span><span className="num">{money(d.pointsValue)}</span></div>}
+        {d.lines?.some((l: any) => Number(l.promoDiscount) > 0) && <div className="c" style={{ marginTop: 4, fontWeight: 700 }}>🎁 وفّرت مع العروض: <span className="num">{money(d.lines.reduce((a: number, l: any) => a + Number(l.promoDiscount || 0), 0))}</span> {CUR()}</div>}
       </div>
       {qr && <div className="c" style={{ marginTop: 8 }}><img src={qr} style={{ width: 110 }} alt="QR" /></div>}
       {c.invoiceFooter && <div className="c" style={{ marginTop: 6 }}>{c.invoiceFooter}</div>}

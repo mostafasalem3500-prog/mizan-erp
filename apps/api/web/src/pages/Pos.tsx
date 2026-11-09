@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { api, q, useFetch, money, Money, Loading, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, useAction, useToast, useCompanyContext, useLocalState, fmtDT, METHOD_AR, Badge, confirmDlg, matches } from "../lib";
 import { Thermal, QuickPartner } from "./Documents";
 import { ProductImagesModal } from "./ProductImages";
+import { applyPromotions, combinePct } from "../shared/promoEngine";
 
 type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
 const lineKey = (l: { product: any; uom?: any }) => l.product.id + ":" + (l.uom?.id || "");
@@ -37,6 +38,14 @@ export function PosPage() {
   const [newPartner, setNewPartner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useFetch(`/products${q({ limit: 1000 })}`);
+  // offers and loyalty settings are cached so the POS keeps applying them while offline
+  const promosF = useFetch<any[]>("/promotions/live");
+  const loyF = useFetch<any>("/loyalty/settings");
+  const cached = (k: string, v: any) => { if (v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} return v; } try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
+  const promos: any[] = cached("mz_pos_promos", promosF.data) || [];
+  const loyalty: any = cached("mz_pos_loyalty", loyF.data);
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(iv); }, []);
   const incl = !!me.company.pricesIncludeVat;
   // image mode: pick products in the catalog and upload/replace their pictures
   const [imgMode, setImgMode] = useState(false);
@@ -61,18 +70,22 @@ export function PosPage() {
   const add = (p: any, uom: any = null) => setCart((c) => { const k = p.id + ":" + (uom?.id || ""); const i = c.findIndex((l) => lineKey(l) === k); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1, priceList, uom) }; return n; } return [...c, { product: p, uom, qty: 1, unitPrice: priceFor(p, 1, priceList, uom), discountPct: 0 }]; });
   const setUom = (key: string, uomId: string) => setCart((c) => c.map((l) => { if (lineKey(l) !== key) return l; const u = (l.product.uoms || []).find((x: any) => x.id === uomId) || null; return { ...l, uom: u, unitPrice: priceFor(l.product, l.qty, priceList, u) }; }));
   const setQty = (key: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => lineKey(l) !== key) : c.map((l) => (lineKey(l) === key ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" && !l.uom ? priceFor(l.product, qty) : l.unitPrice } : l))));
+  const hits = useMemo(() => applyPromotions(promos, cart.map((l) => ({ productId: l.product.id, categoryId: l.product.categoryId, qty: l.qty, unitPrice: l.unitPrice })), new Date(clock), "POS"), [cart, promos, clock]);
+  const hitOf = (l: CartLine) => hits[cart.indexOf(l)] || null;
+  const lineDisc = (l: CartLine) => combinePct(l.discountPct, hitOf(l)?.pct || 0, ticketDisc);
   const totals = useMemo(() => {
-    let net = 0, vat = 0;
+    let net = 0, vat = 0, promo = 0;
     for (const l of cart) {
       const rate = l.product.taxCode === "S" ? CFG.vatRate : 0;
-      const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100;
+      const disc = lineDisc(l);
+      promo += l.qty * l.unitPrice * ((hitOf(l)?.pct || 0) / 100);
       const gross = l.qty * l.unitPrice * (1 - disc / 100);
       let n = gross, v = gross * rate / 100;
       if (incl && rate) { n = gross / (1 + rate / 100); v = gross - n; }
       net += Math.round(n * 100) / 100; vat += Math.round(v * 100) / 100;
     }
-    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0) };
-  }, [cart, ticketDisc, incl]);
+    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0), promo: Math.round(promo * 100) / 100 };
+  }, [cart, ticketDisc, incl, hits]);
 
   // ── offline: queued sales are replayed in order with an idempotent clientRef ──
   const syncQueue = async () => {
@@ -109,9 +122,9 @@ export function PosPage() {
   }, []);
   /** builds a local invoice-like object so the receipt can be shown/printed while offline */
   const localReceipt = (body: any, lines: CartLine[], tenders: any[]) => {
-    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? CFG.vatRate : 0; const disc = 100 - (100 - l.discountPct) * (100 - ticketDisc) / 100; const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
+    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? CFG.vatRate : 0; const disc = lineDisc(l); const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
     const taxable = rows.reduce((a, r) => a + r.netAmount, 0), vatTotal = rows.reduce((a, r) => a + r.vatAmount, 0);
-    return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? taxable + vatTotal })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
+    return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? Math.max(0, taxable + vatTotal - tenders.reduce((x: number, y: any) => x + (y.amount ?? 0), 0)) })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
   };
 
   useEffect(() => {
@@ -202,11 +215,11 @@ export function PosPage() {
         <div className="cart-lines">
           {cart.map((l) => (
             <div className="line" key={lineKey(l)}>
-              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>
+              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>{hitOf(l) && <span className="promo-tag" title="عرض مطبّق تلقائياً">🎁 {hitOf(l)!.name} −{Math.round(hitOf(l)!.pct * 10) / 10}%</span>}
                 {l.product.uoms?.length > 0 && <select className="input" style={{ padding: "2px 6px", fontSize: 12, width: "auto", marginTop: 2 }} value={l.uom?.id || ""} onChange={(e) => setUom(lineKey(l), e.target.value)}><option value="">{l.product.unit || "حبة"}</option>{l.product.uoms.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}</select>}</div>
               <div className="row" style={{ gap: 6 }}>
                 <div className="qty"><button onClick={() => setQty(lineKey(l), l.qty - 1)}>−</button><input value={l.qty} onChange={(e) => setQty(lineKey(l), Number(e.target.value) || 0)} /><button onClick={() => setQty(lineKey(l), l.qty + 1)}>＋</button></div>
-                <b className="num" style={{ minWidth: 70, textAlign: "end" }}>{money(l.qty * l.unitPrice * (1 - l.discountPct / 100))}</b>
+                <b className="num" style={{ minWidth: 70, textAlign: "end" }}>{money(l.qty * l.unitPrice * (1 - combinePct(l.discountPct, hitOf(l)?.pct || 0) / 100))}</b>
                 <button className="btn ghost sm" onClick={() => { const v = prompt("خصم % على هذا السطر", String(l.discountPct)); if (v !== null) setCart((c) => c.map((x) => (lineKey(x) === lineKey(l) ? { ...x, discountPct: Math.min(100, Math.max(0, Number(v) || 0)) } : x))); }}>%</button>
               </div>
             </div>))}
@@ -215,14 +228,15 @@ export function PosPage() {
         <div className="totals">
           <div className="t"><span>الأصناف</span><span className="num">{totals.count}</span></div>
           <div className="t"><span>قبل الضريبة</span><span className="num">{money(totals.net)}</span></div>
+          {totals.promo > 0 && <div className="t" style={{ color: "var(--accent)" }}><span>🎁 خصم العروض</span><span className="num">−{money(totals.promo)}</span></div>}
           <div className="t"><span>الضريبة {CFG.vatRate}%</span><span className="num">{money(totals.vat)}</span></div>
           <div className="t"><span>خصم على الفاتورة %</span><input className="input num" style={{ width: 70, minHeight: 28, padding: "2px 6px" }} value={ticketDisc} onChange={(e) => setTicketDisc(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} /></div>
           <div className="t grand"><span>الإجمالي</span><span className="num">{money(totals.total)}</span></div>
         </div>
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
-      {payOpen && <PayModal total={totals.total} partner={partner} onClose={() => setPayOpen(false)} onPay={(tenders) => run(async () => {
-        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
+      {payOpen && <PayModal total={totals.total} partner={partner} loyalty={loyalty} online={online} onClose={() => setPayOpen(false)} onPay={(tenders, redeemPoints) => run(async () => {
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
         const finish = (inv: any) => { setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(inv); };
         if (!navigator.onLine) { setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("لا يوجد اتصال — حُفظت العملية وستُرحّل تلقائياً عند عودة الاتصال", "info"); return; }
         try {
@@ -249,31 +263,51 @@ export function PosPage() {
   );
 }
 
-function PayModal({ total, partner, onClose, onPay }: { total: number; partner: any; onClose: () => void; onPay: (t: any[]) => void }) {
+function PayModal({ total: gross, partner, loyalty, online, onClose, onPay }: { total: number; partner: any; loyalty: any; online: boolean; onClose: () => void; onPay: (t: any[], redeemPoints?: number) => void }) {
   const [method, setMethod] = useState<"CASH" | "CARD" | "MIXED" | "CREDIT">("CASH");
   const [cash, setCash] = useState<string>("");
   const [card, setCard] = useState<string>("");
+  // loyalty points: shown for a registered customer while online (the balance is checked by the server)
+  const member = !!(loyalty?.enabled && partner && partner.code !== "WALKIN" && online);
+  const [lp, setLp] = useState<any>(null);
+  const [usePts, setUsePts] = useState("");
+  useEffect(() => { if (member) api(`/partners/${partner.id}/loyalty`).then(setLp).catch(() => setLp(null)); }, [member, partner?.id]);
+  const maxPts = lp ? Math.max(0, Math.min(Math.floor(lp.balance), Math.floor((gross * loyalty.maxRedeemPct) / 100 / loyalty.pointValue))) : 0;
+  const pts = Math.min(maxPts, Math.max(0, Math.floor(Number(usePts) || 0)));
+  const ptsOk = pts === 0 || pts >= (loyalty?.minRedeem || 0);
+  const ptsValue = ptsOk ? Math.round(pts * (loyalty?.pointValue || 0) * 100) / 100 : 0;
+  const total = Math.round((gross - ptsValue) * 100) / 100;
   const cashN = Number(cash || 0), cardN = Number(card || 0);
-  const paid = method === "CASH" ? (cashN || total) : method === "CARD" ? total : method === "MIXED" ? cashN + cardN : total;
   const change = method === "CASH" ? Math.max(0, cashN - total) : method === "MIXED" ? Math.max(0, cashN + cardN - total) : 0;
-  const short = method === "MIXED" ? Math.max(0, total - cashN - cardN) : 0;
+  const short = method === "MIXED" && card !== "" ? Math.max(0, total - cashN - cardN) : 0;
+  // «remainder» tenders (amount null) let the server settle the exact total, so a rounding cent never blocks the sale
   const submit = () => {
-    if (method === "CASH") onPay([{ method: "CASH", amount: cashN >= total ? cashN : total }]);
-    else if (method === "CARD") onPay([{ method: "CARD", amount: total }]);
-    else if (method === "MIXED") { if (short > 0) return; onPay([{ method: "CASH", amount: cashN }, { method: "CARD", amount: cardN }]); }
-    else onPay([{ method: "CREDIT", amount: null }]);
+    if (!ptsOk) return;
+    const r = pts > 0 ? pts : undefined;
+    if (method === "CASH") onPay([{ method: "CASH", amount: cashN > total ? cashN : null }], r);
+    else if (method === "CARD") onPay([{ method: "CARD", amount: null }], r);
+    else if (method === "MIXED") { if (short > 0) return; onPay(cashN >= total ? [{ method: "CASH", amount: cashN }] : [{ method: "CASH", amount: cashN }, { method: "CARD", amount: null }], r); }
+    else onPay([{ method: "CREDIT", amount: null }], r);
   };
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Enter" && !(e.target as HTMLElement)?.dataset?.pts) { e.preventDefault(); submit(); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
   const quick = [total, Math.ceil(total / 10) * 10, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100].filter((v, i, a) => a.indexOf(v) === i);
   return (
-    <Modal narrow title={<>الدفع — <span className="num">{money(total)}</span> {CUR()}</>} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary lg" disabled={method === "MIXED" && short > 0 || (method === "CREDIT" && !partner)} onClick={submit}>تأكيد الدفع (Enter)</button></>}>
+    <Modal narrow title={<>الدفع — <span className="num">{money(total)}</span> {CUR()}</>} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary lg" disabled={(method === "MIXED" && short > 0) || (method === "CREDIT" && !partner) || !ptsOk} onClick={submit}>تأكيد الدفع (Enter)</button></>}>
       <div className="pay">
+        {member && lp && <div className="alert info small" style={{ margin: 0 }}>
+          ⭐ رصيد <b>{partner.name}</b>: <b className="num">{lp.balance}</b> نقطة (<Money v={lp.value} />){lp.balance >= loyalty.minRedeem ? <div className="row" style={{ gap: 6, marginTop: 6 }}>
+            <span>استبدال</span><NumInput data-pts="1" value={usePts} onChange={(e) => setUsePts(e.target.value)} placeholder="0" style={{ width: 90 }} /><span>نقطة</span>
+            <button className="btn sm" onClick={() => setUsePts(String(maxPts))}>الحد الأقصى ({maxPts})</button>
+            {pts > 0 && ptsOk && <b className="num">− {money(ptsValue)}</b>}
+          </div> : <div className="muted">الاستبدال من {loyalty.minRedeem} نقطة</div>}
+          {!ptsOk && <div style={{ color: "var(--danger)" }}>أقل عدد للاستبدال {loyalty.minRedeem} نقطة</div>}
+        </div>}
         <div className="methods">
           {(["CASH", "CARD", "MIXED", "CREDIT"] as const).map((m) => <button key={m} className={method === m ? "active" : ""} onClick={() => setMethod(m)}>{m === "MIXED" ? "مختلط" : METHOD_AR[m]}</button>)}
         </div>
         {(method === "CASH" || method === "MIXED") && <Field label="المبلغ النقدي المستلم"><NumInput autoFocus value={cash} onChange={(e) => setCash(e.target.value)} placeholder={money(total)} style={{ fontSize: 22, textAlign: "center" }} /></Field>}
         {method === "CASH" && <div className="row" style={{ gap: 6 }}>{quick.map((v) => <button key={v} className="btn sm" onClick={() => setCash(String(v))}>{money(v)}</button>)}</div>}
-        {method === "MIXED" && <Field label="مبلغ الشبكة / البطاقة"><NumInput value={card} onChange={(e) => setCard(e.target.value)} style={{ fontSize: 22, textAlign: "center" }} /></Field>}
+        {method === "MIXED" && <Field label="مبلغ الشبكة / البطاقة"><NumInput value={card} onChange={(e) => setCard(e.target.value)} placeholder={money(Math.max(0, total - cashN))} style={{ fontSize: 22, textAlign: "center" }} /></Field>}
         {method === "CARD" && <div className="alert info">سيُسجل المبلغ كاملاً على حساب تسوية مدى/البطاقات.</div>}
         {method === "CREDIT" && (partner ? <div className="alert warn">سيُسجل المبلغ على حساب العميل <b>{partner.name}</b> (آجل) ويُسدد لاحقاً بسند قبض.</div> : <div className="alert err">البيع الآجل يتطلب اختيار عميل مسجل أولاً.</div>)}
         {change > 0 && <div className="alert ok" style={{ fontSize: 18, textAlign: "center" }}>الباقي للعميل: <b className="num">{money(change)}</b></div>}

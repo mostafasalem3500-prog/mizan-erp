@@ -1,4 +1,5 @@
 import { CFG } from "../shared/country";
+import { CustomerLoyaltyCard, Attachments } from "./Round28";
 /** Customer / supplier profile: KPIs, tabs (invoices, quotations, payments, statement) and every action from one place. */
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -101,6 +102,8 @@ export function PartnerProfilePage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) 
           )}
         </div>
       </div>
+      {isC && <CustomerLoyaltyCard partnerId={p.id} />}
+      <Attachments entity="partner" id={p.id} />
 
       {editor && <DocEditor direction={dir} kind={editor.kind} id={editor.id} originId={editor.originId} prefill={editor.prefill} onClose={(s) => { setEditor(null); if (s) reload(); }} />}
       {pay && <PaymentEditor direction={isC ? "IN" : "OUT"} partner={p} onClose={(s) => { setPay(false); if (s) reload(); }} />}

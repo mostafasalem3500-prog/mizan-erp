@@ -29,6 +29,7 @@ import { FinancialAnalysisPage } from "./pages/Round25";
 import { FinalAccountsPage } from "./pages/Round27";
 import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
 import { CFG } from "./shared/country";
+import { PromotionsPage, LoyaltyPage, ThemeToggle } from "./pages/Round28";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
 const NAV = [
@@ -41,6 +42,8 @@ const NAV = [
   { to: "/sales/credit-notes", ic: "↩", label: "الإشعارات الدائنة", perm: "sales.read" },
   { to: "/customers", ic: "👥", label: "العملاء", perm: "partners.read" },
   { to: "/price-lists", ic: "🏷", label: "قوائم الأسعار", perm: "products.read" },
+  { to: "/promotions", ic: "🎁", label: "العروض والخصومات", perm: "sales.read" },
+  { to: "/loyalty", ic: "⭐", label: "نقاط الولاء", perm: "sales.read" },
   { to: "/receipts", ic: "💵", label: "سندات القبض", perm: "payments.read" },
   { to: "/collections", ic: "📞", label: "التحصيل والمتابعة", perm: "sales.read" },
   { group: "المشتريات" },
@@ -144,6 +147,7 @@ export function App() {
               <div className="title">{(NAV.find((n: any) => n.to === loc.pathname) || NAV.find((n: any) => n.to && n.to !== "/" && loc.pathname.startsWith(n.to + "/")))?.label || ""}</div>
               <div className="grow" />
               <GlobalSearch />
+              <ThemeToggle />
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
             </div>
@@ -191,6 +195,8 @@ export function App() {
                 <Route path="/analysis" element={<FinancialAnalysisPage />} />
                 <Route path="/final-accounts" element={<FinalAccountsPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
+                <Route path="/promotions" element={<PromotionsPage />} />
+                <Route path="/loyalty" element={<LoyaltyPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />
                 <Route path="/budgets/:id" element={<BudgetsPage />} />

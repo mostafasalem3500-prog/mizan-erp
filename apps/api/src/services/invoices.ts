@@ -5,6 +5,7 @@
 import { Db } from "../db/pool";
 import { VAT_F, IS_EG } from "../lib/country";
 import { queueDocument } from "../eta/eta";
+import { loyaltyOnPost } from "./loyalty";
 import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, isDate, addDays, TAX_CODES, today } from "../lib/core";
 import { currentCtx } from "../lib/context";
 import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
@@ -28,6 +29,9 @@ export interface LineInput {
   uomId?: string | null; // product_uoms.id (pack); omitted → base unit
   lotNo?: string | null; // purchases of lot-tracked products
   expiryDate?: string | null;
+  promotionId?: string | null; // offer that gave (part of) the line discount
+  promoPct?: number; // the offer's share of the discount, for the usage report
+  promoDiscount?: number; // explicit offer amount (returns copy the original's share)
 }
 
 export interface InvoiceInput {
@@ -105,6 +109,8 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
       vatAmount: c.vat,
       total: c.total,
       discount: c.discount,
+      promotionId: input.direction === "SALE" && l.promotionId ? l.promotionId : null,
+      promoDiscount: input.direction === "SALE" && l.promotionId ? (l.promoDiscount !== undefined ? r2(num(l.promoDiscount)) : r2(D(qty).times(unitPrice).times(num(l.promoPct)).div(100))) : 0,
       product: p,
       sort: i,
     };
@@ -207,7 +213,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     lines.map((l) => ({
       invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, uom: l.uom, factor: l.factor, lotNo: l.lotNo, expiryDate: l.expiryDate,
       unitPrice: l.unitPrice, fcUnitPrice: l.fcUnitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
-      netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort,
+      netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort, promotionId: l.promotionId, promoDiscount: l.promoDiscount,
     })),
   );
   return inv;
@@ -394,6 +400,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     // fully returned
   }
 
+  if (isSale) await loyaltyOnPost(t, company, id);
   if (isSale) await (IS_EG ? queueDocument(t, company, id) : stampInvoice(t, company, id));
   return getInvoice(t, companyId, id);
 }

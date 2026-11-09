@@ -449,3 +449,45 @@ tr.row-warn td { background: var(--accent-soft); }
 .form-grid > .form-sec:first-child { padding-top: 0; margin-top: 0; }
 .input.invalid { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,.12); }
 .field:has(.input.invalid) .hint { color: #b91c1c; }
+
+/* ── round 28: chips, pick lists, attachments ── */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px; background: var(--surface); user-select: none; }
+.chip input { display: none; }
+.chip.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pick-list { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 9px; padding: 6px 10px; margin-top: 6px; display: grid; gap: 2px; }
+.attach { border: 1px dashed var(--border); border-radius: 12px; padding: 10px 14px; margin-top: 12px; display: grid; gap: 8px; background: var(--surface-2); }
+.attach.over { border-color: var(--primary); background: var(--primary-soft); }
+.attach-list { display: grid; gap: 4px; }
+.attach-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.attach-item a { cursor: pointer; font-weight: 600; word-break: break-all; }
+.promo-tag { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 6px; padding: 0 6px; font-size: 11px; font-weight: 600; margin-inline-start: 6px; }
+
+/* ── dark theme (screens only; printing stays black on white) ── */
+html[data-theme="dark"] {
+  --bg: #0c1615; --surface: #13201f; --surface-2: #182827; --border: #26393a; --text: #e3eceb; --muted: #94a8a6;
+  --primary: #2bb3a3; --primary-2: #24998b; --primary-soft: #133a36; --accent: #f0a63a; --accent-soft: #3a2a12;
+  --danger: #f87171; --danger-soft: #3b1717; --success: #4ade80; --success-soft: #12301d; --info: #60a5fa; --info-soft: #172a45;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+html[data-theme="dark"] .input, html[data-theme="dark"] select.input, html[data-theme="dark"] textarea.input,
+html[data-theme="dark"] .pos .cat-head, html[data-theme="dark"] .pos .cats button, html[data-theme="dark"] .pos .item, html[data-theme="dark"] .pos .cart,
+html[data-theme="dark"] .pos .line .qty button, html[data-theme="dark"] .pay .methods button, html[data-theme="dark"] .keypad button, html[data-theme="dark"] .suggest { background: var(--surface); color: var(--text); }
+html[data-theme="dark"] .pos .cats button.active, html[data-theme="dark"] .pay .methods button.active { background: var(--primary); color: #04201d; }
+html[data-theme="dark"] .tbl tr:hover td { background: #1b2c2b; }
+html[data-theme="dark"] .tbl .group td { background: #1a2a29; }
+html[data-theme="dark"] .alert.warn { color: #fcd9a0; border-color: #6b4a14; }
+html[data-theme="dark"] .alert.err { color: #fecaca; border-color: #7f1d1d; }
+html[data-theme="dark"] .alert.ok { color: #bbf7d0; border-color: #14532d; }
+html[data-theme="dark"] .alert.info { color: #bfdbfe; border-color: #1e3a8a; }
+html[data-theme="dark"] .btn.primary { background: var(--primary); color: #04201d; border-color: var(--primary); }
+html[data-theme="dark"] .badge { background: #223534; color: #cfe0de; }
+html[data-theme="dark"] .badge.green { color: #86efac; } html[data-theme="dark"] .badge.red { color: #fca5a5; }
+html[data-theme="dark"] .badge.amber { color: #fcd34d; } html[data-theme="dark"] .badge.blue { color: #93c5fd; }
+html[data-theme="dark"] .badge.green, html[data-theme="dark"] .badge.red, html[data-theme="dark"] .badge.amber, html[data-theme="dark"] .badge.blue { background: var(--surface-2); }
+html[data-theme="dark"] .print-doc, html[data-theme="dark"] .thermal { background: #fff; color: #000; }
+@media print { html[data-theme="dark"] { --bg: #fff; --surface: #fff; --surface-2: #f8fafa; --border: #e2e8e8; --text: #0f1f1e; --muted: #5f6f6e; --primary: #0f766e; } }
+html[data-theme="dark"] .topbar { background: rgba(12,22,21,.85); }
+html[data-theme="dark"] .kbd { background: var(--surface-2); }
+html[data-theme="dark"] .sidebar a.active { color: #04201d; }
