@@ -38,8 +38,8 @@ r28.get("/partners/:id/loyalty", perm("partners.read"), h(async (req) => tx((t) 
 r28.post("/partners/:id/loyalty/adjust", perm("settings.write"), h(async (req) => { const r = await tx((t) => ly.adjustPoints(t, req.company, p(req).id, req.body?.points, req.body?.note, actor(req))); await audit(req, "LOYALTY_ADJUST", "partner", p(req).id, { points: r.points, note: r.note }); return r; }));
 
 // ─── attachments ─────────────────────────────────────────────────────────
-const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"] };
-const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products" };
+const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"] };
+const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIME_OK = /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/plain|text\/csv|application\/(msword|vnd\.openxmlformats-officedocument\.[a-z.]+|vnd\.ms-excel|zip))$/;
 const MAX = 8 * 1024 * 1024;
@@ -96,3 +96,16 @@ r28.post("/attachments/:entity/:id", h(async (req) => {
   await audit(req, "ATTACH", entity, id, { name, size: buf.length });
   return r;
 }));
+
+// ─── AI accounting assistant (top plan) ──────────────────────────────────
+import * as ai from "../services/ai";
+const A = (req: Request) => ({ userId: req.auth.userId, userName: actor(req), role: req.auth.role, superAdmin: !!req.auth.superAdmin });
+const needCo = (req: Request) => { if (!req.company) throw new AppError(400, "اختر المنشأة أولاً", "NO_COMPANY"); if (subscriptionState(req.company).readOnly) throw new AppError(402, "النظام في وضع القراءة فقط", "SUBSCRIPTION"); };
+r28.get("/ai/status", perm("dashboard.read"), h(async (req) => ai.aiStatus(req.company, A(req))));
+r28.put("/ai/key", perm("settings.write"), h(async (req) => { await ai.saveAiKey(cid(req), req.body?.apiKey ? String(req.body.apiKey).trim() : null); await audit(req, "UPDATE", "ai_key", cid(req), { set: !!req.body?.apiKey }); return { ok: true }; }));
+r28.get("/ai/conversations", perm("dashboard.read"), h(async (req) => ai.listConversations(cid(req), req.auth.userId)));
+r28.get("/ai/conversations/:id", perm("dashboard.read"), h(async (req) => ai.getConversation(cid(req), req.auth.userId, p(req).id)));
+r28.delete("/ai/conversations/:id", perm("dashboard.read"), h(async (req) => { await ai.deleteConversation(cid(req), req.auth.userId, p(req).id); return { ok: true }; }));
+r28.post("/ai/chat", h(async (req) => { needCo(req); return ai.chat(req.company, A(req), req.body || {}); }));
+r28.post("/ai/conversations/:id/confirm", h(async (req) => { needCo(req); return ai.confirmPlan(req.company, A(req), p(req).id); }));
+r28.post("/ai/conversations/:id/cancel", h(async (req) => { needCo(req); return ai.cancelPlan(req.company, A(req), p(req).id); }));

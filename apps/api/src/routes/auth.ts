@@ -355,6 +355,15 @@ admin.post(
   }),
 );
 
+/** Sells the AI assistant as an add-on to a company on any plan. */
+admin.post(
+  "/companies/:id/ai-addon",
+  h(async (req) => {
+    await db.exec(`UPDATE companies SET ai = jsonb_set(ai, '{addon}', to_jsonb($2::boolean)) WHERE id=$1`, [req.params.id, !!req.body.on]);
+    return { ok: true };
+  }),
+);
+
 admin.post(
   "/companies/:id/extend",
   h(async (req) => {

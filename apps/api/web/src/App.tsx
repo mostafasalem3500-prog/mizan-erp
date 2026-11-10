@@ -30,6 +30,7 @@ import { FinalAccountsPage } from "./pages/Round27";
 import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
 import { CFG } from "./shared/country";
 import { SideNav, useNav } from "./nav";
+import { AiAssistantPage } from "./pages/Ai";
 import { PromotionsPage, LoyaltyPage, ThemeToggle } from "./pages/Round28";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
@@ -143,6 +144,7 @@ export function App() {
                 <Route path="/final-accounts" element={<FinalAccountsPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
                 <Route path="/promotions" element={<PromotionsPage />} />
+                <Route path="/ai" element={<AiAssistantPage />} />
                 <Route path="/loyalty" element={<LoyaltyPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />

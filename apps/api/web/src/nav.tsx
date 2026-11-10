@@ -12,6 +12,7 @@ export type NavGroup = { key: string; ic: string; label: string; to?: string; pe
 
 export const NAV_TREE: NavGroup[] = [
   { key: "home", ic: "▦", label: "لوحة المؤشرات", to: "/", perm: "dashboard.read" },
+  { key: "ai", ic: "✨", label: "المساعد الذكي", to: "/ai", perm: "dashboard.read" },
   { key: "pos", ic: "🛒", label: "نقطة البيع", to: "/pos", perm: "pos.use" },
   { key: "sales", ic: "🧾", label: "المبيعات", items: [
     { to: "/sales/invoices?new=INVOICE", label: "فاتورة مبيعات جديدة", perm: "sales.write", action: true },

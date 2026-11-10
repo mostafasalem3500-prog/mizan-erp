@@ -54,7 +54,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(compression());
 // attachments carry files (base64): their own, larger body limit; parsed bodies are skipped by the general parser
-app.use("/api/attachments", express.json({ limit: "14mb" }));
+app.use(["/api/attachments", "/api/ai/chat"], express.json({ limit: "30mb" }));
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });
