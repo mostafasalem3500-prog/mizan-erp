@@ -541,3 +541,5 @@ html[data-theme="dark"] .sidebar .nav-sub a.active, html[data-theme="dark"] .sid
 .ai-compose { border-top: 1px solid var(--border); padding: 12px; display: grid; gap: 6px; }
 .ai-compose textarea { resize: none; }
 @media (max-width: 900px) { .ai-wrap { grid-template-columns: minmax(0, 1fr); height: auto; } .ai-side { min-width: 0; } .ai-msgs { padding: 10px; } .ai-side { max-height: 180px; } .ai-main { height: calc(100vh - 150px); } }
+
+.ai-eng { display: grid; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; line-height: 1.7; }

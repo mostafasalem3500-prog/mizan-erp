@@ -6,10 +6,32 @@ import { api, session, useFetch, money, Loading, Field, Input, useToast, useComp
 
 const SUGGEST = [
   "فاتورة مياه المكتب بقيمة 200 ريال شامل الضريبة من المورد شركة المياه الوطنية، دُفعت نقداً",
-  "سجّل إيجار المكتب 5,000 ريال + ضريبة، آجل على المورد مؤسسة العقار المتحد",
-  "اشرح لي قيد شراء أثاث بالتقسيط وهل أسجله مصروفاً أم أصلاً؟",
-  "كيف أعالج فاتورة ضيافة عملاء ضريبياً؟",
+  "إيجار المكتب 5,000 ريال غير شامل الضريبة، آجل على المورد مؤسسة العقار المتحد",
+  "إيداع نقدي في البنك 10,000",
+  "كيف أعالج المصروفات المدفوعة مقدماً؟",
+  "ماذا تستطيع أن تفعل؟",
 ];
+/** ZATCA tax-invoice QR (base64 TLV: 1 seller, 2 VAT number, 3 timestamp, 4 total, 5 VAT) read from the image in the browser. */
+async function readZatcaQr(file: File): Promise<any | null> {
+  if (!file.type.startsWith("image/")) return null;
+  try {
+    const { default: jsQR } = await import("jsqr");
+    const bmp = await createImageBitmap(file);
+    for (const max of [1600, 1000, 2400]) {
+      const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+      const cx = cv.getContext("2d")!; cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+      const code = jsQR(cx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height);
+      if (!code?.data) continue;
+      const bytes = Uint8Array.from(atob(code.data.trim()), (c) => c.charCodeAt(0));
+      const out: Record<number, string> = {}; const dec = new TextDecoder("utf-8");
+      for (let i = 0; i + 2 <= bytes.length;) { const tag = bytes[i], len = bytes[i + 1]; out[tag] = dec.decode(bytes.slice(i + 2, i + 2 + len)); i += 2 + len; }
+      if (!out[4] || isNaN(Number(out[4]))) return null;
+      return { seller: out[1] || "", vat: out[2] || "", date: (out[3] || "").slice(0, 10), total: Number(out[4]), vatAmount: Number(out[5] || 0) };
+    }
+  } catch { /* not a ZATCA QR */ }
+  return null;
+}
 const readB64 = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
 async function openFile(id: string) {
   const r = await fetch(`/api/attachments/file/${id}`, { headers: { Authorization: `Bearer ${session.token}` } });
@@ -48,6 +70,8 @@ export function AiAssistantPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [key, setKey] = useState("");
+  const [adv, setAdv] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const inp = useRef<HTMLInputElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [conv?.view?.length, busy]);
@@ -60,7 +84,7 @@ export function AiAssistantPage() {
     const optimistic = { ...(conv || { view: [] }), view: [...(conv?.view || []), { role: "user", text: t, files: fs.map((f) => ({ name: f.name })) }] };
     setConv(optimistic);
     try {
-      const r = await api("/ai/chat", { body: { conversationId: conv?.id, text: t, files: await Promise.all(fs.map(async (f) => ({ name: f.name, mime: f.type, data: await readB64(f) }))) } });
+      const r = await api("/ai/chat", { body: { conversationId: conv?.id, text: t, engine: adv ? "advanced" : undefined, files: await Promise.all(fs.map(async (f) => ({ name: f.name, mime: f.type, data: await readB64(f), qr: await readZatcaQr(f) }))) } });
       setConv(r); if (!conv?.id) list.reload(); st.reload();
     } catch (e: any) { toast(e.message, "err"); setConv(conv); setText(t); setFiles(fs); if (e.code === "AI_PLAN" || e.code === "AI_NOT_CONFIGURED") st.reload(); } finally { setBusy(false); }
   };
@@ -71,17 +95,10 @@ export function AiAssistantPage() {
   if (!s.entitled) return (
     <div className="card" style={{ maxWidth: 720, margin: "30px auto" }}><div className="card-b" style={{ textAlign: "center" }}>
       <div style={{ fontSize: 44 }}>✨</div><h2>المساعد المحاسبي الذكي</h2>
-      <p className="muted">ميزة باقة <b>المؤسسات (ENTERPRISE)</b>: اكتب العملية بكلامك أو أرفق الفاتورة، والمساعد يجهّز القيد وفق قواعد المحاسبة والضريبة السعودية، يتحقق من المورد وينشئه إن لم يكن موجوداً، ويعرض عليك ما سيُرحَّل قبل التنفيذ.</p>
+      <p className="muted">ميزة باقة <b>المؤسسات (ENTERPRISE)</b>: اكتب العملية بكلامك أو صوّر الفاتورة، والمساعد المدمج يجهّز القيد وفق قواعد المحاسبة والضريبة السعودية، يتحقق من المورد وينشئه إن لم يكن موجوداً، ويعرض عليك ما سيُرحَّل قبل التنفيذ — دون أي خدمة خارجية.</p>
       <p>باقتك الحالية: <span className="badge">{s.plan}</span></p>
       <Link className="btn primary" to="/settings/license">ترقية الاشتراك</Link>
     </div></div>);
-  if (!s.configured) return (
-    <div className="card" style={{ maxWidth: 720, margin: "30px auto" }}><div className="card-h"><h3>✨ تهيئة المساعد الذكي</h3></div><div className="card-b">
-      <p className="muted">المساعد يعمل عبر خدمة Claude من Anthropic ويحتاج مفتاح API واتصالاً بالإنترنت. أنشئ مفتاحاً من حسابك في console.anthropic.com ثم ألصقه هنا. يُحفظ المفتاح في بيانات منشأتك ولا يُعرض بعد الحفظ.</p>
-      {can("settings.write") ? <><Field label="مفتاح Anthropic API"><Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-…" dir="ltr" type="password" /></Field>
-        <button className="btn primary mt" disabled={!key.trim()} onClick={async () => { try { await api("/ai/key", { method: "PUT", body: { apiKey: key.trim() } }); setKey(""); st.reload(); toast("تم حفظ المفتاح", "ok"); } catch (e: any) { toast(e.message, "err"); } }}>حفظ وتفعيل</button></> : <div className="alert warn">اطلب من مدير النظام إضافة المفتاح.</div>}
-    </div></div>);
-
   const view: any[] = conv?.view || [];
   const lastPlan = [...view].reverse().find((v) => v.plan)?.plan;
   return (
@@ -90,28 +107,35 @@ export function AiAssistantPage() {
         <button className="btn primary block" onClick={() => { setConv(null); setText(""); }}>＋ محادثة جديدة</button>
         <div className="ai-list">{(list.data || []).map((c) => <div key={c.id} className={"ai-conv" + (conv?.id === c.id ? " on" : "")} onClick={() => open(c.id)}><div className="t">{c.hasPending && "⏳ "}{c.title}</div><div className="small muted">{fmtDT(c.updatedAt)}</div>
           <button className="x" title="حذف" onClick={async (e) => { e.stopPropagation(); if (!confirmDlg("حذف المحادثة؟ (المستندات المرحّلة لا تتأثر)")) return; await api(`/ai/conversations/${c.id}`, { method: "DELETE" }); if (conv?.id === c.id) setConv(null); list.reload(); }}>✕</button></div>)}</div>
-        <div className="small muted">{s.trial ? "تجربة" : "هذا الشهر"}: {s.used} / {s.limit} رسالة{s.model === "mock" ? " · وضع الاختبار" : ""}</div>
-        {s.keySource === "company" && can("settings.write") && <button className="btn sm ghost" onClick={async () => { if (!confirmDlg("إزالة مفتاح API من المنشأة؟")) return; await api("/ai/key", { method: "PUT", body: { apiKey: null } }); st.reload(); }}>إزالة مفتاح API</button>}
+        <div className="ai-eng small">
+          <div>⚡ <b>المساعد المدمج</b>: يعمل دائماً، بلا إنترنت وبلا حدّ.</div>
+          <div>✨ <b>النموذج المتقدم</b>: {s.advanced ? <>مفعّل — {s.used} / {s.limit} رسالة {s.trial ? "(تجربة)" : "هذا الشهر"}</> : "غير مفعّل"}</div>
+          {can("settings.write") && s.keySource !== "server" && (s.keySource === "company"
+            ? <button className="btn sm ghost" onClick={async () => { if (!confirmDlg("إزالة مفتاح API من المنشأة؟")) return; await api("/ai/key", { method: "PUT", body: { apiKey: null } }); st.reload(); }}>إزالة مفتاح API</button>
+            : <button className="btn sm ghost" onClick={() => setKeyOpen((x) => !x)}>{keyOpen ? "إخفاء" : "تفعيل النموذج المتقدم (اختياري)"}</button>)}
+          {keyOpen && !s.advanced && <div style={{ display: "grid", gap: 6 }}><div className="muted">للعمليات المركّبة وقراءة نص الفواتير وملفات PDF: مفتاح Anthropic API (console.anthropic.com) واتصال بالإنترنت.</div><Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-…" dir="ltr" type="password" />
+            <button className="btn sm primary" disabled={!key.trim()} onClick={async () => { try { await api("/ai/key", { method: "PUT", body: { apiKey: key.trim() } }); setKey(""); setKeyOpen(false); st.reload(); toast("تم تفعيل النموذج المتقدم", "ok"); } catch (e: any) { toast(e.message, "err"); } }}>حفظ</button></div>}
+        </div>
       </aside>
       <section className="ai-main card" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}>
         <div className="ai-msgs">
           {!view.length && <div className="ai-empty">
             <div style={{ fontSize: 40 }}>✨</div><h2>المساعد المحاسبي الذكي</h2>
-            <p className="muted">اكتب العملية بكلامك أو أرفق صورة الفاتورة. أجهّز القيد وأعرضه عليك، ولا يُرحَّل شيء قبل تأكيدك.</p>
+            <p className="muted">اكتب العملية بكلامك أو صوّر الفاتورة الضريبية (أقرأ رمز QR). أجهّز القيد وأعرضه عليك، ولا يُرحَّل شيء قبل تأكيدك.</p>
             <div className="ai-sug">{SUGGEST.map((x) => <button key={x} className="btn" onClick={() => send(x)}>{x}</button>)}</div>
           </div>}
           {view.map((m, i) => m.role === "system" ? (
             <div key={i} className="ai-sys">{m.text}{m.results?.map((r: any, j: number) => <div key={j} className="small">{r.title}{r.number && <> — <b className="num">{r.number}</b></>} {r.link && <Link to={r.link}>فتح ←</Link>}</div>)}</div>
           ) : (
             <div key={i} className={"ai-msg " + m.role}>
-              <div className="who">{m.role === "user" ? "أنت" : "✨ المساعد"}</div>
+              <div className="who">{m.role === "user" ? "أنت" : m.engine === "advanced" ? "✨ النموذج المتقدم" : "⚡ المساعد المدمج"}</div>
               <div className="bubble">
-                {m.files?.length > 0 && <div className="row" style={{ gap: 6, marginBottom: 6 }}>{m.files.map((f: any, j: number) => <span key={j} className="badge blue" style={{ cursor: f.id ? "pointer" : undefined }} onClick={() => f.id && openFile(f.id).catch((e) => toast(e.message, "err"))}>📎 {f.name}</span>)}</div>}
+                {m.files?.length > 0 && <div className="row" style={{ gap: 6, marginBottom: 6 }}>{m.files.map((f: any, j: number) => <span key={j} className="badge blue" style={{ cursor: f.id ? "pointer" : undefined }} onClick={() => f.id && openFile(f.id).catch((e) => toast(e.message, "err"))}>📎 {f.name}{f.qr ? " · QR ✓" : ""}</span>)}</div>}
                 <Rich text={m.text} />
                 {m.plan && <PlanCard plan={m.plan} live={m.plan === lastPlan && !!conv?.pending} busy={busy} onConfirm={() => act("confirm")} onCancel={() => act("cancel")} />}
               </div>
             </div>))}
-          {busy && <div className="ai-msg assistant"><div className="who">✨ المساعد</div><div className="bubble"><span className="spinner" /> يفكّر…</div></div>}
+          {busy && <div className="ai-msg assistant"><div className="who">{adv ? "✨ النموذج المتقدم" : "⚡ المساعد المدمج"}</div><div className="bubble"><span className="spinner" /> يفكّر…</div></div>}
           <div ref={end} />
         </div>
         <div className="ai-compose">
@@ -124,7 +148,7 @@ export function AiAssistantPage() {
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
             <button className="btn primary" disabled={busy || (!text.trim() && !files.length)} onClick={() => send()}>إرسال</button>
           </div>
-          <div className="small muted">المساعد قد يخطئ — راجع الخطة قبل التأكيد. Enter للإرسال، Shift+Enter لسطر جديد.</div>
+          <div className="row between small muted"><span>راجع الخطة قبل التأكيد. Enter للإرسال، Shift+Enter لسطر جديد.</span>{s.advanced && <label className="check" title="يُحسب من رصيد رسائل النموذج المتقدم"><input type="checkbox" checked={adv} onChange={(e) => setAdv(e.target.checked)} /> ✨ استخدم النموذج المتقدم لهذه الرسالة</label>}</div>
         </div>
       </section>
     </div>

@@ -13,6 +13,8 @@ import { manualJournal } from "./misc";
 import { nextCode } from "../routes/master";
 import { systemPrompt, TOOLS } from "./aiRules";
 import { mockLlm } from "./aiMock";
+import { localAgent } from "./aiLocal";
+import { VAT_RATE, BASE_CURRENCY, CFG } from "../lib/country";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = () => process.env.AI_MODEL || "claude-sonnet-5-5";
@@ -28,7 +30,8 @@ export function aiAccess(company: any, auth: { superAdmin: boolean }) {
   const trial = company?.plan === "TRIAL";
   const entitled = !!auth.superAdmin || plans.includes(company?.plan) || company?.ai?.addon === true || trial;
   return {
-    entitled, trial: trial && !auth.superAdmin && company?.ai?.addon !== true, configured: !!key, key,
+    // the built-in agent always works; `key` only unlocks the advanced model for what the agent cannot do
+    entitled, trial: trial && !auth.superAdmin && company?.ai?.addon !== true, configured: true, advanced: !!key, key,
     keySource: process.env.ANTHROPIC_API_KEY ? "server" : company?.ai?.apiKey ? "company" : mock ? "mock" : null,
     plans, trialTurns: Number(process.env.AI_TRIAL_TURNS || 15), monthlyTurns: Number(process.env.AI_MONTHLY_TURNS || 600),
   };
@@ -43,7 +46,7 @@ export async function aiStatus(company: any, auth: Auth) {
   const a = aiAccess(company, auth);
   const u = await usage(company.id);
   return {
-    entitled: a.entitled, configured: a.configured, keySource: a.keySource, trial: a.trial, plan: company.plan, plans: a.plans,
+    entitled: a.entitled, configured: true, advanced: a.advanced, keySource: a.keySource, trial: a.trial, plan: company.plan, plans: a.plans,
     used: a.trial ? u.total : u.month, limit: a.trial ? a.trialTurns : a.monthlyTurns, model: a.keySource === "mock" ? "mock" : MODEL(),
     hasCompanyKey: !!company?.ai?.apiKey,
   };
@@ -242,19 +245,21 @@ export async function deleteConversation(companyId: string, userId: string, id: 
 const save = (c: any) => db.exec(`UPDATE ai_conversations SET title=$2, messages=$3::jsonb, view=$4::jsonb, pending=$5::jsonb, user_turns=$6, tokens_in=$7, tokens_out=$8, updated_at=now() WHERE id=$1`,
   [c.id, c.title, JSON.stringify(c.messages), JSON.stringify(c.view), c.pending ? JSON.stringify(c.pending) : null, c.userTurns, c.tokensIn, c.tokensOut]);
 
-export async function chat(company: any, auth: Auth, input: { conversationId?: string; text?: string; files?: { name: string; mime: string; data: string }[] }) {
+export async function chat(company: any, auth: Auth, input: { conversationId?: string; text?: string; engine?: string; files?: { name: string; mime: string; data: string; qr?: any }[] }) {
   const a = aiAccess(company, auth);
   if (!a.entitled) throw new AppError(402, "المساعد الذكي متاح في الباقة الأعلى (المؤسسات) — رقِّ اشتراكك لتفعيله", "AI_PLAN");
-  if (!a.configured) throw new AppError(400, "المساعد الذكي غير مهيأ: أضف مفتاح Anthropic API من إعدادات المساعد", "AI_NOT_CONFIGURED");
   const u = await usage(company.id);
-  if (a.trial && u.total >= a.trialTurns) throw new AppError(402, `انتهت رسائل التجربة المجانية للمساعد (${a.trialTurns}) — رقِّ إلى باقة المؤسسات للاستمرار`, "AI_PLAN");
-  if (!a.trial && u.month >= a.monthlyTurns) throw new AppError(429, "بلغت الحد الشهري لرسائل المساعد الذكي", "AI_LIMIT");
+  // limits apply to the advanced model only; the built-in agent is unmetered
+  const advancedLeft = a.advanced && (a.trial ? u.total < a.trialTurns : u.month < a.monthlyTurns);
   const text = String(input.text || "").trim().slice(0, 6000);
   const files = (input.files || []).slice(0, 5);
+  const wantAdvanced = input.engine === "advanced";
+  if (wantAdvanced && !a.advanced) throw new AppError(400, "النموذج المتقدم غير مفعّل: أضف مفتاح API من إعدادات المساعد", "AI_NOT_CONFIGURED");
+  if (wantAdvanced && !advancedLeft) throw new AppError(a.trial ? 402 : 429, a.trial ? `انتهت رسائل تجربة النموذج المتقدم (${a.trialTurns}) — المساعد المدمج ما زال متاحاً` : "بلغت الحد الشهري لرسائل النموذج المتقدم — المساعد المدمج ما زال متاحاً", a.trial ? "AI_PLAN" : "AI_LIMIT");
   if (!text && !files.length) throw bad("اكتب رسالة أو أرفق ملفاً");
 
   // validate the files before anything is stored
-  const ready: { name: string; mime: string; buf: Buffer }[] = [];
+  const ready: { name: string; mime: string; buf: Buffer; qr: any }[] = [];
   for (const f of files) {
     const mime = String(f.mime || "").toLowerCase();
     if (!FILE_MIME.test(mime)) throw bad(`«${f.name}»: المساعد يقرأ الصور وملفات PDF والنص/CSV فقط`);
@@ -262,7 +267,9 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
     const buf = m ? Buffer.from(m[1], "base64") : Buffer.alloc(0);
     if (!buf.length) throw bad(`«${f.name}»: ملف فارغ أو غير صالح`);
     if (buf.length > MAX_FILE) throw bad(`«${f.name}»: الحد الأقصى للمرفق 5 ميجابايت`);
-    ready.push({ name: String(f.name || "مرفق").slice(0, 160), mime, buf });
+    // the browser reads the ZATCA QR on a tax-invoice image (seller, VAT number, time, total, VAT): pass it on as text
+    const q = f.qr && typeof f.qr === "object" ? { seller: String(f.qr.seller || "").slice(0, 120), vat: String(f.qr.vat || "").replace(/\D/g, "").slice(0, 15), date: /^\d{4}-\d{2}-\d{2}/.test(String(f.qr.date || "")) ? String(f.qr.date).slice(0, 10) : "", total: num(f.qr.total), vatAmount: num(f.qr.vatAmount) } : null;
+    ready.push({ name: String(f.name || "مرفق").slice(0, 160), mime, buf, qr: q && q.total > 0 ? q : null });
   }
 
   let c: any = input.conversationId
@@ -274,7 +281,8 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   for (const f of ready) {
     const row = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by) VALUES ($1,'ai',$2,$3,$4,$5,$6,$7) RETURNING id`, [company.id, c.id, f.name, f.mime, f.buf.length, f.buf, auth.userName]);
     blocks.push({ type: "file_ref", id: row.id, name: f.name, mime: f.mime });
-    viewFiles.push({ id: row.id, name: f.name, mime: f.mime });
+    if (f.qr) blocks.push({ type: "text", text: `[QR]${JSON.stringify(f.qr)}` });
+    viewFiles.push({ id: row.id, name: f.name, mime: f.mime, qr: !!f.qr });
   }
   if (c.pending) { // a new message instead of confirming: the old plan is dropped
     c.pending = null;
@@ -286,13 +294,29 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   c.view.push({ role: "user", text, files: viewFiles, at: new Date().toISOString() });
 
   const accounts = await db.rows(`SELECT id, code, name_ar, type, system_key FROM accounts WHERE company_id=$1 AND NOT is_group AND is_active ORDER BY code LIMIT 400`, [company.id]);
-  const cash = await db.rows(`SELECT id, code, name_ar FROM accounts WHERE company_id=$1 AND is_cash_bank AND NOT is_group AND is_active ORDER BY code`, [company.id]);
+  const cash = await db.rows(`SELECT id, code, name_ar, system_key FROM accounts WHERE company_id=$1 AND is_cash_bank AND NOT is_group AND is_active ORDER BY code`, [company.id]);
   const system = [{ type: "text", text: systemPrompt({ company, accounts, cash, today: today(), userName: auth.userName, role: auth.role || "" }), cache_control: { type: "ephemeral" } }];
 
+  const lctx = { accounts, cash, today: today(), vatRate: VAT_RATE, currency: CFG.currencySymbol || BASE_CURRENCY };
+  // who answers: the built-in agent first; the advanced model when asked for, when it already leads this exchange,
+  // or when the agent says the request is beyond it (and a key exists)
+  const lastA = [...c.view].reverse().find((v: any) => v.role !== "user");
+  let engine: "local" | "advanced" = wantAdvanced || (advancedLeft && lastA?.role === "assistant" && lastA.engine === "advanced" && !/^\s*$/.test(text)) ? "advanced" : "local";
+  // an attachment the built-in agent cannot read (no QR found by the browser) goes to the advanced model when there is one
+  if (advancedLeft && ready.some((f) => !f.qr)) engine = "advanced";
   let reply = "", plan: any = null, dIn = 0, dOut = 0;
   try {
     for (let step = 0; step < 8; step++) {
-      const r = await callLlm(a.key!, { model: MODEL(), max_tokens: 2500, system, tools: TOOLS, messages: await hydrate(company.id, c.messages) });
+      const hist = await hydrate(company.id, c.messages);
+      let r: any = engine === "local" ? await localAgent({ messages: hist }, lctx) : null;
+      if (r?.escalate) {
+        if (advancedLeft && step === 0) { engine = "advanced"; r = null; }
+        else if (r.escalate === "complex") r.content = [{ type: "text", text: "هذا طلب مركّب (عدة خطوات أو توزيع أو تحليل) يتجاوز ما أعالجه بالقواعد المدمجة. قسّمه إلى عمليات بسيطة أسجّلها واحدة واحدة، أو فعّل النموذج المتقدم بمفتاح API من إعدادات المساعد ليتولاه كاملاً." }];
+        else if (!r.content.length) r.content = [{ type: "text", text: r.escalate === "attachment"
+          ? "لم أجد في المرفق رمز QR ضريبياً أستطيع قراءته. المساعد المدمج يقرأ رمز QR في صور الفواتير الضريبية فقط؛ قراءة نص الفاتورة أو ملفات PDF تحتاج النموذج المتقدم" + (a.advanced ? " (بلغت حدّه الآن)." : " (يُفعَّل بمفتاح API من إعدادات المساعد).") + "\nاكتب لي بيانات الفاتورة: النوع، المبلغ وهل هو شامل الضريبة، المورد، وطريقة السداد."
+          : "لم أفهم المطلوب تماماً. جرّب صيغة مثل:\n- «فاتورة كهرباء 460 ريال شامل الضريبة من المورد … من البنك»\n- «سددنا للمورد … 5,000 من البنك»\n- «إيداع نقدي في البنك 10,000»\n- «اشرح القيد JV-2026-00012» أو «كيف أعالج المصروفات المدفوعة مقدماً؟»" + (a.advanced ? "" : "\nالعمليات المركّبة يتولاها النموذج المتقدم عند تفعيله بمفتاح API.") }];
+      }
+      if (!r) r = await callLlm(a.key!, { model: MODEL(), max_tokens: 2500, system, tools: TOOLS, messages: hist });
       dIn += r.usage?.input_tokens || 0; dOut += r.usage?.output_tokens || 0;
       c.messages.push({ role: "assistant", content: r.content });
       const txt = r.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
@@ -324,11 +348,11 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   // the history must not end on a tool_result with no assistant answer (step limit)
   if (c.messages[c.messages.length - 1].role === "user") c.messages.push({ role: "assistant", content: [{ type: "text", text: reply || "…" }] });
   if (plan) c.pending = { summary: plan.summary, actions: plan.actions, at: new Date().toISOString() };
-  c.view.push({ role: "assistant", text: reply || (plan ? "هذه الخطة المقترحة — راجعها ثم أكّد." : "…"), plan: plan ? { status: "pending", summary: plan.summary, preview: plan.preview } : undefined, at: new Date().toISOString() });
+  c.view.push({ role: "assistant", text: reply || (plan ? "هذه الخطة المقترحة — راجعها ثم أكّد." : "…"), plan: plan ? { status: "pending", summary: plan.summary, preview: plan.preview } : undefined, engine, at: new Date().toISOString() });
   c.userTurns = Number(c.userTurns || 0) + 1; c.tokensIn += dIn; c.tokensOut += dOut;
   await save(c);
-  await db.exec(`INSERT INTO ai_usage (company_id, month, turns, tokens_in, tokens_out) VALUES ($1,$2,1,$3,$4) ON CONFLICT (company_id, month) DO UPDATE SET turns=ai_usage.turns+1, tokens_in=ai_usage.tokens_in+$3, tokens_out=ai_usage.tokens_out+$4`, [company.id, month(), dIn, dOut]);
-  return { id: c.id, title: c.title, view: c.view, pending: !!c.pending };
+  if (engine === "advanced") await db.exec(`INSERT INTO ai_usage (company_id, month, turns, tokens_in, tokens_out) VALUES ($1,$2,1,$3,$4) ON CONFLICT (company_id, month) DO UPDATE SET turns=ai_usage.turns+1, tokens_in=ai_usage.tokens_in+$3, tokens_out=ai_usage.tokens_out+$4`, [company.id, month(), dIn, dOut]);
+  return { id: c.id, title: c.title, view: c.view, pending: !!c.pending, engine };
 }
 
 /** The user pressed «تأكيد»: execute the stored plan for real, attach the conversation's files to the first document. */
