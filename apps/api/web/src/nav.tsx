@@ -12,6 +12,7 @@ export type NavGroup = { key: string; ic: string; label: string; to?: string; pe
 
 export const NAV_TREE: NavGroup[] = [
   { key: "home", ic: "▦", label: "لوحة المؤشرات", to: "/", perm: "dashboard.read" },
+  { key: "insights", ic: "📈", label: "لوحة الإدارة والتحليل", to: "/insights", perm: "reports.read" },
   { key: "ai", ic: "✨", label: "المساعد الذكي", to: "/ai", perm: "dashboard.read" },
   { key: "pos", ic: "🛒", label: "نقطة البيع", to: "/pos", perm: "pos.use" },
   { key: "sales", ic: "🧾", label: "المبيعات", items: [
@@ -25,6 +26,8 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/price-lists", label: "قوائم الأسعار", perm: "products.read" },
     { to: "/promotions", label: "العروض والخصومات", perm: "sales.read" },
     { to: "/loyalty", label: "نقاط الولاء", perm: "sales.read" },
+    { to: "/insights?tab=sales", label: "تحليل المبيعات والأكثر مبيعاً", perm: "reports.read" },
+    { to: "/reports-center?m=sales", label: "تقارير المبيعات التفصيلية", perm: "reports.read" },
   ] },
   { key: "purchases", ic: "📦", label: "المشتريات", items: [
     { to: "/purchases/invoices?new=INVOICE", label: "فاتورة مشتريات جديدة", perm: "purchases.write", action: true },
@@ -33,6 +36,8 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/purchases/returns", label: "مرتجعات المشتريات", perm: "purchases.read" },
     { to: "/suppliers", label: "الموردون", perm: "partners.read" },
     { to: "/vouchers", label: "سندات الصرف", perm: "payments.read" },
+    { to: "/insights?tab=purchases", label: "تحليل المشتريات والموردين", perm: "reports.read" },
+    { to: "/reports-center?m=purchases", label: "تقارير المشتريات التفصيلية", perm: "reports.read" },
   ] },
   { key: "expenses", ic: "🧮", label: "المصروفات", items: [
     { to: "/expenses?new=1", label: "تسجيل مصروف", perm: "expenses.write", action: true },
@@ -40,6 +45,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/recurring", label: "المصروفات والقيود الدورية", perm: "accounting.read", company: true },
     { to: "/reports/expenses", label: "تحليل المصروفات", perm: "reports.read", company: true },
     { to: "/reports/cost-centers", label: "مراكز التكلفة", perm: "reports.read", company: true },
+    { to: "/reports-center?m=expenses", label: "تقارير المصروفات التفصيلية", perm: "reports.read" },
   ] },
   { key: "inventory", ic: "🏬", label: "المخزون", items: [
     { to: "/products", label: "الأصناف والخدمات", perm: "products.read" },
@@ -50,11 +56,15 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/lots", label: "الدفعات والصلاحية", perm: "inventory.read" },
     { to: "/reorder", label: "إعادة الطلب", perm: "inventory.read" },
     { to: "/labels", label: "ملصقات الباركود", perm: "products.read" },
+    { to: "/insights?tab=stock", label: "تنبيهات المخزون وتحليل الأصناف", perm: "reports.read" },
+    { to: "/reports-center?m=inventory", label: "تقارير المخزون التفصيلية", perm: "reports.read" },
   ] },
   { key: "cash", ic: "🏦", label: "النقدية والبنوك", items: [
     { to: "/treasury", label: "الخزائن والحسابات البنكية", perm: "payments.read" },
     { to: "/cheques", label: "الشيكات", perm: "payments.read", company: true },
     { to: "/bank", label: "التسوية البنكية", perm: "accounting.read", company: true },
+    { to: "/insights?tab=money", label: "الذمم والسيولة المتوقعة", perm: "reports.read" },
+    { to: "/reports-center?m=treasury", label: "تقارير الخزينة التفصيلية", perm: "reports.read" },
   ] },
   { key: "gl", ic: "📒", label: "المحاسبة العامة", items: [
     { to: "/journals?new=manual", label: "قيد يومية جديد", perm: "accounting.write", action: true },
@@ -71,6 +81,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/payroll/loans", label: "السلف", perm: "accounting.read", company: true },
     { to: "/payroll/provisions", label: "مخصصات نهاية الخدمة والإجازات", perm: "accounting.read", company: true },
     { to: "/payroll/settlements", label: "التصفية النهائية", perm: "accounting.read", company: true },
+    { to: "/reports-center?m=hr", label: "تقارير الرواتب التفصيلية", perm: "reports.read", company: true },
   ] },
   { key: "tax", ic: "٪", label: "الضرائب والزكاة", items: [
     { to: "/vat", label: "ضريبة القيمة المضافة والإقرار", perm: "vat.read", company: true },
@@ -91,7 +102,10 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/periods?tab=close", label: "فحص وإقفال السنة", perm: "accounting.read", company: true },
   ] },
   { key: "reports", ic: "📊", label: "التقارير", items: [
+    { to: "/insights", label: "لوحة الإدارة والتحليل", perm: "reports.read" },
+    { to: "/insights?tab=alerts", label: "التنبيهات والملاحظات", perm: "reports.read" },
     { to: "/reports-center", label: "مركز التقارير (كل التقارير)", perm: "reports.read" },
+    { to: "/digest", label: "تقارير الإدارة بالبريد", perm: "settings.read", company: true },
     { to: "/reports/trial-balance", label: "ميزان المراجعة", perm: "reports.read" },
     { to: "/reports/income", label: "قائمة الدخل لفترة", perm: "reports.read" },
     { to: "/reports/income-compare", label: "قائمة دخل مقارنة", perm: "reports.read" },
@@ -105,6 +119,12 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/reports/budget", label: "الموازنة مقابل الفعلي", perm: "reports.read", company: true },
     { to: "/analysis", label: "التحليل المالي والمؤشرات", perm: "reports.read", company: true },
     { to: "/reports/integrity", label: "فحص التطابق", perm: "reports.read", company: true },
+  ] },
+  { key: "archive", ic: "🗄", label: "الأرشيف والمستندات", items: [
+    { to: "/archive", label: "كل المستندات", perm: "reports.read" },
+    { to: "/archive?tab=general", label: "مستندات المنشأة (سجل، رخص، عقود)", perm: "reports.read" },
+    { to: "/archive?tab=expiring", label: "مستندات تنتهي قريباً", perm: "reports.read" },
+    { to: "/archive?tab=missing", label: "فواتير ومصروفات بلا مرفق", perm: "reports.read" },
   ] },
   { key: "settings", ic: "⚙", label: "الإعدادات", items: [
     { to: "/settings", label: "بيانات المنشأة", perm: "settings.read", company: true },
@@ -132,7 +152,7 @@ function score(to: string, pathname: string, search: string) {
   const cur = new URLSearchParams(search);
   if (path === pathname) {
     for (const [k, v] of params) if (cur.get(k) !== v) return -1;
-    if (!params.has("tab") && cur.get("tab")) return 500; // another entry owns this tab
+    if ((!params.has("tab") && cur.get("tab")) || (!params.has("m") && cur.get("m"))) return 500; // another entry owns this tab
     return 1000 + [...params].length;
   }
   if (path !== "/" && pathname.startsWith(path + "/") && ![...params].length) return path.length;

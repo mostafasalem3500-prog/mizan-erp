@@ -1,7 +1,7 @@
 /** Round 28 routes: promotions, customer loyalty points, document attachments. */
 import { Router, Request } from "express";
 import { db, tx } from "../db/pool";
-import { h, bad, notFound, AppError, num } from "../lib/core";
+import { h, bad, notFound, AppError, num, today } from "../lib/core";
 import { authenticate, perm, cid, actor, p, can, subscriptionState } from "../lib/auth";
 import { audit } from "./master";
 import * as pr from "../services/promotions";
@@ -38,7 +38,7 @@ r28.get("/partners/:id/loyalty", perm("partners.read"), h(async (req) => tx((t) 
 r28.post("/partners/:id/loyalty/adjust", perm("settings.write"), h(async (req) => { const r = await tx((t) => ly.adjustPoints(t, req.company, p(req).id, req.body?.points, req.body?.note, actor(req))); await audit(req, "LOYALTY_ADJUST", "partner", p(req).id, { points: r.points, note: r.note }); return r; }));
 
 // ─── attachments ─────────────────────────────────────────────────────────
-const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"] };
+const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"], archive: ["accounting"] };
 const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIME_OK = /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/plain|text\/csv|application\/(msword|vnd\.openxmlformats-officedocument\.[a-z.]+|vnd\.ms-excel|zip))$/;
@@ -109,3 +109,89 @@ r28.delete("/ai/conversations/:id", perm("dashboard.read"), h(async (req) => { a
 r28.post("/ai/chat", h(async (req) => { needCo(req); return ai.chat(req.company, A(req), req.body || {}); }));
 r28.post("/ai/conversations/:id/confirm", h(async (req) => { needCo(req); return ai.confirmPlan(req.company, A(req), p(req).id); }));
 r28.post("/ai/conversations/:id/cancel", h(async (req) => { needCo(req); return ai.cancelPlan(req.company, A(req), p(req).id); }));
+
+// ─── executive analytics, e-mailed management reports, document archive ───
+import { executive } from "../services/insights";
+import * as dg from "../services/digest";
+import { mailStatus } from "../services/mail";
+r28.get("/analytics/executive", perm("reports.read"), h(async (req) => executive(db, cid(req), { ...req.query, branchId: req.auth.lockedBranchId || req.query.branchId })));
+
+r28.get("/digest", perm("settings.read"), h(async (req) => ({
+  settings: dg.digestSettings(req.company), mail: mailStatus(), sections: dg.SECTIONS,
+  recipients: await db.rows(`SELECT r.*, b.name branch_name FROM report_recipients r LEFT JOIN branches b ON b.id=r.branch_id WHERE r.company_id=$1 ORDER BY r.created_at`, [cid(req)]),
+  log: await db.rows(`SELECT email, period, ok, error, created_at FROM report_send_log WHERE company_id=$1 ORDER BY created_at DESC LIMIT 40`, [cid(req)]),
+})));
+r28.put("/digest/settings", perm("settings.write"), h(async (req) => { const s = await dg.saveDigestSettings(cid(req), req.body || {}); await audit(req, "UPDATE", "digest_settings", cid(req), s); return s; }));
+r28.post("/digest/recipients", perm("settings.write"), h(async (req) => { const r = await dg.saveRecipient(cid(req), req.body || {}); await audit(req, "CREATE", "report_recipient", r.id, { email: r.email, sections: r.sections }); return r; }));
+r28.put("/digest/recipients/:id", perm("settings.write"), h(async (req) => { const r = await dg.saveRecipient(cid(req), req.body || {}, p(req).id); await audit(req, "UPDATE", "report_recipient", r.id, { email: r.email, sections: r.sections }); return r; }));
+r28.delete("/digest/recipients/:id", perm("settings.write"), h(async (req) => { await db.exec(`DELETE FROM report_recipients WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); await audit(req, "DELETE", "report_recipient", p(req).id); return { ok: true }; }));
+const recipientOf = async (req: Request) => {
+  const id = String(req.query.recipientId || req.body?.recipientId || "");
+  if (UUID.test(id)) return db.one(`SELECT * FROM report_recipients WHERE id=$1 AND company_id=$2`, [id, cid(req)], "المستلم غير موجود");
+  const sections = String(req.query.sections || "").split(",").filter((s) => dg.SECTIONS[s]);
+  return { sections: sections.length ? sections : Object.keys(dg.SECTIONS), frequency: ["DAILY", "WEEKLY", "MONTHLY"].includes(String(req.query.frequency)) ? req.query.frequency : "DAILY", branchId: null };
+};
+r28.get("/digest/preview", perm("settings.read"), h(async (req, res) => { const m = await dg.buildFor(req.company, await recipientOf(req)); res.setHeader("Content-Type", "text/html; charset=utf-8"); res.send(m.html); }));
+r28.post("/digest/send", perm("settings.write"), h(async (req) => {
+  if (!mailStatus().configured) throw bad("خدمة البريد غير مفعّلة على الخادم — اضبط متغيرات SMTP أولاً");
+  const rs = req.body?.recipientId ? [await recipientOf(req)] : await db.rows(`SELECT * FROM report_recipients WHERE company_id=$1 AND is_active`, [cid(req)]);
+  const out: any[] = []; for (const r of rs) out.push(await dg.sendTo(req.company, r));
+  await audit(req, "SEND", "digest", cid(req), { n: out.length, failed: out.filter((x) => !x.ok).length });
+  return { sent: out.filter((x) => x.ok).length, failed: out.filter((x) => !x.ok) };
+}));
+
+// archive: every attached file in one searchable place, plus stand-alone company documents with expiry dates
+export const ARCHIVE_CATEGORIES = ["فاتورة مورد", "فاتورة مبيعات", "إيصال / سند", "عقد", "سجل تجاري", "رخصة / تصريح", "شهادة ضريبية أو زكوية", "كشف بنكي", "مستند حكومي", "مستند موظف", "مراسلات", "أخرى"];
+const ARCH_SELECT = `SELECT a.id, a.entity, a.entity_id, a.name, a.mime, a.size, a.category, a.title, a.tags, a.notes, a.doc_date, a.expires_at, a.created_by, a.created_at,
+    COALESCE(i.number, e.number, pm.number, j.number, pr.name, pd.name, fa.name) ref, i.direction, i.kind doc_kind, i.partner_name, COALESCE(i.total, e.total, pm.amount) amount, pm.direction pay_dir, pr.is_customer
+  FROM attachments a
+  LEFT JOIN invoices i ON a.entity='invoice' AND i.id=a.entity_id LEFT JOIN expenses e ON a.entity='expense' AND e.id=a.entity_id
+  LEFT JOIN payments pm ON a.entity='payment' AND pm.id=a.entity_id LEFT JOIN journal_entries j ON a.entity='journal' AND j.id=a.entity_id
+  LEFT JOIN partners pr ON a.entity='partner' AND pr.id=a.entity_id LEFT JOIN products pd ON a.entity='product' AND pd.id=a.entity_id LEFT JOIN fixed_assets fa ON a.entity='asset' AND fa.id=a.entity_id`;
+r28.get("/archive", perm("reports.read"), h(async (req) => {
+  const q: any = req.query; const params: any[] = [cid(req)]; const w = ["a.company_id=$1", "a.entity<>'ai'"];
+  const add = (sql: string, v: any) => { params.push(v); w.push(sql.replace("?", `$${params.length}`)); };
+  if (q.entity) add("a.entity=?", String(q.entity));
+  if (q.category) add("a.category=?", String(q.category));
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.from || "")) add("COALESCE(a.doc_date, a.created_at::date) >= ?", q.from);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.to || "")) add("COALESCE(a.doc_date, a.created_at::date) <= ?", q.to);
+  if (q.tab === "expiring") w.push("a.expires_at IS NOT NULL AND a.expires_at <= CURRENT_DATE + 60");
+  if (q.q) { params.push(`%${q.q}%`); const n = `$${params.length}`; w.push(`(${["a.name", "a.title", "a.tags", "a.notes", "i.number", "i.partner_name", "e.number", "e.description", "pr.name", "pm.number", "j.number"].map((c) => `${c} ILIKE ${n}`).join(" OR ")})`); }
+  const sql = `${ARCH_SELECT} WHERE ${w.join(" AND ")} ORDER BY ${q.tab === "expiring" ? "a.expires_at" : "a.created_at DESC"} LIMIT 500`;
+  const rows = await db.rows(sql, params);
+  const stats = await db.one(`SELECT COUNT(*)::int files, COALESCE(SUM(size),0)::bigint bytes, COUNT(*) FILTER (WHERE entity='invoice')::int invoices, COUNT(*) FILTER (WHERE entity='expense')::int expenses, COUNT(*) FILTER (WHERE entity='archive')::int general,
+      COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= CURRENT_DATE + 60)::int expiring, COUNT(*) FILTER (WHERE expires_at < CURRENT_DATE)::int expired FROM attachments WHERE company_id=$1 AND entity<>'ai'`, [cid(req)]);
+  return { rows, stats, categories: ARCHIVE_CATEGORIES };
+}));
+/** Posted purchase invoices and expenses with no supporting document — what an auditor would ask for. */
+r28.get("/archive/missing", perm("reports.read"), h(async (req) => {
+  const q: any = req.query; const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || "") ? q.from : `${today().slice(0, 4)}-01-01`, to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || "") ? q.to : today();
+  return db.rows(`SELECT 'invoice' entity, i.id, i.number, i.date, i.partner_name party, i.total, 'فاتورة مشتريات' label FROM invoices i WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date BETWEEN $2 AND $3 AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.entity='invoice' AND a.entity_id=i.id)
+    UNION ALL SELECT 'expense', e.id, e.number, e.date, COALESCE(e.payee, e.description), e.total, 'مصروف' FROM expenses e WHERE e.company_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3 AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.entity='expense' AND a.entity_id=e.id)
+    ORDER BY 4 DESC LIMIT 500`, [cid(req), from, to]);
+}));
+const archMeta = (b: any) => ({
+  category: ARCHIVE_CATEGORIES.includes(b.category) ? b.category : b.category === "" ? null : undefined, title: b.title === undefined ? undefined : String(b.title || "").trim().slice(0, 200) || null,
+  tags: b.tags === undefined ? undefined : String(b.tags || "").trim().slice(0, 200) || null, notes: b.notes === undefined ? undefined : String(b.notes || "").trim().slice(0, 1000) || null,
+  docDate: b.docDate === undefined ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(b.docDate || "") ? b.docDate : null, expiresAt: b.expiresAt === undefined ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(b.expiresAt || "") ? b.expiresAt : null,
+});
+r28.post("/archive/upload", perm("accounting.write"), h(async (req) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim().slice(0, 160), mime = String(b.mime || "").toLowerCase();
+  if (!name) throw bad("اسم الملف مطلوب");
+  if (!MIME_OK.test(mime)) throw bad("نوع الملف غير مسموح — صور، PDF، Word، Excel، نص، ZIP");
+  const m = String(b.data || "").match(/^(?:data:[^;]+;base64,)?([A-Za-z0-9+/=\s]+)$/);
+  const buf = m ? Buffer.from(m[1], "base64") : Buffer.alloc(0);
+  if (!buf.length) throw bad("الملف فارغ");
+  if (buf.length > MAX) throw bad("حجم الملف أكبر من 8 ميجابايت");
+  const meta = archMeta(b);
+  const r = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by, category, title, tags, notes, doc_date, expires_at) VALUES ($1,'archive',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, name`,
+    [cid(req), name, mime, buf.length, buf, actor(req), meta.category ?? "أخرى", meta.title ?? null, meta.tags ?? null, meta.notes ?? null, meta.docDate ?? null, meta.expiresAt ?? null]);
+  await audit(req, "ARCHIVE", "attachment", r.id, { name });
+  return r;
+}));
+r28.put("/archive/:id", perm("accounting.write"), h(async (req) => {
+  const r = await db.update("attachments", { id: p(req).id, companyId: cid(req) }, archMeta(req.body || {}));
+  if (!r) throw notFound("المستند غير موجود");
+  return { ok: true };
+}));

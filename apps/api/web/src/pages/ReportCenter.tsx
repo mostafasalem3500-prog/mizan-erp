@@ -84,6 +84,9 @@ export function ReportCenterPage() {
   const costCenters = useFetch<any[]>("/cost-centers");
   const [search, setSearch] = useState("");
   const [mod, setMod] = useState("");
+  // ?m=sales opens the center on one module (menu entries «تقارير … التفصيلية»)
+  const only = new URLSearchParams(loc.search).get("m") || "";
+  useEffect(() => { if (only) setMod(only); }, [only]);
   const def = cat.data?.reports.find((r) => r.key === key) || null;
   const [f, setF] = useState<Record<string, string>>({});
   const [pickers, setPickers] = useState<Record<string, any>>({});
@@ -148,7 +151,7 @@ export function ReportCenterPage() {
         {!def ? (
           <div className="card"><div className="card-b">
             <h2>مركز التقارير</h2><p className="muted">{cat.data.reports.length} تقريراً مفصّلاً في {cat.data.modules.length} مديولات — كل تقرير بفلاتر متعددة وتجميع وتصدير وطباعة. اختر تقريراً من القائمة.</p>
-            <div className="rc-grid">{cat.data.modules.map((m) => <div key={m.key} className="card"><div className="card-h"><h3>{m.label}</h3></div><div className="card-b">{reportsOf(m.key).map((r) => <Link key={r.key} to={`/reports-center/${r.key}`} className="rc-link"><b>{r.title}</b><span className="small muted">{r.desc}</span></Link>)}</div></div>)}</div>
+            <div className="rc-grid">{cat.data.modules.filter((m) => !only || m.key === only).map((m) => <div key={m.key} className="card"><div className="card-h"><h3>{m.label}</h3></div><div className="card-b">{reportsOf(m.key).map((r) => <Link key={r.key} to={`/reports-center/${r.key}`} className="rc-link"><b>{r.title}</b><span className="small muted">{r.desc}</span></Link>)}</div></div>)}</div>
           </div></div>
         ) : (
           <div className="card">

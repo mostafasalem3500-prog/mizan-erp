@@ -7,6 +7,7 @@ import { egr } from "./routes/egypt";
 import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP } from "./lib/country";
 import { r16 } from "./routes/round16";
 import { r28 } from "./routes/round28";
+import { startDigestScheduler } from "./services/digest";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
 import express from "express";
@@ -54,7 +55,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(compression());
 // attachments carry files (base64): their own, larger body limit; parsed bodies are skipped by the general parser
-app.use(["/api/attachments", "/api/ai/chat"], express.json({ limit: "30mb" }));
+app.use(["/api/attachments", "/api/ai/chat", "/api/archive/upload"], express.json({ limit: "30mb" }));
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });
@@ -137,6 +138,7 @@ migrate()
     if (IS_DESKTOP) setTimeout(selfCheck, 3 * 60_000).unref(); else selfCheck();
     if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
+    startDigestScheduler();
     startDesktopLicenseCheck();
   })
   .catch((e) => {

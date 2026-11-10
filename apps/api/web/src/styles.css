@@ -543,3 +543,24 @@ html[data-theme="dark"] .sidebar .nav-sub a.active, html[data-theme="dark"] .sid
 @media (max-width: 900px) { .ai-wrap { grid-template-columns: minmax(0, 1fr); height: auto; } .ai-side { min-width: 0; } .ai-msgs { padding: 10px; } .ai-side { max-height: 180px; } .ai-main { height: calc(100vh - 150px); } }
 
 .ai-eng { display: grid; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; line-height: 1.7; }
+
+/* ── management dashboard charts ── */
+.lg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; }
+.hbars { display: grid; gap: 7px; }
+.hbar { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(60px, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.hbar .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar .b { background: var(--surface-2); border-radius: 6px; height: 12px; overflow: hidden; }
+.hbar .b i { display: block; height: 100%; border-radius: 6px; min-width: 2px; }
+.hbar .v { font-weight: 600; min-width: 56px; text-align: end; }
+.vcols { display: flex; align-items: flex-end; gap: 4px; height: 170px; }
+.vcol { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; min-width: 0; }
+.vcol .bar { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.vcol .bar i { display: block; width: 100%; background: var(--primary); border-radius: 5px 5px 0 0; min-height: 2px; }
+.vcol .l { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.stackbar { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.ins-list { margin: 0; padding-inline-start: 18px; line-height: 2; }
+.insights .kpi .value { font-size: 22px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.kpis > .kpi { min-width: 0; }
+.grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .grid.cols-2 { grid-template-columns: minmax(0, 1fr); } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
