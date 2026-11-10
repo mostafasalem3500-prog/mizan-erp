@@ -4,7 +4,7 @@ import { ProductImagesModal } from "./ProductImages";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ImportModal } from "./Import";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches, useNewParam, useTabParam } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
 export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
@@ -13,6 +13,7 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const [search, setSearch] = useUrlSearch();
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
+  useNewParam(() => setEdit({}));
   const [stmt, setStmt] = useState<any>(null);
   const [imp, setImp] = useState(false);
   const [bal, setBal] = useState("");
@@ -88,6 +89,7 @@ export function ProductsPage() {
   const [status, setStatus] = useState("active");
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
+  useNewParam(() => setEdit({}));
   const [card, setCard] = useState<any>(null);
   const navP = useNavigate();
   const [cats, setCats] = useState(false);
@@ -223,7 +225,7 @@ export function StockCardModal({ p, onClose }: { p: any; onClose: () => void }) 
 // ─── inventory: valuation, warehouses, adjustments ─────────────────────────
 export function InventoryPage() {
   const { can } = useCompanyContext();
-  const [tab, setTab] = useState("valuation");
+  const [tab, setTab] = useTabParam("valuation");
   const val = useFetch(`/inventory/valuation`);
   const wh = useFetch("/warehouses");
   const adj = useFetch("/inventory/adjustments");

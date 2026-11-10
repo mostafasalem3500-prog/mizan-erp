@@ -29,66 +29,9 @@ import { FinancialAnalysisPage } from "./pages/Round25";
 import { FinalAccountsPage } from "./pages/Round27";
 import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
 import { CFG } from "./shared/country";
+import { SideNav, useNav } from "./nav";
 import { PromotionsPage, LoyaltyPage, ThemeToggle } from "./pages/Round28";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
-
-const NAV = [
-  { group: "الرئيسية" },
-  { to: "/", ic: "▦", label: "لوحة المؤشرات", perm: "dashboard.read" },
-  { to: "/pos", ic: "🛒", label: "نقطة البيع", perm: "pos.use" },
-  { group: "المبيعات" },
-  { to: "/sales/invoices", ic: "🧾", label: "فواتير المبيعات", perm: "sales.read" },
-  { to: "/sales/quotations", ic: "📝", label: "عروض الأسعار والأوامر", perm: "sales.read" },
-  { to: "/sales/credit-notes", ic: "↩", label: "الإشعارات الدائنة", perm: "sales.read" },
-  { to: "/customers", ic: "👥", label: "العملاء", perm: "partners.read" },
-  { to: "/price-lists", ic: "🏷", label: "قوائم الأسعار", perm: "products.read" },
-  { to: "/promotions", ic: "🎁", label: "العروض والخصومات", perm: "sales.read" },
-  { to: "/loyalty", ic: "⭐", label: "نقاط الولاء", perm: "sales.read" },
-  { to: "/receipts", ic: "💵", label: "سندات القبض", perm: "payments.read" },
-  { to: "/collections", ic: "📞", label: "التحصيل والمتابعة", perm: "sales.read" },
-  { group: "المشتريات" },
-  { to: "/purchases/invoices", ic: "📦", label: "فواتير المشتريات", perm: "purchases.read" },
-  { to: "/purchases/orders", ic: "📋", label: "أوامر الشراء", perm: "purchases.read" },
-  { to: "/purchases/returns", ic: "↪", label: "مرتجعات المشتريات", perm: "purchases.read" },
-  { to: "/suppliers", ic: "🏭", label: "الموردون", perm: "partners.read" },
-  { to: "/vouchers", ic: "💸", label: "سندات الصرف", perm: "payments.read" },
-  { to: "/expenses", ic: "🧮", label: "المصروفات", perm: "expenses.read" },
-  { group: "المخزون" },
-  { to: "/products", ic: "🏷", label: "الأصناف", perm: "products.read" },
-  { to: "/inventory", ic: "🏬", label: "المستودعات والجرد", perm: "inventory.read" },
-  { to: "/inventory/count-sheet", ic: "📋", label: "ورقة الجرد وملخص العمليات", perm: "inventory.read" },
-  { to: "/lots", ic: "⏳", label: "الدفعات والصلاحية", perm: "inventory.read" },
-  { to: "/reorder", ic: "🔔", label: "إعادة الطلب", perm: "inventory.read" },
-  { to: "/labels", ic: "🏷", label: "ملصقات الباركود", perm: "products.read" },
-  { group: "المحاسبة" },
-  { to: "/accounts", ic: "🌳", label: "دليل الحسابات", perm: "accounting.read" },
-  { to: "/journals", ic: "📒", label: "القيود اليومية", perm: "accounting.read" },
-  { to: "/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
-  { to: "/cheques", ic: "🧾", label: "الشيكات", perm: "payments.read" },
-  { to: "/bank", ic: "🏦", label: "التسوية البنكية", perm: "accounting.read" },
-  { to: "/recurring", ic: "🔁", label: "القيود الدورية", perm: "accounting.read" },
-  { to: "/payroll", ic: "👔", label: "الرواتب والموظفون", perm: "accounting.read" },
-  { to: "/assets", ic: "🏢", label: "الأصول الثابتة", perm: "assets.read" },
-  { to: "/periods", ic: "📅", label: "السنوات والفترات", perm: "accounting.read" },
-  { to: "/vat", ic: "٪", label: "ضريبة القيمة المضافة", perm: "vat.read" },
-  { to: "/tax/wht", ic: "🌍", label: "ضريبة الاستقطاع (غير المقيمين)", perm: "vat.read", sa: true },
-  { to: "/tax/form41", ic: "🧾", label: "الخصم تحت حساب الضريبة (نموذج 41)", perm: "vat.read", eg: true },
-  { to: "/tax/income-tax", ic: "🏛", label: "ضريبة الدخل (22.5%)", perm: "accounting.read", eg: true },
-  { to: "/zakat", ic: "🕌", label: "احتساب الزكاة الشرعية", perm: "accounting.read", sa: true },
-  { to: "/analysis", ic: "📈", label: "التحليل المالي والمؤشرات", perm: "reports.read" },
-  { to: "/budgets", ic: "🎯", label: "الموازنات التقديرية", perm: "reports.read" },
-  { to: "/final-accounts", ic: "📚", label: "الحسابات الختامية", perm: "reports.read" },
-  { to: "/reports", ic: "📊", label: "القوائم المالية", perm: "reports.read" },
-  { to: "/reports-center", ic: "📈", label: "مركز التقارير", perm: "reports.read" },
-  { group: "الإعدادات" },
-  { to: "/zatca", ic: "🔐", label: "الفوترة الإلكترونية", perm: "settings.read", sa: true },
-  { to: "/eta", ic: "🔐", label: "الفاتورة والإيصال الإلكتروني", perm: "settings.read", eg: true },
-  { to: "/settings", ic: "⚙", label: "إعدادات المنشأة", perm: "settings.read" },
-  { to: "/settings/integrations", ic: "🔌", label: "التكامل والربط (API)", perm: "settings.read" },
-];
-
-// company-level screens hidden from members confined to one branch
-const COMPANY_ONLY = new Set(["/accounts", "/cheques", "/bank", "/recurring", "/payroll", "/assets", "/periods", "/vat", "/tax/wht", "/zakat", "/tax/form41", "/tax/income-tax", "/eta", "/analysis", "/final-accounts", "/budgets", "/zatca", "/settings", "/settings/integrations"]);
 
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
@@ -102,6 +45,11 @@ function canRole(role: string | null, perm: string, superAdmin = false) {
   if (superAdmin) return true;
   const ps = ROLE_PERMS[role || ""] || [];
   return ps.includes("*") || ps.includes(perm) || (perm.endsWith(".read") && ps.includes("*.read"));
+}
+
+function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedBranch: boolean }) {
+  const { active } = useNav(can, lockedBranch);
+  return <div className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : active?.g.label || ""}</div>;
 }
 
 export function App() {
@@ -131,11 +79,10 @@ export function App() {
           <aside className={"sidebar" + (menu ? " open" : "")}>
             <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}{CFG.desktop && <span className="badge" title="قاعدة البيانات على هذا الجهاز" style={{ marginInlineStart: 6, fontSize: 11 }}>💻 محلي</span>}</div>
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
-            <nav>
-              {NAV.filter((n: any) => !(n.sa && CFG.country !== "SA") && !(n.eg && CFG.country !== "EG")).map((n: any, i) => n.group ? <div key={i} className="group">{n.group}</div> : (can(n.perm) && !(me.lockedBranch && COMPANY_ONLY.has(n.to)) ? <NavLink key={n.to} to={n.to} end={n.to === "/"}><span className="ic">{n.ic}</span>{n.label}</NavLink> : null))}
-              {CFG.charity && can("payments.read") && <NavLink to="/charity" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
-              {me.superAdmin && <><div className="group">النظام</div><NavLink to="/admin"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink></>}
-            </nav>
+            <SideNav can={can} lockedBranch={!!me.lockedBranch} extra={<>
+              {CFG.charity && can("payments.read") && <NavLink to="/charity" className="nav-top" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
+              {me.superAdmin && <NavLink to="/admin" className="nav-top"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink>}
+            </>} />
             <div className="foot">
               <SubscriptionLine me={me} />
               <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={() => { session.token = null; setMe(null); nav("/login"); }}>تسجيل الخروج</button>
@@ -144,7 +91,7 @@ export function App() {
           <div className="main">
             <div className="topbar">
               <button className="btn sm burger" onClick={() => setMenu((m) => !m)}>☰</button>
-              <div className="title">{(NAV.find((n: any) => n.to === loc.pathname) || NAV.find((n: any) => n.to && n.to !== "/" && loc.pathname.startsWith(n.to + "/")))?.label || ""}</div>
+              <PageTitle can={can} lockedBranch={!!me.lockedBranch} />
               <div className="grow" />
               <GlobalSearch />
               <ThemeToggle />

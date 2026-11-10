@@ -3,7 +3,7 @@ import { Attachments } from "./Round28";
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch, SearchBox, FilterInfo, useSorted, Th, matches } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch, SearchBox, FilterInfo, useSorted, Th, matches, useNewParam } from "../lib";
 import { PartnerStatement, AccountLedger, AccountStatementButton } from "./Statements";
 
 // ─── payments (receipt / payment vouchers) ─────────────────────────────────
@@ -14,6 +14,7 @@ export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
   const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const [edit, setEdit] = useState(false);
+  useNewParam(() => setEdit(true));
   const [view, setView] = useState<any>(null);
   const [method, setMethod] = useState("");
   const [status, setStatus] = useState("");
@@ -175,6 +176,7 @@ export function ExpensesPage() {
   const [from, setFrom] = useState(monthStart().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const [edit, setEdit] = useState(false);
+  useNewParam(() => setEdit(true));
   const [accountId, setAccountId] = useState("");
   const [pay, setPay] = useState("");
   const [status, setStatus] = useState("");

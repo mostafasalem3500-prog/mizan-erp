@@ -2,7 +2,7 @@ import { CFG } from "../shared/country";
 /** Round 27 — final accounts (الحسابات الختامية) and the year-end closing checklist. */
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, useFetch, Money, money, Loading, Empty, Modal, PrintBtn, exportExcel, useAction, useToast, confirmDlg, useCompanyContext } from "../lib";
+import { api, useFetch, Money, money, Loading, Empty, Modal, PrintBtn, exportExcel, useAction, useToast, confirmDlg, useCompanyContext, useTabParam } from "../lib";
 
 type Row = { code: string; name: string; cur: number; prev: number };
 type Sec = { subtype: string; name: string; items: Row[]; cur: number; prev: number };
@@ -45,7 +45,7 @@ export function FinalAccountsPage({ charity = false }: { charity?: boolean }) {
   const { me } = useCompanyContext();
   const [sp] = useSearchParams();
   const [fy, setFy] = useState(sp.get("fy") || "");
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useTabParam("all");
   const { data: d, loading } = useFetch<any>(`/reports/final-accounts${fy ? `?fiscalYearId=${fy}` : ""}`, [fy]);
   const L = charity
     ? { bs: "قائمة المركز المالي", is: "قائمة الأنشطة", eq: "قائمة التغيرات في صافي الأصول", cf: "قائمة التدفقات النقدية", net: "صافي الفائض (العجز)", equity: "صافي الأصول (الأموال)", sales: "الإيرادات" }

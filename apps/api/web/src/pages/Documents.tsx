@@ -9,7 +9,7 @@ export const etaQrText = (d: any) => !d?.etaUuid ? "" : d.etaKind === "RECEIPT"
   ? `https://invoicing.eta.gov.eg/receipts/search/${d.etaUuid}/share/${(d.issuedAt ? new Date(d.issuedAt) : new Date(d.date + "T10:00:00+02:00")).toISOString().replace(/\.\d{3}Z$/, "Z")}#Total:${Number(d.total).toFixed(2)},IssuerRIN:${d.company?.vatNumber || ""}`
   : `https://invoicing.eta.gov.eg/documents/${d.etaUuid}/share/${d.etaLongId || ""}`;
 import { amountToArabicWords } from "../shared/tafqeet";
-import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter } from "../lib";
+import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
 import { PartnerStatement } from "./Statements";
 
 const KIND_TITLE: Record<string, Record<string, string>> = {
@@ -37,6 +37,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
   const [page, setPage] = useState(0);
   const dq = useDebounce(search);
   const [editor, setEditor] = useState<{ kind: string; id?: string } | null>(null);
+  useNewParam((v) => { if (can(writePerm)) setEditor({ kind: v === "1" ? kinds.filter((k) => k !== "CREDIT_NOTE" && k !== "DEBIT_NOTE")[0] || kinds[0] : v }); });
   const { data, loading, reload } = useFetch(`/invoices${q({ direction, kind: kinds.join(","), q: dq, status, paymentStatus: pay, branchId: branchId || undefined, channel: channel || undefined, from, to, partnerId: partner?.id, overdue: overdue ? 1 : undefined, zatca, limit: 50, offset: page * 50 })}`);
   const writePerm = direction === "SALE" ? "sales.write" : "purchases.write";
   useEffect(() => setPage(0), [dq, status, pay, branchId, channel, from, to, partner?.id, overdue, zatca]);

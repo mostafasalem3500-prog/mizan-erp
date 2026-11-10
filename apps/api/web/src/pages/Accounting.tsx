@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { BranchField } from "./Branches";
 import { CloseYearModal } from "./Round27";
 import { AccountLedger } from "./Statements";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, JTYPE_AR, TYPE_AR, confirmDlg, SearchBox, FilterInfo, useUrlSearch, normalizeAr } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, partnerFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, JTYPE_AR, TYPE_AR, confirmDlg, SearchBox, FilterInfo, useUrlSearch, normalizeAr, useNewParam } from "../lib";
 
 // ─── chart of accounts ─────────────────────────────────────────────────────
 export function AccountsPage() {
@@ -101,6 +101,7 @@ export function JournalsPage() {
   const dq = useDebounce(search);
   const [page, setPage] = useState(0);
   const [edit, setEdit] = useState<"manual" | "opening" | null>(null);
+  useNewParam((v) => setEdit(v === "opening" ? "opening" : "manual"));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [account, setAccount] = useState<any>(null);
   const [partner, setPartner] = useState<any>(null);

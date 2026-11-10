@@ -491,3 +491,28 @@ html[data-theme="dark"] .print-doc, html[data-theme="dark"] .thermal { backgroun
 html[data-theme="dark"] .topbar { background: rgba(12,22,21,.85); }
 html[data-theme="dark"] .kbd { background: var(--surface-2); }
 html[data-theme="dark"] .sidebar a.active { color: #04201d; }
+
+
+/* ── grouped main menu ── */
+.sidebar .nav-search { position: relative; margin: 2px 2px 8px; }
+.sidebar .nav-search input { width: 100%; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); border-radius: 9px; padding: 7px 10px; color: #fff; font-size: 13px; outline: none; }
+.sidebar .nav-search input::placeholder { color: #8bb0ab; }
+.sidebar .nav-search input:focus { border-color: var(--primary); }
+.sidebar .nav-search button { position: absolute; inset-inline-end: 6px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: #8bb0ab; cursor: pointer; }
+.sidebar .nav-top { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 9px; color: #d8e7e5; font-size: 14px; font-weight: 500; background: none; border: 0; cursor: pointer; text-align: start; margin-bottom: 1px; }
+.sidebar .nav-top:hover { background: rgba(255,255,255,.06); color: #fff; }
+.sidebar a.nav-top.active { background: var(--primary); color: #fff; }
+.sidebar .nav-top .ic { width: 20px; text-align: center; font-size: 16px; }
+.sidebar .nav-top .chev { font-size: 15px; opacity: .6; transition: transform .15s; }
+.sidebar .nav-group.open > .nav-top .chev { transform: rotate(-90deg); }
+.sidebar .nav-group.current > .nav-top { color: #fff; font-weight: 700; }
+.sidebar .nav-group.open { background: rgba(255,255,255,.035); border-radius: 10px; margin-bottom: 4px; }
+.sidebar .nav-sub { display: none; padding: 0 8px 8px; margin-inline-start: 19px; border-inline-start: 1px solid rgba(255,255,255,.12); }
+.sidebar .nav-group.open > .nav-sub { display: block; }
+.sidebar .nav-sub a { padding: 6px 10px; font-size: 13px; gap: 6px; margin-bottom: 0; color: #b9cfcc; }
+.sidebar .nav-sub a.active { background: var(--primary); color: #fff; font-weight: 600; }
+.sidebar .nav-sub a.action { color: #7fe0d2; font-weight: 600; }
+.sidebar .nav-sub a.action:hover { color: #fff; }
+.topbar .title .crumb { color: var(--muted); font-weight: 400; font-size: 14px; }
+@media (max-width: 700px) { .topbar .title .crumb { display: none; } }
+html[data-theme="dark"] .sidebar .nav-sub a.active, html[data-theme="dark"] .sidebar a.nav-top.active { color: #04201d; }

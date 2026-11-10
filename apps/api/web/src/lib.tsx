@@ -1,7 +1,7 @@
 import { CFG } from "./shared/country";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { writeSheet } from "./shared/sheet";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 // ─── api ───────────────────────────────────────────────────────────────────
 export const session = {
@@ -402,3 +402,23 @@ export function PeriodFilter({ from, to, onChange }: { from: string; to: string;
 /** URL prefix of the interface a shared page is rendered in ("" = core program, "/charity" = association interface). */
 export const BaseCtx = createContext("");
 export const useBase = () => useContext(BaseCtx);
+
+
+/** Menu shortcuts like «تسجيل مصروف» open a list page with ?new=…: the page opens its editor, the parameter is cleared. */
+export function useNewParam(open: (v: string) => void) {
+  const loc = useLocation(); const nav = useNavigate();
+  useEffect(() => {
+    const sp = new URLSearchParams(loc.search); const v = sp.get("new");
+    if (!v) return;
+    sp.delete("new");
+    nav({ pathname: loc.pathname, search: sp.toString() ? `?${sp}` : "" }, { replace: true });
+    open(v);
+  }, [loc.search]);
+}
+/** Tab kept in ?tab= so a menu entry can open a page on a given tab (and the back button works). */
+export function useTabParam(def: string): [string, (t: string) => void] {
+  const loc = useLocation(); const nav = useNavigate();
+  const tab = new URLSearchParams(loc.search).get("tab") || def;
+  const set = (t: string) => { const sp = new URLSearchParams(loc.search); if (t === def) sp.delete("tab"); else sp.set("tab", t); nav({ pathname: loc.pathname, search: sp.toString() ? `?${sp}` : "" }, { replace: true }); };
+  return [tab, set];
+}
