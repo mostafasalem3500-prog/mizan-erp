@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { CFG } from "./shared/country";
+import { useFavs } from "./pages/Learn";
 
 export type NavItem = { to: string; label: string; perm: string; sa?: boolean; eg?: boolean; company?: boolean; action?: boolean };
 export type NavGroup = { key: string; ic: string; label: string; to?: string; perm?: string; items?: NavItem[] };
@@ -15,6 +16,7 @@ export const NAV_TREE: NavGroup[] = [
   { key: "insights", ic: "📈", label: "لوحة الإدارة والتحليل", to: "/insights", perm: "reports.read" },
   { key: "ai", ic: "✨", label: "المساعد الذكي", to: "/ai", perm: "dashboard.read" },
   { key: "pos", ic: "🛒", label: "نقطة البيع", to: "/pos", perm: "pos.use" },
+  { key: "tasks", ic: "☑", label: "المهام والمتابعات", to: "/tasks", perm: "dashboard.read" },
   { key: "sales", ic: "🧾", label: "المبيعات", items: [
     { to: "/sales/invoices?new=INVOICE", label: "فاتورة مبيعات جديدة", perm: "sales.write", action: true },
     { to: "/sales/invoices", label: "فواتير المبيعات", perm: "sales.read" },
@@ -126,6 +128,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/archive?tab=expiring", label: "مستندات تنتهي قريباً", perm: "reports.read" },
     { to: "/archive?tab=missing", label: "فواتير ومصروفات بلا مرفق", perm: "reports.read" },
   ] },
+  { key: "learn", ic: "🎓", label: "مركز التعلّم والشروحات", to: "/learn", perm: "dashboard.read" },
   { key: "settings", ic: "⚙", label: "الإعدادات", items: [
     { to: "/settings", label: "بيانات المنشأة", perm: "settings.read", company: true },
     { to: "/settings/invoice", label: "الفاتورة والطباعة", perm: "settings.read", company: true },
@@ -184,9 +187,16 @@ export function SideNav({ can, lockedBranch, extra }: { can: (p: string) => bool
   const [q, setQ] = useState("");
   useEffect(() => { if (active?.g.items) setOpen(active.g.key); }, [active?.g.key]);
   const nq = norm(q.trim());
+  const [favs, toggleFav] = useFavs();
+  const loc = useLocation();
+  const here = loc.pathname + loc.search;
   return (
     <nav>
       <div className="nav-search"><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في القائمة…" aria-label="بحث في القائمة" />{q && <button onClick={() => setQ("")} aria-label="مسح">✕</button>}</div>
+      {!nq && favs.length > 0 && <div className="nav-group open nav-favs">
+        <div className="nav-top"><span className="ic">★</span><span className="grow">المفضلة</span></div>
+        <div className="nav-sub">{favs.map((f) => <span key={f.to} className="fav-row"><Link to={f.to} className={here === f.to ? "active" : ""}>{f.label}</Link><button onClick={() => toggleFav(f)} aria-label={"إزالة " + f.label + " من المفضلة"} title="إزالة">✕</button></span>)}</div>
+      </div>}
       {tree.map((g) => {
         if (g.to) return nq && !norm(g.label).includes(nq) ? null : <Link key={g.key} to={g.to} className={"nav-top" + (active?.g.key === g.key ? " active" : "")}><span className="ic">{g.ic}</span>{g.label}</Link>;
         // matching screens; a hit on the module name alone lists the whole module

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { CUR } from "../shared/country";
 import { q, useFetch, money, Loading, Empty, DateRange, Select, ExportBtn, PrintBtn, today, monthStart, yearStart, useTabParam, useCompanyContext } from "../lib";
 
+import { TargetCard } from "./Learn";
 const f0 = (v: any) => Number(v || 0).toLocaleString("en", { maximumFractionDigits: 0 });
 const DAYS = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 const CH: Record<string, string> = { POS: "نقطة البيع", SALES: "الفواتير", SALLA: "سلة", ZID: "زد", API: "الربط" };
@@ -109,6 +110,7 @@ export function InsightsPage() {
           <Kpi label="المحصّل من العملاء" value={f0(k.collected)} delta={c.collected} sub={`المدفوع للموردين ${f0(k.paid)}`} />
           <Kpi label="النقدية والبنوك" value={f0(d.cash.total)} sub={`متوقع بعد 30 يوماً ${f0(d.forecast.projected)}`} />
         </div>
+        <TargetCard />
         <div className="grid cols-2">
           <div className="card"><div className="card-h"><h3>🧠 قراءة الفترة</h3></div><div className="card-b">{d.insights.length ? <ul className="ins-list">{d.insights.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul> : <Empty text="لا توجد حركة في الفترة" />}</div></div>
           <div className="card"><div className="card-h"><h3>🔔 أهم التنبيهات</h3><button className="btn sm ghost" onClick={() => setTab("alerts")}>الكل ({d.alerts.length})</button></div><div className="card-b">{d.alerts.length ? d.alerts.slice(0, 6).map((a: any, i: number) => <AlertRow key={i} a={a} />) : <div className="alert ok">لا توجد تنبيهات ✓</div>}</div></div>

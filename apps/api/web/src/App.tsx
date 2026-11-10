@@ -34,6 +34,7 @@ import { AiAssistantPage } from "./pages/Ai";
 import { InsightsPage } from "./pages/Insights";
 import { DigestPage, ArchivePage } from "./pages/DigestArchive";
 import { PromotionsPage, LoyaltyPage, ThemeToggle } from "./pages/Round28";
+import { LearnPage, TasksPage, HelpButton, TasksBadge, FavStar } from "./pages/Learn";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
 const ROLE_PERMS: Record<string, string[]> = {
@@ -52,7 +53,11 @@ function canRole(role: string | null, perm: string, superAdmin = false) {
 
 function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedBranch: boolean }) {
   const { active } = useNav(can, lockedBranch);
-  return <div className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : active?.g.label || ""}</div>;
+  const loc = useLocation();
+  const label = active?.i?.label || active?.g.label || "";
+  // the menu entry itself when it is a plain screen; otherwise the open address (a profile, a report…)
+  const to = active?.i && !active.i.action && active.s >= 1000 ? active.i.to : active?.g.to && active.s >= 1000 ? active.g.to : null;
+  return <><div className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : label}</div><FavStar to={to} label={label} /></>;
 }
 
 export function App() {
@@ -97,6 +102,8 @@ export function App() {
               <PageTitle can={can} lockedBranch={!!me.lockedBranch} />
               <div className="grow" />
               <GlobalSearch />
+              <HelpButton />
+              <TasksBadge />
               <ThemeToggle />
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
@@ -150,6 +157,8 @@ export function App() {
                 <Route path="/insights" element={<InsightsPage />} />
                 <Route path="/digest" element={<DigestPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
+                <Route path="/learn" element={<LearnPage />} />
+                <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/loyalty" element={<LoyaltyPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />
                 <Route path="/budgets" element={<BudgetsPage />} />

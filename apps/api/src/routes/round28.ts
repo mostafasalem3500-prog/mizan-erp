@@ -195,3 +195,50 @@ r28.put("/archive/:id", perm("accounting.write"), h(async (req) => {
   if (!r) throw notFound("المستند غير موجود");
   return { ok: true };
 }));
+
+// ─── follow-up tasks & reminders, monthly sales target ───────────────────
+r28.get("/tasks", perm("dashboard.read"), h(async (req) => {
+  const q: any = req.query; const params: any[] = [cid(req)]; const w = ["t.company_id=$1"];
+  if (q.status === "OPEN" || q.status === "DONE") { params.push(q.status); w.push(`t.status=$${params.length}`); }
+  if (q.mine === "1") { params.push(req.auth.userId); w.push(`(t.assigned_to=$${params.length} OR (t.assigned_to IS NULL AND t.created_by=$${params.length}))`); }
+  const rows = await db.rows(`SELECT t.* FROM tasks t WHERE ${w.join(" AND ")} ORDER BY (t.status='DONE'), t.due_date NULLS LAST, (t.priority='HIGH') DESC, t.created_at DESC LIMIT 500`, params);
+  const mine = await db.one(`SELECT COUNT(*) FILTER (WHERE due_date <= CURRENT_DATE)::int due, COUNT(*)::int open FROM tasks WHERE company_id=$1 AND status='OPEN' AND (assigned_to=$2 OR (assigned_to IS NULL AND created_by=$2))`, [cid(req), req.auth.userId]);
+  const members = await db.rows(`SELECT u.id, u.full_name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 AND m.is_active ORDER BY u.full_name`, [cid(req)]);
+  return { rows, mine, members };
+}));
+const taskBody = async (req: Request) => {
+  const b = req.body || {};
+  const title = b.title === undefined ? undefined : String(b.title).trim().slice(0, 200);
+  if (title === "") throw bad("عنوان المهمة مطلوب");
+  let assignedTo: any = undefined, assignedName: any = undefined;
+  if (b.assignedTo !== undefined) {
+    if (!b.assignedTo) { assignedTo = null; assignedName = null; }
+    else { const u = await db.one(`SELECT u.id, u.full_name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 AND u.id=$2`, [cid(req), UUID.test(b.assignedTo) ? b.assignedTo : "00000000-0000-0000-0000-000000000000"], "المستخدم غير موجود في المنشأة"); assignedTo = u.id; assignedName = u.fullName; }
+  }
+  return { title, notes: b.notes === undefined ? undefined : String(b.notes || "").slice(0, 2000) || null, dueDate: b.dueDate === undefined ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(b.dueDate || "") ? b.dueDate : null,
+    priority: b.priority === undefined ? undefined : ["LOW", "NORMAL", "HIGH"].includes(b.priority) ? b.priority : "NORMAL", assignedTo, assignedName,
+    link: b.link === undefined ? undefined : /^\/[A-Za-z0-9\-\/?=&_]*$/.test(String(b.link || "")) ? String(b.link).slice(0, 200) : null };
+};
+r28.post("/tasks", perm("dashboard.read"), h(async (req) => { const d = await taskBody(req); if (!d.title) throw bad("عنوان المهمة مطلوب"); return db.insert("tasks", { companyId: cid(req), ...d, createdBy: req.auth.userId, createdName: actor(req) }); }));
+r28.put("/tasks/:id", perm("dashboard.read"), h(async (req) => {
+  const d: any = await taskBody(req);
+  if (req.body?.status === "DONE") { d.status = "DONE"; d.doneAt = new Date(); } else if (req.body?.status === "OPEN") { d.status = "OPEN"; d.doneAt = null; }
+  const r = await db.update("tasks", { id: UUID.test(p(req).id) ? p(req).id : "00000000-0000-0000-0000-000000000000", companyId: cid(req) }, d);
+  if (!r) throw notFound("المهمة غير موجودة");
+  return r;
+}));
+r28.delete("/tasks/:id", perm("dashboard.read"), h(async (req) => {
+  const t = await db.maybe(`SELECT created_by FROM tasks WHERE id=$1 AND company_id=$2`, [UUID.test(p(req).id) ? p(req).id : "00000000-0000-0000-0000-000000000000", cid(req)]);
+  if (!t) throw notFound("المهمة غير موجودة");
+  if (t.createdBy !== req.auth.userId && !can(req.auth.role, "settings.write") && !req.auth.superAdmin) throw new AppError(403, "يحذف المهمة منشئها أو مدير النظام", "FORBIDDEN");
+  await db.exec(`DELETE FROM tasks WHERE id=$1`, [p(req).id]);
+  return { ok: true };
+}));
+r28.get("/targets", perm("reports.read"), h(async (req) => {
+  const target = Number(req.company.targets?.monthlySales || 0);
+  const m = await db.one(`SELECT COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -1 ELSE 1 END * taxable * COALESCE(exchange_rate,1)),0) v FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE') AND date >= date_trunc('month', CURRENT_DATE)`, [cid(req)]);
+  const now = new Date(Date.now() + 3 * 3600e3); const dim = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate(); const day = now.getUTCDate();
+  const actual = Number(m.v);
+  return { monthlySales: target, actual, pct: target ? Math.round((actual / target) * 1000) / 10 : null, day, daysInMonth: dim, expectedByNow: target ? Math.round((target * day) / dim) : null, projected: Math.round((actual / day) * dim), dailyNeeded: target && dim > day ? Math.max(0, Math.round((target - actual) / (dim - day))) : null };
+}));
+r28.put("/targets", perm("settings.write"), h(async (req) => { const v = Math.max(0, Math.round(num(req.body?.monthlySales))); await db.exec(`UPDATE companies SET targets = jsonb_set(targets, '{monthlySales}', to_jsonb($2::numeric)) WHERE id=$1`, [cid(req), v]); await audit(req, "UPDATE", "targets", cid(req), { monthlySales: v }); return { monthlySales: v }; }));
