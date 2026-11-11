@@ -4,7 +4,8 @@ import { VitePWA } from "vite-plugin-pwa";
 import { readFileSync } from "node:fs";
 
 // one version number for web and desktop
-const VERSION = (() => { try { return JSON.parse(readFileSync(new URL("../../desktop/package.json", import.meta.url), "utf8")).version as string; } catch { return "dev"; } })();
+// the hosting build only sees apps/api, so the number is kept in apps/api/web/VERSION (same as apps/desktop/package.json)
+const VERSION = (() => { for (const f of ["./VERSION", "../../desktop/package.json"]) { try { const t = readFileSync(new URL(f, import.meta.url), "utf8").trim(); return (f.endsWith(".json") ? JSON.parse(t).version : t) as string; } catch { /* next */ } } return "dev"; })();
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(VERSION) },

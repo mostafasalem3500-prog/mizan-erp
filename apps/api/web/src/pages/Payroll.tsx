@@ -5,6 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, accountFetcher, useAction, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, SearchBox, FilterInfo, useSorted, Th, matches } from "../lib";
 import { LeavesTab, LoansTab, ProvisionsTab, SettlementsTab, EmployeeStatement } from "./Hr";
 import { PayrollItemsTab, Payslip } from "./PayrollItems";
+import { AttendanceTab } from "./Attendance";
 
 const NAT: Record<string, string> = CFG.country === "EG" ? { EGYPTIAN: "مصري", FOREIGN: "أجنبي", SAUDI: "سعودي", NON_SAUDI: "غير مصري" } : { SAUDI: "سعودي", NON_SAUDI: "غير سعودي" };
 const EG = CFG.country === "EG";
@@ -35,7 +36,8 @@ export function PayrollPage() {
   const runRows = (runs.data?.runs || []).filter((r: any) => !ry || String(r.period).startsWith(ry));
   return (
     <div className="grid">
-      <div className="tabs">{[["runs", "مسيرات الرواتب"], ["items", "الإضافي والحسميات"], ["employees", `الموظفون (${emps.data?.filter((e: any) => e.isActive).length || 0})`], ["leaves", "الإجازات"], ["loans", "السلف"], ["provisions", "مخصصات نهاية الخدمة والإجازات"], ["settlements", "التصفية النهائية"]].map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
+      <div className="tabs">{[["runs", "مسيرات الرواتب"], ["attendance", "الحضور والانصراف"], ["items", "الإضافي والحسميات"], ["employees", `الموظفون (${emps.data?.filter((e: any) => e.isActive).length || 0})`], ["leaves", "الإجازات"], ["loans", "السلف"], ["provisions", "مخصصات نهاية الخدمة والإجازات"], ["settlements", "التصفية النهائية"]].map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
+      {tab === "attendance" && <AttendanceTab />}
       {tab === "items" && emps.data && <PayrollItemsTab emps={emps.data} />}
       {tab === "leaves" && emps.data && <LeavesTab emps={emps.data} />}
       {tab === "loans" && emps.data && <LoansTab emps={emps.data} />}

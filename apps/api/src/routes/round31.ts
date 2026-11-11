@@ -10,6 +10,7 @@ import { suggestMatches, statementSummary } from "../services/bankimport";
 import * as s from "../services/round31";
 import * as pay from "../services/payroll";
 import * as hr from "../services/hr";
+import * as att from "../services/attendance";
 import { IS_EG } from "../lib/country";
 import { computeLineEG } from "../services/egypt";
 
@@ -107,4 +108,11 @@ r31.get("/payroll/preview2", perm("accounting.read"), h(async (req) => { const e
 r31.post("/payroll/:id/recalc", perm("accounting.write"), h(async (req) => tx((t) => pay.recalcRun(t, cid(req), p(req).id))));
 r31.post("/hr/loans/:id/repay", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.repayLoan(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, r); return r; }));
 r31.put("/hr/loans/:id", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.rescheduleLoan(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, { installment: r.installment, startPeriod: r.startPeriod }); return r; }));
+
+// ── attendance ──
+r31.get("/attendance", perm("accounting.read"), h(async (req) => att.monthSheet(db, req.company, String(req.query.period || ""))));
+r31.put("/attendance/day", perm("accounting.write"), h(async (req) => tx((t) => att.saveDay(t, req.company, actor(req), String(req.body?.date || ""), req.body?.rows || []))));
+r31.post("/attendance/import", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.importRows(t, req.company, actor(req), req.body?.rows)); await audit(req, "IMPORT", "attendance", cid(req), { saved: r.saved, skipped: r.skipped }); return r; }));
+r31.put("/attendance/settings", perm("settings.write"), h(async (req) => tx((t) => att.saveSettings(t, cid(req), req.body || {}))));
+r31.post("/attendance/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.postToPayroll(t, req.company, actor(req), String(req.body?.period || ""))); await audit(req, "CREATE", "payroll", cid(req), { attendance: req.body?.period, items: r.created }); return r; }));
 void can; void today; void IS_EG; void computeLineEG;

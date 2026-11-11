@@ -57,7 +57,7 @@ export function HelpButton() {
   useEffect(() => { if (!open) return; const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [open]);
   return (
     <>
-      <button className="btn sm help-btn" title="شرح هذه الشاشة" onClick={() => setOpen(true)}>؟ شرح</button>
+      <button className="btn sm help-btn" title="شرح هذه الشاشة" onClick={() => setOpen(true)}>؟<span className="help-t"> شرح</span></button>
       {open && createPortal(<div className="drawer-bg no-print" onClick={() => setOpen(false)}>
         <aside className="drawer" role="dialog" aria-label="شرح الشاشة" onClick={(e) => e.stopPropagation()}>
           <div className="drawer-h"><b>{l ? l.title : "شرح الشاشة"}</b><button className="btn sm ghost" onClick={() => setOpen(false)} aria-label="إغلاق">✕</button></div>

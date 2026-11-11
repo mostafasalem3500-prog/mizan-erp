@@ -612,7 +612,7 @@ html[data-theme="dark"] .sidebar .nav-sub a.active, html[data-theme="dark"] .sid
 .nav-favs .fav-row a { flex: 1; min-width: 0; }
 .nav-favs .fav-row button { background: none; border: 0; color: inherit; opacity: 0; cursor: pointer; padding: 2px 8px; font-size: 11px; }
 .nav-favs .fav-row:hover button, .nav-favs .fav-row button:focus-visible { opacity: .7; }
-@media (max-width: 760px) { .help-btn { font-size: 0; } .help-btn::before { content: "؟"; font-size: 15px; } .learn-item-b { padding-inline-start: 16px; } }
+@media (max-width: 760px) { .help-t { display: none; } .learn-item-b { padding-inline-start: 16px; } }
 .topbar .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) {
   .topbar { padding: 8px 10px; gap: 4px; }
@@ -648,3 +648,13 @@ html[data-theme="dark"] .close-row.lv-block { background: rgba(220,38,38,.12); }
 .payslip-net { display: flex; justify-content: space-between; align-items: center; background: var(--primary-soft); border-radius: 10px; padding: 10px 14px; font-weight: 600; }
 .payslip-net b { font-size: 20px; color: var(--primary-2); }
 .update-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 80; display: flex; gap: 12px; align-items: center; justify-content: center; padding: 10px 16px; background: var(--text); color: var(--surface); font-size: 14px; box-shadow: 0 -4px 20px rgba(0,0,0,.25); }
+/* ── attendance grid ── */
+.att-grid th, .att-grid td.c { text-align: center; padding: 4px 1px; min-width: 21px; font-size: 12px; }
+.att-grid th.n, .att-grid td.n { padding-inline: 6px; white-space: nowrap; }
+.att-grid td.c { cursor: pointer; border-inline-start: 1px solid var(--border); }
+.att-grid .off { background: var(--surface-2); color: var(--muted); }
+.att-grid .cur { outline: 2px solid var(--primary); outline-offset: -2px; }
+.att-p { color: var(--primary-2); font-weight: 700; } .att-a { background: var(--danger-soft); color: #991b1b; font-weight: 700; }
+.att-l { background: var(--accent-soft); color: #92400e; } .att-o { color: var(--muted); }
+html[data-theme="dark"] .att-a { background: rgba(220,38,38,.18); color: #fca5a5; } html[data-theme="dark"] .att-l { color: #fcd34d; }
+.nowrap { white-space: nowrap; }
