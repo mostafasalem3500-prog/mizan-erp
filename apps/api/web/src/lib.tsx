@@ -13,7 +13,14 @@ export class ApiError extends Error {
   constructor(public status: number, message: string, public code?: string) { super(message); }
 }
 
+/** In-flight requests, for the thin activity bar under the top bar. */
+let pending = 0;
+const netTick = (d: number) => { pending = Math.max(0, pending + d); window.dispatchEvent(new CustomEvent("mz-net", { detail: pending })); };
 export async function api<T = any>(path: string, opts: { method?: string; body?: any; raw?: boolean } = {}): Promise<T> {
+  netTick(1);
+  try { return await apiCall<T>(path, opts); } finally { netTick(-1); }
+}
+async function apiCall<T = any>(path: string, opts: { method?: string; body?: any; raw?: boolean } = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch("/api" + path, {
@@ -182,12 +189,21 @@ export function DateRange({ from, to, onChange }: { from: string; to: string; on
   );
 }
 
-export function exportExcel(rows: any[], name: string, sheet = "Sheet1") {
-  return writeSheet(rows, name, sheet).catch((e) => { console.error(e); alert("تعذر إنشاء ملف Excel: " + (e?.message || e)); });
+/** The period / filters shown on screen, read from the open report so the sheet says what it covers. */
+function screenContext(from?: HTMLElement | null): string {
+  const scope = (from?.closest(".modal") || from?.closest(".card")?.parentElement || document.querySelector(".content")) as HTMLElement | null;
+  if (!scope) return "";
+  const dates = Array.from(scope.querySelectorAll<HTMLInputElement>('input[type="date"]')).map((i) => i.value).filter(Boolean);
+  const parts: string[] = [];
+  if (dates.length >= 2) parts.push(`الفترة: من ${dates[0]} إلى ${dates[1]}`); else if (dates.length === 1) parts.push(`حتى تاريخ: ${dates[0]}`);
+  return parts.join(" · ");
+}
+export function exportExcel(rows: any[], name: string, sheet = "Sheet1", opts: { title?: string; sub?: string; totals?: boolean; from?: HTMLElement | null } = {}) {
+  return writeSheet(rows, name, sheet, { title: opts.title, sub: opts.sub ?? screenContext(opts.from), totals: opts.totals }).catch((e) => { console.error(e); alert("تعذر إنشاء ملف Excel: " + (e?.message || e)); });
 }
 
-export function ExportBtn({ rows, name }: { rows: any[] | (() => any[]); name: string }) {
-  return <button className="btn sm" onClick={() => exportExcel(typeof rows === "function" ? rows() : rows, name)}>⬇ Excel</button>;
+export function ExportBtn({ rows, name, sub, totals }: { rows: any[] | (() => any[]); name: string; sub?: string; totals?: boolean }) {
+  return <button className="btn sm" title="تنزيل ملف Excel منسّق" onClick={(e) => exportExcel(typeof rows === "function" ? rows() : rows, name, "Sheet1", { sub, totals, from: e.currentTarget })}>⬇ Excel</button>;
 }
 export function PrintBtn({ pdfName }: { pdfName?: string } = {}) { return <><button className="btn sm" onClick={() => window.print()}>🖨 طباعة</button><PdfBtn name={pdfName} /></>; }
 

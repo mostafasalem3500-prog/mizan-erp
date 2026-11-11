@@ -126,7 +126,8 @@ export function ArchivePage() {
       </div>}
       <div className="tabs">{[["all", "كل المستندات"], ["general", "مستندات المنشأة"], ["expiring", `تنتهي قريباً${st?.expiring ? ` (${st.expiring})` : ""}`], ["missing", "مستندات ناقصة"]].map(([k, l]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>)}</div>
       {tab !== "missing" ? <div className="card">
-        <div className="card-h"><h3>🗄 الأرشيف</h3><div className="row">{data && <ExportBtn name="الأرشيف" rows={() => data.rows.map((a: any) => ({ الملف: a.title || a.name, التصنيف: a.category, المصدر: srcOf(a).label, "تاريخ المستند": fmtDate(a.docDate), "ينتهي في": fmtDate(a.expiresAt), الوسوم: a.tags, "أُضيف بواسطة": a.createdBy, "تاريخ الإضافة": fmtDate(a.createdAt) }))} />}{W && <button className="btn primary sm" onClick={() => setUp(true)}>＋ أرشفة مستند</button>}</div></div>
+        <div className="card-h"><h3>🗄 الأرشيف</h3><div className="row">{data && <ExportBtn name="الأرشيف" rows={() => data.rows.map((a: any) => ({ الملف: a.title || a.name, التصنيف: a.category, المصدر: srcOf(a).label, "تاريخ المستند": fmtDate(a.docDate), "ينتهي في": fmtDate(a.expiresAt), الوسوم: a.tags, "أُضيف بواسطة": a.createdBy, "تاريخ الإضافة": fmtDate(a.createdAt) }))} />}<PackBtn from={from} to={to} entity={tab === "general" ? "archive" : entity} category={category} />{W && <button className="btn primary sm" onClick={() => setUp(true)}>＋ أرشفة مستند</button>}</div></div>
+        {data?.byKind?.length > 1 && <div className="card-b row arch-kinds" style={{ gap: 6, paddingBottom: 0 }}>{data.byKind.map((k: any) => <button key={k.label} className={"chip" + ((k.general ? category === k.k && (tab === "general" || entity === "archive") : entity === k.k && !category) ? " on" : "")} title={fmtSize(Number(k.bytes))} onClick={() => { if (k.general) { setCategory(category === k.k ? "" : k.k); if (tab === "all") setEntity("archive"); } else { setCategory(""); setEntity(entity === k.k ? "" : k.k); if (tab !== "all") setTab("all"); } }}>{k.label} <b className="num">{k.n}</b></button>)}</div>}
         <div className="card-b toolbar"><div className="search grow" style={{ minWidth: 220 }}><span className="ic">🔍</span><input className="input" placeholder="بحث باسم الملف، العنوان، الوسوم، رقم المستند، اسم العميل أو المورد…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           {tab === "all" && <Select value={entity} onChange={(e) => setEntity(e.target.value)} style={{ width: "auto" }}><option value="">كل المصادر</option>{Object.entries(ENT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}
           <Select value={category} onChange={(e) => setCategory(e.target.value)} style={{ width: "auto" }}><option value="">كل التصنيفات</option>{(data?.categories || []).map((c: string) => <option key={c} value={c}>{c}</option>)}</Select>
@@ -162,13 +163,31 @@ function MetaFields({ f, setF, categories }: { f: any; setF: (x: any) => void; c
     <Field label="ملاحظات" span3><Input value={f.notes || ""} onChange={s("notes")} /></Field>
   </>;
 }
+/** One ZIP for the auditor: the period's documents in a folder per kind, with an index sheet and the list of what is missing. */
+function PackBtn({ from, to, entity, category }: { from: string; to: string; entity: string; category: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    const f = from || yearStart(), t = to || today();
+    if (!confirmDlg(`تنزيل حزمة المستندات من ${f} إلى ${t}${entity || category ? " (حسب الفلتر الحالي)" : ""} في ملف ZIP واحد؟`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/archive/pack${q({ from: f, to: t, entity, category })}`, { headers: { Authorization: `Bearer ${session.token}` } });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || "تعذّر إنشاء الحزمة");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = `أرشيف ${f} إلى ${t}.zip`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast(`تم تجهيز ${r.headers.get("X-Files") || ""} ملفاً مع الفهرس`);
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  };
+  return <button className="btn sm" disabled={busy} title="كل مستندات الفترة في مجلدات مع فهرس — لتسليمها للمراجع" onClick={go}>{busy ? "…جارٍ التجهيز" : "📦 حزمة المراجع (ZIP)"}</button>;
+}
 function ArchiveUpload({ categories, onClose }: { categories: string[]; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const [f, setF] = useState<any>({ category: "عقد" });
   const [files, setFiles] = useState<File[]>([]);
   const inp = useRef<HTMLInputElement>(null);
   return (
-    <Modal title="أرشفة مستند للمنشأة" onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !files.length} onClick={() => run(async () => { for (const file of files) { if (file.size > 8 * 1048576) throw new Error(`«${file.name}» أكبر من 8 ميجابايت`); await api("/archive/upload", { body: { ...f, title: files.length > 1 && f.title ? `${f.title} — ${file.name}` : f.title, name: file.name, mime: file.type || "application/octet-stream", data: await readB64(file) } }); } onClose(true); }, "تمت الأرشفة")}>حفظ في الأرشيف</button></>}>
+    <Modal title="أرشفة مستند للمنشأة" onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !files.length} onClick={() => run(async () => { for (const file of files) { if (file.size > 8 * 1048576) throw new Error(`«${file.name}» أكبر من 8 ميجابايت`); const body = { ...f, title: files.length > 1 && f.title ? `${f.title} — ${file.name}` : f.title, name: file.name, mime: file.type || "application/octet-stream", data: await readB64(file) };
+        try { await api("/archive/upload", { body }); } catch (e: any) { if (e?.code !== "DUPLICATE") throw e; if (confirmDlg(`${e.message}\n\nحفظ نسخة ثانية من «${file.name}»؟`)) await api("/archive/upload", { body: { ...body, allowDuplicate: true } }); } } onClose(true); }, "تمت الأرشفة")}>حفظ في الأرشيف</button></>}>
       <div className="attach" style={{ marginTop: 0 }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); setFiles(Array.from(e.dataTransfer.files)); }}>
         <div className="row between"><b>{files.length ? files.map((x) => x.name).join("، ") : "اسحب الملفات هنا (صور، PDF، Word، Excel — حتى 8 ميجابايت)"}</b><button className="btn sm" onClick={() => inp.current?.click()}>اختيار ملفات</button><input ref={inp} hidden type="file" multiple onChange={(e) => setFiles(Array.from(e.target.files || []))} /></div>
       </div>

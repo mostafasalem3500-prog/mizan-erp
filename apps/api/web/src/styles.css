@@ -622,3 +622,18 @@ html[data-theme="dark"] .sidebar .nav-sub a.active, html[data-theme="dark"] .sid
   .topbar a.btn.primary { font-size: 0; } .topbar a.btn.primary::before { content: "🛒"; font-size: 15px; }
   .topbar select.input { width: 110px !important; }
 }
+/* ── activity bar, offline note, shortcuts, archive chips ── */
+.netbar { position: sticky; top: 53px; z-index: 19; height: 2px; margin-bottom: -2px; overflow: hidden; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.netbar.on { opacity: 1; }
+.netbar::before { content: ""; display: block; height: 100%; width: 35%; background: var(--primary); border-radius: 2px; animation: netbar 1.1s ease-in-out infinite; }
+@keyframes netbar { from { transform: translateX(120%); } to { transform: translateX(-320%); } }
+@media (prefers-reduced-motion: reduce) { .netbar::before { animation: none; width: 100%; } }
+.offline-note { background: var(--accent-soft); color: #92400e; padding: 8px 24px; font-size: 13.5px; border-bottom: 1px solid var(--border); }
+html[data-theme="dark"] .offline-note { color: #fcd34d; }
+.shortcuts { font-size: 13px; color: var(--muted); }
+.shortcuts summary { cursor: pointer; padding: 4px 0; }
+.shortcuts > div { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; }
+.shortcuts kbd { flex: none; min-width: 92px; text-align: center; direction: ltr; font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; color: var(--text); }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip:hover { border-color: var(--primary); }
+.chip.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-2); font-weight: 600; }

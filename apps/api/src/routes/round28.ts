@@ -1,4 +1,6 @@
 /** Round 28 routes: promotions, customer loyalty points, document attachments. */
+import crypto from "crypto";
+import { zip } from "../lib/zip";
 import { Router, Request } from "express";
 import { db, tx } from "../db/pool";
 import { h, bad, notFound, AppError, num, today } from "../lib/core";
@@ -92,9 +94,10 @@ r28.post("/attachments/:entity/:id", h(async (req) => {
   if (buf.length > MAX) throw bad("حجم الملف أكبر من 8 ميجابايت");
   const c = await db.one(`SELECT COUNT(*)::int c FROM attachments WHERE company_id=$1 AND entity=$2 AND entity_id=$3`, [cid(req), entity, id]);
   if (c.c >= 20) throw bad("الحد الأقصى 20 مرفقاً للمستند");
-  const r = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, name, mime, size, created_by, created_at`, [cid(req), entity, id, name, mime, buf.length, buf, actor(req)]);
+  const sha = sha256(buf); const duplicate = await sameFile(cid(req), sha);
+  const r = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by, sha256) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, name, mime, size, created_by, created_at`, [cid(req), entity, id, name, mime, buf.length, buf, actor(req), sha]);
   await audit(req, "ATTACH", entity, id, { name, size: buf.length });
-  return r;
+  return { ...r, duplicate };
 }));
 
 // ─── AI accounting assistant (top plan) ──────────────────────────────────
@@ -140,6 +143,13 @@ r28.post("/digest/send", perm("settings.write"), h(async (req) => {
   return { sent: out.filter((x) => x.ok).length, failed: out.filter((x) => !x.ok) };
 }));
 
+const sha256 = (buf: Buffer) => crypto.createHash("sha256").update(buf).digest("hex");
+const ENTITY_LABEL: Record<string, string> = { invoice: "فاتورة", expense: "مصروف", payment: "سند", journal: "قيد", partner: "ملف عميل/مورد", product: "صنف", asset: "أصل ثابت", archive: "مستندات المنشأة" };
+/** The same bytes already filed in this company: where, so the user can tell a real duplicate from a deliberate second copy. */
+async function sameFile(companyId: string, sha: string) {
+  const d = await db.maybe(`${ARCH_SELECT} WHERE a.company_id=$1 AND a.sha256=$2 AND a.entity<>'ai' ORDER BY a.created_at LIMIT 1`, [companyId, sha]);
+  return d ? { id: d.id, name: d.name, where: `${ENTITY_LABEL[d.entity] || d.entity}${d.ref ? ` ${d.ref}` : d.title ? ` «${d.title}»` : ""}`, at: d.createdAt } : null;
+}
 // archive: every attached file in one searchable place, plus stand-alone company documents with expiry dates
 export const ARCHIVE_CATEGORIES = ["فاتورة مورد", "فاتورة مبيعات", "إيصال / سند", "عقد", "سجل تجاري", "رخصة / تصريح", "شهادة ضريبية أو زكوية", "كشف بنكي", "مستند حكومي", "مستند موظف", "مراسلات", "أخرى"];
 const ARCH_SELECT = `SELECT a.id, a.entity, a.entity_id, a.name, a.mime, a.size, a.category, a.title, a.tags, a.notes, a.doc_date, a.expires_at, a.created_by, a.created_at,
@@ -161,7 +171,45 @@ r28.get("/archive", perm("reports.read"), h(async (req) => {
   const rows = await db.rows(sql, params);
   const stats = await db.one(`SELECT COUNT(*)::int files, COALESCE(SUM(size),0)::bigint bytes, COUNT(*) FILTER (WHERE entity='invoice')::int invoices, COUNT(*) FILTER (WHERE entity='expense')::int expenses, COUNT(*) FILTER (WHERE entity='archive')::int general,
       COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= CURRENT_DATE + 60)::int expiring, COUNT(*) FILTER (WHERE expires_at < CURRENT_DATE)::int expired FROM attachments WHERE company_id=$1 AND entity<>'ai'`, [cid(req)]);
-  return { rows, stats, categories: ARCHIVE_CATEGORIES };
+  const byKind = await db.rows(`SELECT CASE WHEN entity='archive' THEN COALESCE(category,'أخرى') ELSE entity END k, entity='archive' general, COUNT(*)::int n, COALESCE(SUM(size),0)::bigint bytes FROM attachments WHERE company_id=$1 AND entity<>'ai' GROUP BY 1,2 ORDER BY 3 DESC`, [cid(req)]);
+  return { rows, stats, categories: ARCHIVE_CATEGORIES, byKind: byKind.map((x) => ({ ...x, label: x.general ? x.k : ENTITY_LABEL[x.k] || x.k })) };
+}));
+/** Auditor pack: the period's documents in one ZIP, in a folder per kind, with an index sheet (CSV) listing what each file supports. */
+r28.get("/archive/pack", perm("reports.read"), h(async (req, res) => {
+  const q: any = req.query; const D = /^\d{4}-\d{2}-\d{2}$/;
+  const from = D.test(q.from || "") ? q.from : `${today().slice(0, 4)}-01-01`, to = D.test(q.to || "") ? q.to : today();
+  const params: any[] = [cid(req), from, to]; const w = ["a.company_id=$1", "a.entity<>'ai'", "COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, a.created_at::date) BETWEEN $2 AND $3"];
+  if (q.entity && ENTITY_LABEL[String(q.entity)]) { params.push(String(q.entity)); w.push(`a.entity=$${params.length}`); }
+  if (q.category) { params.push(String(q.category)); w.push(`a.category=$${params.length}`); }
+  const list = await db.rows(`${ARCH_SELECT.replace("a.created_at,", "a.created_at, COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, a.created_at::date) on_date,")} WHERE ${w.join(" AND ")} ORDER BY a.entity, on_date, a.created_at LIMIT 2001`, params);
+  if (!list.length) throw bad("لا توجد مستندات في هذه الفترة");
+  const total = list.reduce((s2, x) => s2 + Number(x.size), 0);
+  if (list.length > 2000 || total > 250 * 1024 * 1024) throw bad(`الحزمة كبيرة (${list.length > 2000 ? "أكثر من 2000 ملف" : Math.round(total / 1048576) + " ميجابايت"}) — قصّر الفترة أو اختر نوعاً واحداً`);
+  const folder = (x: any) => x.entity === "invoice" ? (x.direction === "PURCHASE" ? "فواتير المشتريات" : "فواتير المبيعات") : x.entity === "expense" ? "المصروفات" : x.entity === "payment" ? (x.payDir === "IN" ? "سندات القبض" : "سندات الصرف") : x.entity === "journal" ? "القيود اليومية" : x.entity === "partner" ? "العملاء والموردون" : x.entity === "product" ? "الأصناف" : x.entity === "asset" ? "الأصول الثابتة" : `مستندات المنشأة/${x.category || "أخرى"}`;
+  const csvCell = (v: any) => { const t = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const files: { name: string; data: Buffer; date?: Date }[] = []; const index = [["المجلد", "الملف", "المرجع", "الطرف", "التاريخ", "المبلغ", "العنوان", "الوسوم", "ينتهي في", "أرشفه", "تاريخ الأرشفة"]];
+  for (let i = 0; i < list.length; i += 25) {
+    const chunk = list.slice(i, i + 25);
+    const data = await db.rows(`SELECT id, data FROM attachments WHERE company_id=$1 AND id = ANY($2::uuid[])`, [cid(req), `{${chunk.map((x) => x.id).join(",")}}`]);
+    for (const x of chunk) {
+      const body = data.find((d2) => d2.id === x.id)?.data; if (!body) continue;
+      const day = String(x.onDate instanceof Date ? x.onDate.toISOString() : x.onDate).slice(0, 10);
+      const fname = `${x.ref ? `${String(x.ref).replace(/[\/]/g, "-")} - ` : ""}${x.name}`;
+      files.push({ name: `${folder(x)}/${fname}`, data: body, date: new Date(x.createdAt) });
+      index.push([folder(x), fname, x.ref || "", x.partnerName || "", day, x.amount ?? "", x.title || "", x.tags || "", x.expiresAt ? String(x.expiresAt instanceof Date ? x.expiresAt.toISOString() : x.expiresAt).slice(0, 10) : "", x.createdBy || "", String(x.createdAt instanceof Date ? x.createdAt.toISOString() : x.createdAt).slice(0, 10)]);
+    }
+  }
+  const missing = await db.rows(`SELECT 'فاتورة مشتريات' label, i.number, i.date, i.partner_name party, i.total FROM invoices i WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date BETWEEN $2 AND $3 AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.entity='invoice' AND a.entity_id=i.id)
+    UNION ALL SELECT 'مصروف', e.number, e.date, COALESCE(e.payee, e.description), e.total FROM expenses e WHERE e.company_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3 AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.entity='expense' AND a.entity_id=e.id) ORDER BY 3 LIMIT 5000`, [cid(req), from, to]);
+  const BOM = "\ufeff";
+  files.unshift({ name: "فهرس المستندات.csv", data: Buffer.from(BOM + index.map((r) => r.map(csvCell).join(",")).join("\r\n"), "utf8") });
+  if (!q.entity && !q.category) files.push({ name: "مستندات ناقصة (بلا مرفق).csv", data: Buffer.from(BOM + [["النوع", "الرقم", "التاريخ", "الطرف / البيان", "الإجمالي"], ...missing.map((m) => [m.label, m.number, String(m.date instanceof Date ? m.date.toISOString() : m.date).slice(0, 10), m.party || "", m.total])].map((r) => r.map(csvCell).join(",")).join("\r\n"), "utf8") });
+  const out = zip(files);
+  await audit(req, "EXPORT", "archive", cid(req), { from, to, files: list.length });
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(`أرشيف ${req.company.nameAr} ${from} إلى ${to}.zip`)}`);
+  res.setHeader("X-Files", String(list.length));
+  res.send(out);
 }));
 /** Posted purchase invoices and expenses with no supporting document — what an auditor would ask for. */
 r28.get("/archive/missing", perm("reports.read"), h(async (req) => {
@@ -185,10 +233,12 @@ r28.post("/archive/upload", perm("accounting.write"), h(async (req) => {
   if (!buf.length) throw bad("الملف فارغ");
   if (buf.length > MAX) throw bad("حجم الملف أكبر من 8 ميجابايت");
   const meta = archMeta(b);
-  const r = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by, category, title, tags, notes, doc_date, expires_at) VALUES ($1,'archive',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, name`,
-    [cid(req), name, mime, buf.length, buf, actor(req), meta.category ?? "أخرى", meta.title ?? null, meta.tags ?? null, meta.notes ?? null, meta.docDate ?? null, meta.expiresAt ?? null]);
+  const sha = sha256(buf); const duplicate = await sameFile(cid(req), sha);
+  if (duplicate && !b.allowDuplicate) throw new AppError(409, `هذا الملف مؤرشف من قبل في: ${duplicate.where} (باسم ${duplicate.name}). إن أردت نسخة ثانية فأكّد الحفظ.`, "DUPLICATE");
+  const r = await db.one(`INSERT INTO attachments (company_id, entity, entity_id, name, mime, size, data, created_by, category, title, tags, notes, doc_date, expires_at, sha256) VALUES ($1,'archive',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, name`,
+    [cid(req), name, mime, buf.length, buf, actor(req), meta.category ?? "أخرى", meta.title ?? null, meta.tags ?? null, meta.notes ?? null, meta.docDate ?? null, meta.expiresAt ?? null, sha]);
   await audit(req, "ARCHIVE", "attachment", r.id, { name });
-  return r;
+  return { ...r, duplicate };
 }));
 r28.put("/archive/:id", perm("accounting.write"), h(async (req) => {
   const r = await db.update("attachments", { id: p(req).id, companyId: cid(req) }, archMeta(req.body || {}));

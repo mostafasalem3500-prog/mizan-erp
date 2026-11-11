@@ -117,15 +117,12 @@ async function cashBalance(t: Db, companyId: string, to: string) {
 export async function finalAccounts(t: Db, companyId: string, q: any) {
   const { years, fy, prev, prevFrom, prevTo } = await pickYear(t, companyId, q.fiscalYearId);
   const from = fy.startDate, to = fy.endDate;
-  const [bs, bsP, is, isP, cfd] = [await balanceSheet(t, companyId, { to }), await balanceSheet(t, companyId, { to: prevTo }), await incomeStatement(t, companyId, { from, to }), await incomeStatement(t, companyId, { from: prevFrom, to: prevTo }), await cashFlow(t, companyId, { from, to })];
-  const eq = await equityStatement(t, companyId, from, to);
-  const cfi = await indirectCashFlow(t, companyId, from, to);
-  const tb = await trialBalance(t, companyId, { from, to });
-  const cashEnd = await cashBalance(t, companyId, to), cashStart = await cashBalance(t, companyId, prevTo);
+  // independent read-only statements: run together (each takes its own pooled connection) instead of one after another
+  const [bs, bsP, is, isP, cfd, eq, cfi, tb, cashEnd, cashStart, ig] = await Promise.all([balanceSheet(t, companyId, { to }), balanceSheet(t, companyId, { to: prevTo }), incomeStatement(t, companyId, { from, to }), incomeStatement(t, companyId, { from: prevFrom, to: prevTo }), cashFlow(t, companyId, { from, to }),
+    equityStatement(t, companyId, from, to), indirectCashFlow(t, companyId, from, to), trialBalance(t, companyId, { from, to }), cashBalance(t, companyId, to), cashBalance(t, companyId, prevTo), integrity(t, companyId)]);
   const bsCash = r2((bs.currentAssets.sections || []).filter((s: any) => ["CASH", "BANK"].includes(s.subtype)).reduce((a: number, s: any) => a + s.total, 0));
   const misclassified = await t.rows(`SELECT code, name_ar, type, subtype FROM accounts WHERE company_id=$1 AND NOT is_group`, [companyId]).then((r) => r.filter((a) => !SUBTYPES_BY_TYPE[a.type]?.includes(a.subtype)));
   const tempAfterClose = fy.status === "CLOSED" ? r2((await t.one(`SELECT COALESCE(SUM(ABS(b)),0) s FROM (SELECT SUM(l.debit-l.credit) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED' AND e.date BETWEEN $2 AND $3 AND a.type IN ('REVENUE','EXPENSE') GROUP BY a.id) x`, [companyId, from, to])).s) : null;
-  const ig = await integrity(t, companyId);
 
   const checks: { key: string; name: string; ok: boolean; a: any; b: any; note?: string }[] = [];
   const c = (key: string, name: string, ok: boolean, a: any, b: any, note?: string) => checks.push({ key, name, ok, a, b, note });

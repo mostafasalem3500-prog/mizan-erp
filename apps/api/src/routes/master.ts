@@ -42,11 +42,11 @@ master.get(
     if (req.query.active !== "all") where.push("p.is_active");
     params.push(limit, offset);
     const rows = await db.rows(
-      `SELECT p.*, COALESCE((SELECT SUM(CASE WHEN a.system_key='AR' THEN l.debit-l.credit ELSE l.credit-l.debit END) FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.partner_id=p.id AND a.system_key IN ('AR','AP') AND e.status='POSTED' AND ((a.system_key='AR' AND p.is_customer) OR (a.system_key='AP' AND p.is_supplier))),0) balance
+      `SELECT p.*, COALESCE((SELECT SUM(CASE WHEN a.system_key='AR' THEN l.debit-l.credit ELSE l.credit-l.debit END) FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=p.company_id AND l.partner_id=p.id AND a.system_key IN ('AR','AP') AND e.status='POSTED' AND ((a.system_key='AR' AND p.is_customer) OR (a.system_key='AP' AND p.is_supplier))),0) balance
 ,
-         COALESCE((SELECT SUM(i.total - i.amount_paid) FROM invoices i WHERE i.partner_id=p.id AND i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') AND i.total - i.amount_paid > 0.001 AND COALESCE(i.due_date, i.date) < CURRENT_DATE
+         COALESCE((SELECT SUM(i.total - i.amount_paid) FROM invoices i WHERE i.company_id=p.company_id AND i.partner_id=p.id AND i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') AND i.total - i.amount_paid > 0.001 AND COALESCE(i.due_date, i.date) < CURRENT_DATE
            AND ((i.direction='SALE' AND p.is_customer) OR (i.direction='PURCHASE' AND p.is_supplier AND NOT p.is_customer))),0) overdue,
-         (SELECT MAX(i.date) FROM invoices i WHERE i.partner_id=p.id AND i.status='POSTED') last_doc_date
+         (SELECT MAX(i.date) FROM invoices i WHERE i.company_id=p.company_id AND i.partner_id=p.id AND i.status='POSTED') last_doc_date
        FROM partners p WHERE ${where.join(" AND ")} ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );

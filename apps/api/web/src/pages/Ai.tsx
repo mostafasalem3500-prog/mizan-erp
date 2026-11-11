@@ -38,8 +38,8 @@ async function openFile(id: string) {
   if (!r.ok) throw new Error("تعذّر فتح المرفق");
   const url = URL.createObjectURL(await r.blob()); window.open(url, "_blank"); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-/** **bold** and line breaks only — the model answers in short plain Arabic. */
-const Rich = ({ text }: { text: string }) => <>{String(text || "").split("\n").map((ln, i) => <div key={i} style={{ minHeight: ln ? undefined : 8 }}>{ln.split(/(\*\*[^*]+\*\*)/).map((p, j) => (p.startsWith("**") && p.endsWith("**") ? <b key={j}>{p.slice(2, -2)}</b> : p))}</div>)}</>;
+/** **bold**, [text](/in-app-link) and line breaks — the assistant answers in short plain Arabic. Only in-app links are made clickable. */
+const Rich = ({ text }: { text: string }) => <>{String(text || "").split("\n").map((ln, i) => <div key={i} style={{ minHeight: ln ? undefined : 8 }}>{ln.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(\/[^)\s]*\))/).map((p, j) => { const m = p.match(/^\[([^\]]+)\]\((\/[^)\s]*)\)$/); return m ? <Link key={j} to={m[2]}>{m[1]}</Link> : p.startsWith("**") && p.endsWith("**") ? <b key={j}>{p.slice(2, -2)}</b> : p; })}</div>)}</>;
 
 function PlanCard({ plan, live, busy, onConfirm, onCancel }: { plan: any; live: boolean; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
   const ST: Record<string, [string, string]> = { pending: ["بانتظار تأكيدك", "amber"], done: ["تم الترحيل", "green"], cancelled: ["ملغاة", "gray"], superseded: ["استُبدلت", "gray"] };

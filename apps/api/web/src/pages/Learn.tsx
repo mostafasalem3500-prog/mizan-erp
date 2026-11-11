@@ -67,6 +67,7 @@ export function HelpButton() {
               <Link className="btn sm" to={l ? `/learn?s=${l.section}` : "/learn"} onClick={() => setOpen(false)}>🎓 دروس القسم كاملة</Link>
               <Link className="btn sm" to="/ai" onClick={() => setOpen(false)}>✨ اسأل المساعد</Link>
             </div>
+            <details className="shortcuts mt"><summary>⌨ اختصارات لوحة المفاتيح</summary>{SHORTCUTS.map(([k, d]) => <div key={k}><kbd>{k}</kbd><span>{d}</span></div>)}</details>
           </div>
         </aside>
       </div>, document.body)}
@@ -227,4 +228,41 @@ export function TargetCard() {
       </Modal>}
     </div>
   );
+}
+
+// ─── shell helpers: activity bar, offline notice, keyboard shortcuts ─────
+/** A thin bar while any request is in flight (shown only if it lasts, so quick screens do not flicker). */
+export function NetBar() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let t: any = null;
+    const h = (e: Event) => { const n = (e as CustomEvent).detail as number; if (n > 0) { if (!t) t = setTimeout(() => setOn(true), 250); } else { clearTimeout(t); t = null; setOn(false); } };
+    window.addEventListener("mz-net", h); return () => { window.removeEventListener("mz-net", h); clearTimeout(t); };
+  }, []);
+  return <div className={"netbar" + (on ? " on" : "")} aria-hidden="true" />;
+}
+export function OfflineNote() {
+  const [off, setOff] = useState(!navigator.onLine);
+  useEffect(() => { const a = () => setOff(false), b = () => setOff(true); window.addEventListener("online", a); window.addEventListener("offline", b); return () => { window.removeEventListener("online", a); window.removeEventListener("offline", b); }; }, []);
+  return off && !CFG.desktop ? <div className="offline-note no-print" role="status">⚠ لا يوجد اتصال بالإنترنت — ما تراه آخر ما حُمّل، والحفظ يتوقف حتى يعود الاتصال (نقطة البيع تواصل العمل وترحّل لاحقاً).</div> : null;
+}
+export const SHORTCUTS: [string, string][] = [["Ctrl + K", "بحث شامل في المستندات والعملاء والأصناف"], ["Alt + N", "جديد: فاتورة / مصروف / قيد حسب القسم المفتوح"], ["Alt + H", "شرح الشاشة المفتوحة"], ["Alt + L", "مركز التعلّم"], ["Alt + T", "المهام والمتابعات"], ["Alt + A", "المساعد الذكي"], ["Alt + D", "لوحة المؤشرات"], ["Esc", "إغلاق النافذة المفتوحة"], ["F2 · F5 · F8", "في نقطة البيع: بحث · دفع · تعليق"]];
+/** Alt-key shortcuts; `newTo` is the «＋ جديد» entry of the open module. */
+export function useShortcuts(newTo: string | null) {
+  const nav = useNavigate();
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const go = (to: string) => { e.preventDefault(); nav(to); };
+      switch (e.code) {
+        case "KeyN": if (newTo) go(newTo); break;
+        case "KeyH": e.preventDefault(); (document.querySelector(".help-btn") as HTMLElement | null)?.click(); break;
+        case "KeyL": go("/learn"); break;
+        case "KeyT": go("/tasks"); break;
+        case "KeyA": go("/ai"); break;
+        case "KeyD": go("/"); break;
+      }
+    };
+    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
+  }, [newTo]);
 }

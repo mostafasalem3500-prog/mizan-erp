@@ -49,6 +49,9 @@ export const TOOLS = [
   { name: "search_accounts", description: "البحث في دليل الحسابات بالاسم أو الرمز.", input_schema: { type: "object", properties: { query: { type: "string" }, type: { type: "string", enum: ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] } }, required: ["query"] } },
   { name: "account_balance", description: "رصيد حساب حتى تاريخ (مدين موجب).", input_schema: { type: "object", properties: { accountId: { type: "string" }, to: { type: "string", description: "YYYY-MM-DD" } }, required: ["accountId"] } },
   { name: "get_entry", description: "جلب قيد يومية بسطوره لشرحه: برقم القيد (مثل JV-2026-00012) أو برقم المستند المصدر (فاتورة، مصروف، سند).", input_schema: { type: "object", properties: { number: { type: "string" } }, required: ["number"] } },
+  { name: "books_check", description: "فحص سلامة الدفاتر: تطابق الدفاتر المساعدة مع الأستاذ العام، ثم المشاكل الشائعة (مسودات، نقدية سالبة، مخزون سالب، سطور بلا طرف، مصروفات مكررة) مع طريقة علاج كل منها. استخدمه عند أي سؤال عن خطأ أو فرق أو عدم تطابق.", input_schema: { type: "object", properties: {} } },
+  { name: "business_query", description: "أرقام المنشأة لفترة: المبيعات، الربح، المصروفات، المشتريات، الأكثر مبيعاً، أكبر العملاء، الذمم والمتأخرات، النقدية، تنبيهات المخزون.", input_schema: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, metric: { type: "string" } } } },
+  { name: "partner_balance", description: "رصيد عميل أو مورد بالاسم مع فواتيره المفتوحة والمتأخر منها.", input_schema: { type: "object", properties: { query: { type: "string" }, role: { type: "string", enum: ["CUSTOMER", "SUPPLIER"] } }, required: ["query"] } },
   {
     name: "propose",
     description: "عرض خطة الإجراءات على المستخدم للتأكيد قبل الترحيل. لا يُرحَّل شيء قبل أن يؤكد المستخدم. الإجراءات تُنفَّذ بالترتيب.",

@@ -14,6 +14,8 @@ import { nextCode } from "../routes/master";
 import { systemPrompt, TOOLS } from "./aiRules";
 import { mockLlm } from "./aiMock";
 import { localAgent } from "./aiLocal";
+import { executive } from "./insights";
+import { integrity } from "./reports";
 import { VAT_RATE, BASE_CURRENCY, CFG } from "../lib/country";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,8 +93,57 @@ async function searchPartners(t: Db, companyId: string, q: string, role?: string
   if (!rows.length && words.length) rows = await run(words.map((_, i) => `${AR("name")} LIKE $${i + 2}`).join(" AND "), words.map((w) => `%${w}%`));
   return rows;
 }
-async function runTool(t: Db, company: any, name: string, input: any) {
+/** Diagnostic sweep of the books: sub-ledger ↔ general-ledger ties, then the everyday things that go wrong, each with its fix. */
+async function booksCheck(t: Db, C: string) {
+  const ig = await integrity(t, C);
+  const issues: { level: "danger" | "warn" | "info"; title: string; detail?: string; fix: string; link?: string }[] = [];
+  const f = (v: any) => Number(v || 0).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const one = (sql: string, params: any[] = [C]) => t.one(sql, params);
+  const rows = (sql: string, params: any[] = [C]) => t.rows(sql, params);
+  const drafts = await one(`SELECT COUNT(*) FILTER (WHERE direction='SALE')::int s, COUNT(*) FILTER (WHERE direction='PURCHASE')::int p, MIN(date) d FROM invoices WHERE company_id=$1 AND status='DRAFT' AND kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE') AND date < CURRENT_DATE - 2`);
+  if (drafts.s + drafts.p) issues.push({ level: "warn", title: `${drafts.s + drafts.p} فاتورة مسودة لم تُرحَّل (مبيعات ${drafts.s}، مشتريات ${drafts.p})`, detail: `أقدمها بتاريخ ${String(drafts.d).slice(0, 10)}. المسودة لا تدخل الحسابات ولا المخزون ولا الإقرار.`, fix: "افتح كل مسودة: رحّلها إن كانت صحيحة أو احذفها.", link: drafts.s ? "/sales/invoices" : "/purchases/invoices" });
+  const negCash = await rows(`SELECT a.code, a.name_ar, SUM(l.debit-l.credit) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.is_cash_bank AND e.status='POSTED' GROUP BY a.id HAVING SUM(l.debit-l.credit) < -0.01 ORDER BY 3`);
+  for (const a of negCash) issues.push({ level: "danger", title: `رصيد «${a.nameAr}» دائن (سالب): ${f(a.b)}`, detail: "النقدية لا تكون سالبة فعلياً إلا لحساب بنكي مكشوف.", fix: "الأسباب المعتادة: مقبوضات لم تُسجَّل، مصروف أو سند صرف سُجّل مرتين أو على الحساب الخطأ، أو تحويل بين الصندوق والبنك لم يُقيَّد. راجع كشف الحساب وطابقه مع كشف البنك أو جرد الصندوق.", link: "/treasury" });
+  const negStock = await one(`SELECT COUNT(*)::int c, (SELECT string_agg(n, '، ') FROM (SELECT p.name n FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 AND b.qty < -0.0001 ORDER BY b.qty LIMIT 4) x) names FROM stock_balances WHERE company_id=$1 AND qty < -0.0001`);
+  if (negStock.c) issues.push({ level: "danger", title: `${negStock.c} صنف رصيده سالب في المخزون`, detail: negStock.names, fix: "بيع قبل تسجيل الشراء أو الرصيد الافتتاحي. سجّل فاتورة الشراء الناقصة أو حركة «رصيد افتتاحي/جرد» بالكمية الصحيحة، ثم راجع تكلفة الصنف.", link: "/inventory?tab=adj" });
+  const crCust = await one(`SELECT COUNT(*)::int c, COALESCE(SUM(-b),0) v FROM (SELECT SUM(l.debit-l.credit) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND a.system_key='AR' AND e.status='POSTED' AND l.partner_id IS NOT NULL GROUP BY l.partner_id HAVING SUM(l.debit-l.credit) < -0.01) x`);
+  if (crCust.c) issues.push({ level: "info", title: `${crCust.c} عميل له رصيد دائن (دفع أكثر مما عليه) بإجمالي ${f(crCust.v)}`, fix: "إن كانت دفعات مقدمة فهي صحيحة وتُخصَّص عند إصدار الفاتورة. وإن كانت تحصيلاً سُجّل مرتين أو على العميل الخطأ فاعكس السند.", link: "/reports/aging" });
+  const unalloc = await one(`SELECT COUNT(*)::int c, COALESCE(SUM(amount-allocated),0) v FROM payments WHERE company_id=$1 AND status='POSTED' AND direction='IN' AND amount-allocated > 0.01 AND partner_id IS NOT NULL`);
+  if (unalloc.c) issues.push({ level: "info", title: `${unalloc.c} سند قبض غير موزّع على فواتير بإجمالي ${f(unalloc.v)}`, fix: "افتح ملف العميل ووزّع الدفعة على فواتيره المفتوحة حتى تظهر أعمار الديون صحيحة.", link: "/receipts" });
+  const noPartner = await one(`SELECT COUNT(*)::int c FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND a.system_key IN ('AR','AP') AND e.status='POSTED' AND l.partner_id IS NULL AND e.type NOT IN ('OPENING','CLOSING')`);
+  if (noPartner.c) issues.push({ level: "warn", title: `${noPartner.c} سطر قيد على حساب العملاء/الموردين بلا تحديد الطرف`, fix: "هذه السطور تظهر في الأستاذ ولا تظهر في كشف أي عميل أو مورد، فيختلف الدفتر المساعد عن الأستاذ. اعكس القيد وأعد إدخاله مع اختيار الطرف في السطر.", link: "/journals" });
+  const dup = await rows(`SELECT COALESCE(p.name, e.payee, e.supplier_vat) name, e.supplier_ref ref, COUNT(*)::int n FROM expenses e LEFT JOIN partners p ON p.id=e.partner_id WHERE e.company_id=$1 AND e.status='POSTED' AND COALESCE(e.supplier_ref,'')<>'' AND COALESCE(p.name, e.payee, e.supplier_vat) IS NOT NULL GROUP BY 1, 2 HAVING COUNT(*)>1 LIMIT 5`);
+  for (const d of dup) issues.push({ level: "warn", title: `مصروف مكرر محتمل: فاتورة رقم ${d.ref} من ${d.name} مسجلة ${d.n} مرات`, fix: "إن كان تكراراً فألغِ المصروف الزائد من سجل المصروفات (يُعكس قيده تلقائياً).", link: "/expenses" });
+  const openPrev = await one(`SELECT COUNT(*)::int c FROM periods p WHERE p.company_id=$1 AND p.status='OPEN' AND p.end_date < date_trunc('month', CURRENT_DATE) - interval '2 months' AND EXISTS (SELECT 1 FROM journal_entries e WHERE e.company_id=p.company_id AND e.status='POSTED' AND e.date BETWEEN p.start_date AND p.end_date)`);
+  if (openPrev.c) issues.push({ level: "info", title: `${openPrev.c} فترة شهرية قديمة فيها قيود وما زالت مفتوحة`, fix: "اقفل الفترات التي راجعتها وقدّمت إقرارها حتى لا يُعدَّل فيها بالخطأ.", link: "/periods" });
+  const failed = ig.checks.filter((c: any) => !c.ok);
+  return { ok: ig.ok && !issues.some((i) => i.level === "danger"), checksTotal: ig.checks.length, checksPassed: ig.checks.length - failed.length, failed: failed.map((c: any) => ({ name: c.name, a: c.a, b: c.b, diff: r2(Number(c.a) - Number(c.b)) })), issues };
+}
+
+const perms = (auth: Auth | undefined, p: string) => !auth || auth.superAdmin || can(auth.role, p);
+async function runTool(t: Db, company: any, name: string, input: any, auth?: Auth) {
   const C = company.id;
+  if (name === "books_check") { if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" }; return booksCheck(t, C); }
+  if (name === "business_query") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const to = isDate(input.to) ? input.to : today(); const from = isDate(input.from) ? input.from : to.slice(0, 8) + "01";
+    const d: any = await executive(t, C, { from, to });
+    return { metric: String(input.metric || "summary"), period: d.period, label: input.label || null, kpis: d.kpis, change: d.change, topProducts: d.topProducts.slice(0, 5).map((x: any) => ({ name: x.name, net: x.net, qty: x.qty, profit: x.profit })), topCustomers: d.topCustomers.slice(0, 5), topSuppliers: d.topSuppliers.slice(0, 5), expByAccount: (d.expByAccount || []).slice(0, 6),
+      receivables: { total: d.receivables.total, overdue: d.receivables.overdue, top: d.receivables.top.slice(0, 6) }, payables: { total: d.payables.total, overdue: d.payables.overdue, top: d.payables.top.slice(0, 6) }, cash: d.cash, forecast: d.forecast,
+      stock: { value: d.inventory.value, counts: d.inventory.counts, outOfStock: d.inventory.outOfStock.slice(0, 6).map((x: any) => x.name), belowReorder: d.inventory.belowReorder.slice(0, 6).map((x: any) => x.name) }, insights: d.insights.slice(0, 5) };
+  }
+  if (name === "partner_balance") {
+    if (!perms(auth, "partners.read")) return { error: "صلاحيتك لا تسمح بعرض العملاء والموردين" };
+    const found = await searchPartners(t, C, String(input.query || ""), input.role);
+    if (!found.length) return { found: 0 };
+    if (found.length > 1 && !found.some((f: any) => arNorm(f.name) === arNorm(input.query))) return { found: found.length, candidates: found.slice(0, 6).map((f: any) => f.name) };
+    const pt = found.find((f: any) => arNorm(f.name) === arNorm(input.query)) || found[0];
+    const full = await t.one(`SELECT is_customer, is_supplier, credit_limit FROM partners WHERE id=$1`, [pt.id]);
+    const b = await t.one(`SELECT COALESCE(SUM(CASE WHEN a.system_key='AR' THEN l.debit-l.credit END),0) ar, COALESCE(SUM(CASE WHEN a.system_key='AP' THEN l.credit-l.debit END),0) ap FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key IN ('AR','AP') AND e.status='POSTED'`, [C, pt.id]);
+    const open = await t.rows(`SELECT number, direction, date, COALESCE(due_date, date) due, total-amount_paid rest FROM invoices WHERE company_id=$1 AND partner_id=$2 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid > 0.01 ORDER BY COALESCE(due_date, date) LIMIT 8`, [C, pt.id]);
+    const cnt = await t.one(`SELECT COUNT(*)::int n, COALESCE(SUM(total-amount_paid),0) v, COALESCE(SUM(total-amount_paid) FILTER (WHERE COALESCE(due_date, date) < CURRENT_DATE),0) overdue FROM invoices WHERE company_id=$1 AND partner_id=$2 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid > 0.01`, [C, pt.id]);
+    return { found: 1, id: pt.id, name: pt.name, isCustomer: full.isCustomer, isSupplier: full.isSupplier, receivable: r2(b.ar), payable: r2(b.ap), creditLimit: Number(full.creditLimit || 0), openCount: cnt.n, openTotal: r2(cnt.v), overdue: r2(cnt.overdue), open: open.map((o: any) => ({ number: o.number, due: String(o.due).slice(0, 10), rest: r2(o.rest) })) };
+  }
   if (name === "search_partners") {
     const rows = await searchPartners(t, C, String(input.query || ""), input.role);
     return rows.length ? { found: rows.length, partners: rows } : { found: 0, note: "لا يوجد طرف مطابق — إن كان مطلوباً فأضف create_partner في الخطة" };
@@ -331,7 +382,7 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
             const preview = await previewPlan(company, auth, tu.input?.actions);
             plan = { status: "pending", summary: String(tu.input?.summary || ""), actions: tu.input.actions, preview };
             result = { ok: true, note: "عُرضت الخطة على المستخدم مع القيود الفعلية وهي بانتظار تأكيده. لا تكرر تفاصيل القيد؛ اكتب شرحاً موجزاً فقط.", preview: preview.map((p) => ({ title: p.title, total: p.total, vat: p.vat })) };
-          } else result = await runTool(db, company, tu.name, tu.input || {});
+          } else result = await runTool(db, company, tu.name, tu.input || {}, auth);
         } catch (e: any) { isErr = true; result = { error: e?.message || "خطأ" }; if (tu.name === "propose") plan = null; }
         results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result), ...(isErr ? { is_error: true } : {}) });
       }

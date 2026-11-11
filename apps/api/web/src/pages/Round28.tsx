@@ -194,7 +194,8 @@ export function Attachments({ entity, id, canWrite = true }: { entity: string; i
     try {
       for (const f of Array.from(files)) {
         if (f.size > 8 * 1024 * 1024) { toast(`«${f.name}» أكبر من 8 ميجابايت`, "err"); continue; }
-        await api(`/attachments/${entity}/${id}`, { body: { name: f.name, mime: f.type || "application/octet-stream", data: await readB64(f) } });
+        const r = await api(`/attachments/${entity}/${id}`, { body: { name: f.name, mime: f.type || "application/octet-stream", data: await readB64(f) } });
+        if (r?.duplicate) toast(`تنبيه: «${f.name}» مرفق من قبل في ${r.duplicate.where} — تأكد أنه ليس مستنداً مكرراً`, "err");
       }
       reload();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }

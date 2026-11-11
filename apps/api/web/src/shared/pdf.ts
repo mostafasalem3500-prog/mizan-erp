@@ -1,4 +1,5 @@
 /** Client-side PDF export (true PDF file download) of any on-screen element — keeps Arabic shaping by rasterising via the browser. */
+import { sheetMeta } from "./sheet";
 const A4W = 210, A4H = 297;
 
 function filter(node: HTMLElement) {
@@ -47,22 +48,53 @@ export async function elementToPdf(el: HTMLElement, filename: string, opts: { la
   const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: landscape ? "landscape" : "portrait" });
   const w = pw - 2 * m;
   const pxPerMm = c.width / w;
-  const sliceH = Math.floor((ph - 2 * m) * pxPerMm);
-  let y = 0, page = 0;
-  while (y < c.height) {
-    const h = Math.min(sliceH, c.height - y);
+  // every page: a footer (establishment · print time · page x of y); continuation pages also get a slim title band
+  const HEAD_MM = 7, FOOT_MM = 7;
+  const first = Math.floor((ph - 2 * m - FOOT_MM) * pxPerMm), next = Math.floor((ph - 2 * m - FOOT_MM - HEAD_MM) * pxPerMm);
+  // never cut through a table row or a line of text: move each cut up to the nearest blank scan line
+  const g0 = c.getContext("2d", { willReadFrequently: true })!;
+  const blank = (y: number) => { const d = g0.getImageData(0, y, c.width, 1).data; for (let i = 0; i < d.length; i += 8) if (d[i] < 200 || d[i + 1] < 200 || d[i + 2] < 200) return false; return true; }; // text is dark; hairline borders and zebra fills are not
+  const cuts: number[] = [0];
+  while (cuts[cuts.length - 1] < c.height) {
+    const from = cuts[cuts.length - 1]; let to = from + (cuts.length === 1 ? first : next);
+    if (to < c.height) { const floor = from + Math.floor((to - from) * 0.82); for (let y = to; y > floor; y--) if (blank(y)) { to = y; break; } }
+    cuts.push(Math.min(to, c.height));
+  }
+  const pages = cuts.length - 1;
+  const meta = sheetMeta();
+  const stamp = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  const docTitle = filename.replace(/\s*\d{4}-\d{2}-\d{2}$/, "").replace(/\.pdf$/, "");
+  for (let page = 0; page < pages; page++) {
+    const y = cuts[page], h = cuts[page + 1] - y;
     const part = document.createElement("canvas");
     part.width = c.width; part.height = h;
     const g = part.getContext("2d")!;
     g.fillStyle = "#fff"; g.fillRect(0, 0, part.width, part.height);
     g.drawImage(c, 0, y, c.width, h, 0, 0, c.width, h);
     if (page) pdf.addPage();
-    pdf.addImage(part.toDataURL("image/jpeg", 0.9), "JPEG", m, m, w, h / pxPerMm);
-    pdf.setFontSize(8); pdf.setTextColor(150);
-    pdf.text(`${page + 1}`, pw / 2, ph - 3, { align: "center" });
-    y += h; page++;
+    const top = m + (page ? HEAD_MM : 0);
+    if (page) pdf.addImage(band(c.width, HEAD_MM * pxPerMm, [meta.company || "", `تابع: ${docTitle}`, ""], true).toDataURL("image/png"), "PNG", m, m, w, HEAD_MM);
+    pdf.addImage(part.toDataURL("image/jpeg", 0.9), "JPEG", m, top, w, h / pxPerMm);
+    pdf.addImage(band(c.width, FOOT_MM * pxPerMm, [meta.company || "ميزان ERP", `صفحة ${page + 1} من ${pages}`, stamp], false).toDataURL("image/png"), "PNG", m, ph - m - FOOT_MM, w, FOOT_MM);
   }
   pdf.save(safe(filename));
+}
+
+/** A one-line band drawn by the browser (so Arabic is shaped correctly): right · centre · left, with a hairline. */
+function band(width: number, height: number, [right, centre, left]: string[], lineBelow: boolean) {
+  const cv = document.createElement("canvas"); cv.width = Math.round(width); cv.height = Math.round(height);
+  const g = cv.getContext("2d")!;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  g.strokeStyle = "#cbd5d4"; g.lineWidth = Math.max(1, cv.height / 28);
+  const ly = lineBelow ? cv.height - g.lineWidth : g.lineWidth;
+  g.beginPath(); g.moveTo(0, ly); g.lineTo(cv.width, ly); g.stroke();
+  g.fillStyle = "#5b6b6a"; g.direction = "rtl"; g.textBaseline = "middle";
+  g.font = `${Math.round(cv.height * 0.42)}px ${getComputedStyle(document.body).fontFamily}`;
+  const y = cv.height / 2 + (lineBelow ? -g.lineWidth : g.lineWidth);
+  g.textAlign = "right"; g.fillText(right || "", cv.width - 2, y);
+  g.textAlign = "center"; g.fillText(centre || "", cv.width / 2, y);
+  g.direction = "ltr"; g.textAlign = "left"; g.fillText(left || "", 2, y); // the print time is plain digits: drawn left-to-right so it is never re-ordered
+  return cv;
 }
 
 const safe = (n: string) => (n || "document").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 120) + (n.endsWith(".pdf") ? "" : ".pdf");

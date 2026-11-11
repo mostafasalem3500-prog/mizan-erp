@@ -1,41 +1,82 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select } from "./lib";
-import { Dashboard } from "./pages/Dashboard";
-import { DocumentsPage, DocumentView, PublicInvoice } from "./pages/Documents";
-import { PosPage } from "./pages/Pos";
-import { PartnersPage, ProductsPage, InventoryPage } from "./pages/Master";
-import { PaymentsPage, ExpensesPage, AssetsPage } from "./pages/Money";
-import { AccountsPage, JournalsPage, PeriodsPage } from "./pages/Accounting";
-import { BankPage } from "./pages/Bank";
-import { ChequesPage, RecurringPage } from "./pages/Round3";
-import { PayrollPage } from "./pages/Payroll";
-import { BudgetsPage } from "./pages/Budgets";
-import { PriceListsPage } from "./pages/Pricing";
-import { LabelsPage, ReorderPage } from "./pages/Stock";
-import { CollectionsPage } from "./pages/Collections";
-import { CustomerPortal } from "./pages/Integrations";
-import { LotsPage } from "./pages/Lots";
-import { ReportsPage, VatPage } from "./pages/Reports";
-import { SettingsPage, ZatcaPage, AdminPage } from "./pages/Settings";
 import { GlobalSearch } from "./pages/Search";
-import { ReportCenterPage } from "./pages/ReportCenter";
-import { PartnerProfilePage } from "./pages/PartnerProfile";
-import { ProductProfilePage, TreasuryPage, JournalView, CountSheetPage } from "./pages/Round20";
 const CharityApp = React.lazy(() => import("./charity/CharityApp").then((m) => ({ default: m.CharityApp })));
 const charityDefault = async () => (CFG.charity ? (await import("./charity/CharityApp")).charityDefault() : false);
-import { ZakatPage, WhtPage } from "./pages/Round23";
-import { FinancialAnalysisPage } from "./pages/Round25";
-import { FinalAccountsPage } from "./pages/Round27";
-import { EtaPage, Form41Page, IncomeTaxPage } from "./pages/Egypt";
 import { CFG } from "./shared/country";
 import { SideNav, useNav } from "./nav";
-import { AiAssistantPage } from "./pages/Ai";
-import { InsightsPage } from "./pages/Insights";
-import { DigestPage, ArchivePage } from "./pages/DigestArchive";
-import { PromotionsPage, LoyaltyPage, ThemeToggle } from "./pages/Round28";
-import { LearnPage, TasksPage, HelpButton, TasksBadge, FavStar } from "./pages/Learn";
+import { Dashboard } from "./pages/Dashboard"; // the landing screen ships with the shell
+import { setSheetMeta } from "./shared/sheet";
+import { ThemeToggle } from "./pages/Round28";
+import { LearnPage, TasksPage, HelpButton, TasksBadge, FavStar, NetBar, OfflineNote, useShortcuts } from "./pages/Learn";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
+
+/** Each screen is its own chunk, fetched the first time it is opened — the shell stays small. */
+const LOADERS = new Set<() => Promise<any>>();
+/** Once the shell is up, fetch the other screens one by one while the browser is idle — opening a screen then never waits. */
+function warmScreens() {
+  if ((navigator as any).connection?.saveData) return;
+  const list = [...LOADERS]; LOADERS.clear();
+  const idle: (f: () => void) => void = (window as any).requestIdleCallback ? (f) => (window as any).requestIdleCallback(f, { timeout: 3000 }) : (f) => setTimeout(f, 300);
+  const next = () => { const l = list.shift(); if (l) idle(() => l().catch(() => undefined).finally(next)); };
+  setTimeout(next, 1500);
+}
+const lz = <M extends Record<string, any>>(load: () => Promise<M>, name: keyof M & string) => (LOADERS.add(load), React.lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<any> })).catch((e) => {
+  // a new version was deployed while this tab was open: its old chunks are gone — reload once to pick up the new ones
+  const k = "mz-chunk-reload"; const last = Number(sessionStorage.getItem(k) || 0);
+  if (Date.now() - last > 30000) { sessionStorage.setItem(k, String(Date.now())); window.location.reload(); return new Promise<never>(() => undefined); }
+  throw e;
+})));
+const Wait = <div className="empty" style={{ paddingTop: 80 }}><span className="spinner" /></div>;
+const DocumentsPage = lz(() => import("./pages/Documents"), "DocumentsPage");
+const DocumentView = lz(() => import("./pages/Documents"), "DocumentView");
+const PublicInvoice = lz(() => import("./pages/Documents"), "PublicInvoice");
+const PosPage = lz(() => import("./pages/Pos"), "PosPage");
+const PartnersPage = lz(() => import("./pages/Master"), "PartnersPage");
+const ProductsPage = lz(() => import("./pages/Master"), "ProductsPage");
+const InventoryPage = lz(() => import("./pages/Master"), "InventoryPage");
+const PaymentsPage = lz(() => import("./pages/Money"), "PaymentsPage");
+const ExpensesPage = lz(() => import("./pages/Money"), "ExpensesPage");
+const AssetsPage = lz(() => import("./pages/Money"), "AssetsPage");
+const AccountsPage = lz(() => import("./pages/Accounting"), "AccountsPage");
+const JournalsPage = lz(() => import("./pages/Accounting"), "JournalsPage");
+const PeriodsPage = lz(() => import("./pages/Accounting"), "PeriodsPage");
+const BankPage = lz(() => import("./pages/Bank"), "BankPage");
+const ChequesPage = lz(() => import("./pages/Round3"), "ChequesPage");
+const RecurringPage = lz(() => import("./pages/Round3"), "RecurringPage");
+const PayrollPage = lz(() => import("./pages/Payroll"), "PayrollPage");
+const BudgetsPage = lz(() => import("./pages/Budgets"), "BudgetsPage");
+const PriceListsPage = lz(() => import("./pages/Pricing"), "PriceListsPage");
+const LabelsPage = lz(() => import("./pages/Stock"), "LabelsPage");
+const ReorderPage = lz(() => import("./pages/Stock"), "ReorderPage");
+const CollectionsPage = lz(() => import("./pages/Collections"), "CollectionsPage");
+const CustomerPortal = lz(() => import("./pages/Integrations"), "CustomerPortal");
+const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
+const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
+const VatPage = lz(() => import("./pages/Reports"), "VatPage");
+const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
+const ZatcaPage = lz(() => import("./pages/Settings"), "ZatcaPage");
+const AdminPage = lz(() => import("./pages/Settings"), "AdminPage");
+const ReportCenterPage = lz(() => import("./pages/ReportCenter"), "ReportCenterPage");
+const PartnerProfilePage = lz(() => import("./pages/PartnerProfile"), "PartnerProfilePage");
+const ProductProfilePage = lz(() => import("./pages/Round20"), "ProductProfilePage");
+const TreasuryPage = lz(() => import("./pages/Round20"), "TreasuryPage");
+const JournalView = lz(() => import("./pages/Round20"), "JournalView");
+const CountSheetPage = lz(() => import("./pages/Round20"), "CountSheetPage");
+const ZakatPage = lz(() => import("./pages/Round23"), "ZakatPage");
+const WhtPage = lz(() => import("./pages/Round23"), "WhtPage");
+const FinancialAnalysisPage = lz(() => import("./pages/Round25"), "FinancialAnalysisPage");
+const FinalAccountsPage = lz(() => import("./pages/Round27"), "FinalAccountsPage");
+const EtaPage = lz(() => import("./pages/Egypt"), "EtaPage");
+const Form41Page = lz(() => import("./pages/Egypt"), "Form41Page");
+const IncomeTaxPage = lz(() => import("./pages/Egypt"), "IncomeTaxPage");
+const AiAssistantPage = lz(() => import("./pages/Ai"), "AiAssistantPage");
+const InsightsPage = lz(() => import("./pages/Insights"), "InsightsPage");
+const DigestPage = lz(() => import("./pages/DigestArchive"), "DigestPage");
+const ArchivePage = lz(() => import("./pages/DigestArchive"), "ArchivePage");
+const PromotionsPage = lz(() => import("./pages/Round28"), "PromotionsPage");
+const LoyaltyPage = lz(() => import("./pages/Round28"), "LoyaltyPage");
 
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
@@ -54,6 +95,7 @@ function canRole(role: string | null, perm: string, superAdmin = false) {
 function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedBranch: boolean }) {
   const { active } = useNav(can, lockedBranch);
   const loc = useLocation();
+  useShortcuts(active?.g.items?.find((i) => i.action)?.to || null);
   const label = active?.i?.label || active?.g.label || "";
   // the menu entry itself when it is a plain screen; otherwise the open address (a profile, a report…)
   const to = active?.i && !active.i.action && active.s >= 1000 ? active.i.to : active?.g.to && active.s >= 1000 ? active.g.to : null;
@@ -69,11 +111,13 @@ export function App() {
   const reload = () => api("/auth/me").then(setMe).catch(() => { session.token = null; setMe(null); }).finally(() => setLoading(false));
   useEffect(() => { if (session.token) reload(); const h = () => { setMe(null); nav("/login"); }; window.addEventListener("mz-logout", h); return () => window.removeEventListener("mz-logout", h); }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
-  if (loc.pathname.startsWith("/p/")) return <Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes>;
-  if (loc.pathname.startsWith("/c/")) return <Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes>;
+  useEffect(() => { if (me?.company) warmScreens(); }, [!!me?.company]);
+  if (loc.pathname.startsWith("/p/")) return <React.Suspense fallback={Wait}><Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes></React.Suspense>;
+  if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
   if (!me) return <Routes><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
+  setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
   const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") ? "/charity" : "/login"); };
   if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return CFG.charity ? <AppCtx.Provider value={{ me, reload, can }}><React.Suspense fallback={<div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>}><CharityApp onLogout={logout} /></React.Suspense></AppCtx.Provider> : <Navigate to="/" replace />;
@@ -81,7 +125,7 @@ export function App() {
   return (
     <AppCtx.Provider value={{ me, reload, can }}>
       {isPos ? (
-        <PosPage />
+        <React.Suspense fallback={Wait}><PosPage /></React.Suspense>
       ) : (
         <div className="app">
           <aside className={"sidebar" + (menu ? " open" : "")}>
@@ -108,8 +152,9 @@ export function App() {
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
             </div>
+            <NetBar /><OfflineNote />
             <div className="content">
-              <Routes>
+              <React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />
                 <Route path="/sales/quotations" element={<DocumentsPage direction="SALE" kinds={["QUOTATION", "ORDER"]} title="عروض الأسعار وأوامر البيع" />} />
@@ -172,7 +217,7 @@ export function App() {
                 <Route path="/settings/:tab" element={<SettingsPage />} />
                 <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />
-              </Routes>
+              </Routes></React.Suspense>
             </div>
           </div>
         </div>
