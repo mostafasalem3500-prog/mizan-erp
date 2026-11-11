@@ -82,6 +82,7 @@ export const NAV_TREE: NavGroup[] = [
   ] },
   { key: "payroll", ic: "👔", label: "الرواتب والموظفون", items: [
     { to: "/payroll", label: "مسيرات الرواتب", perm: "accounting.read", company: true },
+    { to: "/payroll/items", label: "الإضافي والحسميات والجزاءات", perm: "accounting.read", company: true },
     { to: "/payroll/employees", label: "الموظفون", perm: "accounting.read", company: true },
     { to: "/payroll/leaves", label: "الإجازات", perm: "accounting.read", company: true },
     { to: "/payroll/loans", label: "السلف", perm: "accounting.read", company: true },

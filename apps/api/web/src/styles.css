@@ -645,3 +645,6 @@ html[data-theme="dark"] .offline-note { color: #fcd34d; }
 .close-row.lv-block { background: var(--danger-soft); }
 .lv-warn { color: #b45309; } html[data-theme="dark"] .lv-warn { color: #fcd34d; }
 html[data-theme="dark"] .close-row.lv-block { background: rgba(220,38,38,.12); }
+.payslip-net { display: flex; justify-content: space-between; align-items: center; background: var(--primary-soft); border-radius: 10px; padding: 10px 14px; font-weight: 600; }
+.payslip-net b { font-size: 20px; color: var(--primary-2); }
+.update-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 80; display: flex; gap: 12px; align-items: center; justify-content: center; padding: 10px 16px; background: var(--text); color: var(--surface); font-size: 14px; box-shadow: 0 -4px 20px rgba(0,0,0,.25); }

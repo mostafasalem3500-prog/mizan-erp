@@ -14,14 +14,17 @@ const ALL = LESSONS.filter(visible);
 /** **bold** → <b> */
 function Rich({ t }: { t: string }) { return <>{t.split("**").map((s, i) => (i % 2 ? <b key={i}>{s}</b> : <React.Fragment key={i}>{s}</React.Fragment>))}</>; }
 
-/** The lesson that explains the open screen: exact route first, then the longest parent route. */
-export function lessonFor(pathname: string): Lesson | null {
-  let best: Lesson | null = null, len = -1;
+/** The lesson that explains the open screen: its exact tab (?tab= / ?m=) first, then the screen, then the nearest parent screen. */
+export function lessonFor(pathname: string, search = ""): Lesson | null {
+  const cur = new URLSearchParams(search);
+  let exact: Lesson | null = null, best: Lesson | null = null, len = -1;
   for (const l of ALL) for (const r of l.routes) {
-    if (r === pathname) return l;
-    if (r !== "/" && pathname.startsWith(r + "/") && r.length > len) { best = l; len = r.length; }
+    const [path, qs] = r.split("?");
+    if (qs) { if (path === pathname && [...new URLSearchParams(qs)].every(([k, v]) => cur.get(k) === v)) return l; continue; }
+    if (path === pathname) { exact = exact || l; continue; }
+    if (path !== "/" && pathname.startsWith(path + "/") && path.length > len) { best = l; len = path.length; }
   }
-  return best;
+  return exact || best;
 }
 
 function useDone() {
@@ -49,8 +52,8 @@ export function HelpButton() {
   const loc = useLocation();
   const [open, setOpen] = useState(false);
   const { done, toggle } = useDone();
-  const l = lessonFor(loc.pathname);
-  useEffect(() => setOpen(false), [loc.pathname]);
+  const l = lessonFor(loc.pathname, loc.search);
+  useEffect(() => setOpen(false), [loc.pathname, loc.search]);
   useEffect(() => { if (!open) return; const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [open]);
   return (
     <>

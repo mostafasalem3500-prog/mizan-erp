@@ -1,15 +1,24 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { readFileSync } from "node:fs";
+
+// one version number for web and desktop
+const VERSION = (() => { try { return JSON.parse(readFileSync(new URL("../../desktop/package.json", import.meta.url), "utf8")).version as string; } catch { return "dev"; } })();
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      injectRegister: "auto",
+      injectRegister: false, // registered in main.tsx, which also reloads the page when a new version takes over
       manifest: false, // public/manifest.webmanifest is hand-written
       workbox: {
+        importScripts: ["/sw-update.js"],
+        skipWaiting: true, // a new version takes over at once; it never waits for every tab to be closed
+        clientsClaim: true,
+        globIgnores: ["sw-update.js"],
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/p\//, /^\/c\//],

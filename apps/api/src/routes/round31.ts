@@ -8,6 +8,10 @@ import { reverse } from "../accounting/engine";
 import { manualJournal } from "../services/misc";
 import { suggestMatches, statementSummary } from "../services/bankimport";
 import * as s from "../services/round31";
+import * as pay from "../services/payroll";
+import * as hr from "../services/hr";
+import { IS_EG } from "../lib/country";
+import { computeLineEG } from "../services/egypt";
 
 export const r31 = Router();
 r31.use(authenticate);
@@ -84,4 +88,23 @@ r31.get("/cost-allocations/:id/preview", perm("accounting.read"), h(async (req) 
 r31.post("/cost-allocations/:id/run", perm("accounting.write"), h(async (req) => { const r = await tx((t) => s.runAllocation(t, cid(req), actor(req), p(req).id, String(req.body?.from || ""), String(req.body?.to || ""))); await audit(req, "CREATE", "journal", r.entryId, { number: r.number, allocation: p(req).id, total: r.total }); return r; }));
 r31.get("/reports/cvp", perm("reports.read"), h(async (req) => s.cvp(db, cid(req), req.query)));
 r31.put("/accounts/:id/cost-behavior", perm("accounting.write"), h(async (req) => s.setBehavior(db, cid(req), p(req).id, req.body?.behavior)));
-void can; void today;
+
+// ── payroll transactions, run preview / recalculation, loans ──
+r31.get("/payroll-items", perm("accounting.read"), h(async (req) => {
+  const q: any = req.query; const params: any[] = [cid(req)]; const w = ["i.company_id=$1"];
+  if (/^\d{4}-\d{2}$/.test(q.period || "")) { params.push(q.period); w.push(`i.period=$${params.length}`); }
+  if (q.employeeId) { params.push(String(q.employeeId)); w.push(`i.employee_id=$${params.length}`); }
+  if (q.status === "OPEN" || q.status === "INCLUDED") { params.push(q.status); w.push(`i.status=$${params.length}`); }
+  const rows = await db.rows(`SELECT i.*, e.name employee_name, e.code employee_code, r.period run_period, r.status run_status FROM payroll_items i JOIN employees e ON e.id=i.employee_id LEFT JOIN payroll_runs r ON r.id=i.run_id WHERE ${w.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT 1000`, params);
+  return { rows, kinds: pay.ITEM_KINDS, overtimeFactor: pay.OVERTIME_FACTOR };
+}));
+r31.post("/payroll-items/quote", perm("accounting.read"), h(async (req) => { const e = await db.one(`SELECT * FROM employees WHERE id=$1 AND company_id=$2`, [req.body?.employeeId, cid(req)], "الموظف غير موجود"); const wage = Number(e.basic) + Number(e.housing) + Number(e.transport) + Number(e.otherAllow); return { amount: pay.itemAmount(e, String(req.body?.kind), Number(req.body?.qty) || 0, Number(req.body?.factor) || null), wage, daily: Math.round((wage / 30) * 100) / 100, hourly: Math.round((wage / 240) * 100) / 100 }; }));
+r31.post("/payroll-items", perm("accounting.write"), h(async (req) => { const r = await tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "payroll", r.id, { kind: r.kind, amount: r.amount }); return r; }));
+r31.put("/payroll-items/:id", perm("accounting.write"), h(async (req) => tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {}, p(req).id))));
+r31.delete("/payroll-items/:id", perm("accounting.write"), h(async (req) => { await tx((t) => pay.deleteItem(t, cid(req), p(req).id)); return { ok: true }; }));
+/** What the month's run would contain right now (fixed pay + open transactions + loan instalments). */
+r31.get("/payroll/preview2", perm("accounting.read"), h(async (req) => { const emps = await db.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [cid(req)]); return pay.buildLines(db, cid(req), String(req.query.period || ""), emps, {}); }));
+r31.post("/payroll/:id/recalc", perm("accounting.write"), h(async (req) => tx((t) => pay.recalcRun(t, cid(req), p(req).id))));
+r31.post("/hr/loans/:id/repay", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.repayLoan(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, r); return r; }));
+r31.put("/hr/loans/:id", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.rescheduleLoan(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, { installment: r.installment, startPeriod: r.startPeriod }); return r; }));
+void can; void today; void IS_EG; void computeLineEG;

@@ -114,6 +114,32 @@ export async function cancelLoan(t: Db, companyId: string, user: string, id: str
   return t.update("employee_loans", { id }, { status: "CANCELLED" });
 }
 
+/** The employee pays back in cash or by transfer, outside the payroll (early settlement or an extra payment). */
+export async function repayLoan(t: Db, companyId: string, user: string, id: string, b: any) {
+  const l = await t.one(`SELECT l.*, e.name employee_name FROM employee_loans l JOIN employees e ON e.id=l.employee_id WHERE l.id=$1 AND l.company_id=$2 FOR UPDATE OF l`, [id, companyId], "السلفة غير موجودة");
+  if (l.status !== "ACTIVE") throw conflict("السلفة ليست نشطة");
+  const rest = r2(Number(l.amount) - Number(l.paid)); const amount = b.amount === undefined || b.amount === "" ? rest : r2(num(b.amount));
+  if (!(amount > 0) || amount > rest + 0.005) throw bad(`المبلغ يجب أن يكون بين 0.01 والمتبقي ${rest.toFixed(2)}`);
+  const acc = await t.one(`SELECT id FROM accounts WHERE id=$1 AND company_id=$2 AND is_cash_bank`, [b.accountId, companyId], "اختر حساب الاستلام (صندوق/بنك)");
+  const date = isDate(b.date) ? b.date : today();
+  const j = await post(t, companyId, { date, type: "RECEIPT", sourceType: "LOAN", sourceId: l.id, reference: l.number, memo: `سداد سلفة ${l.number} — ${l.employeeName}`, createdBy: user, isDemo: l.isDemo, lines: [
+    { account: acc.id, debit: amount, description: `سداد سلفة ${l.employeeName}` },
+    { key: "EMP_ADVANCES", credit: amount, description: `سداد سلفة ${l.number}` },
+  ] });
+  await applyLoanInstallments(t, companyId, [{ id: l.id, amount }]);
+  return { ok: true, number: j!.number, paid: r2(Number(l.paid) + amount), rest: r2(rest - amount) };
+}
+/** Change the monthly instalment or the month deductions start (reschedule, or pause until a later month). */
+export async function rescheduleLoan(t: Db, companyId: string, id: string, b: any) {
+  const l = await t.one(`SELECT * FROM employee_loans WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "السلفة غير موجودة");
+  if (l.status !== "ACTIVE") throw conflict("السلفة ليست نشطة");
+  const rest = r2(Number(l.amount) - Number(l.paid)); const d: any = {};
+  if (b.installment !== undefined && b.installment !== "") { const v = r2(num(b.installment)); if (!(v > 0) || v > rest + 0.005) throw bad(`القسط يجب أن يكون بين 0.01 والمتبقي ${rest.toFixed(2)}`); d.installment = v; }
+  if (b.startPeriod !== undefined) { if (!/^\d{4}-\d{2}$/.test(b.startPeriod || "")) throw bad("شهر بدء الخصم بصيغة YYYY-MM"); d.startPeriod = b.startPeriod; }
+  if (!Object.keys(d).length) throw bad("لا يوجد تعديل");
+  return t.update("employee_loans", { id }, d);
+}
+
 /** Installments due in a payroll period, keyed by employee id. */
 export async function loanInstallments(t: Db, companyId: string, period: string) {
   const rows = await t.rows(`SELECT id, employee_id, installment, amount, paid FROM employee_loans WHERE company_id=$1 AND status='ACTIVE' AND amount-paid > 0 AND (start_period IS NULL OR start_period <= $2) ORDER BY date`, [companyId, period]);

@@ -141,6 +141,7 @@ export function App() {
             </>} />
             <div className="foot">
               <SubscriptionLine me={me} />
+              <div className="small" style={{ opacity: .6 }} title="رقم الإصدار المعروض الآن">الإصدار {(window as any).MIZAN_VERSION}</div>
               <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={() => { session.token = null; setMe(null); nav("/login"); }}>تسجيل الخروج</button>
             </div>
           </aside>

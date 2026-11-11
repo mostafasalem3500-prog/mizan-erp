@@ -121,7 +121,7 @@ if (fs.existsSync(webDir)) {
   // hashed bundles never change → cached for a year; the service worker and manifest are always re-checked
   app.use("/assets", express.static(path.join(webDir, "assets"), { maxAge: "365d", immutable: true, index: false }));
   app.use("/assets", (_req, res) => { res.status(404).type("text/plain").send("not found"); }); // an old tab asking for a replaced chunk must not get index.html
-  app.use(express.static(webDir, { index: false, setHeaders: (res, file) => { res.setHeader("Cache-Control", /(sw\.js|registerSW\.js|workbox-[^/]*\.js|\.webmanifest)$/.test(file) ? "no-cache" : "public, max-age=3600"); } }));
+  app.use(express.static(webDir, { index: false, setHeaders: (res, file) => { res.setHeader("Cache-Control", /(sw\.js|sw-update\.js|registerSW\.js|workbox-[^/]*\.js|\.webmanifest)$/.test(file) ? "no-cache" : "public, max-age=3600"); } }));
   app.get(/^(?!\/api).*/, (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(webDir, "index.html"));
