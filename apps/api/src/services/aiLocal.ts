@@ -9,10 +9,10 @@ import { EXPENSE_KINDS, GUIDES, TOPICS, ABOUT, PROBLEMS, LESSON_KEYS, ExpenseKin
 import { LESSONS } from "../shared/lessons";
 
 export type LocalCtx = { accounts: any[]; cash: any[]; today: string; vatRate: number; currency: string };
-type Out = { content: any[]; stop_reason: string; usage: { input_tokens: number; output_tokens: number }; escalate?: string };
+type Out = { content: any[]; stop_reason: string; usage: { input_tokens: number; output_tokens: number }; escalate?: string; suggest?: string[] };
 
 const usage = { input_tokens: 0, output_tokens: 0 };
-const say = (t: string): Out => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn", usage });
+const say = (t: string, suggest?: string[]): Out => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn", usage, ...(suggest?.length ? { suggest: suggest.slice(0, 4) } : {}) });
 const call = (name: string, input: any): Out => ({ content: [{ type: "tool_use", id: `lt_${Date.now().toString(36)}${Math.round(Math.random() * 1e6).toString(36)}`, name, input }], stop_reason: "tool_use", usage });
 const giveUp = (why: string): Out => ({ content: [], stop_reason: "end_turn", usage, escalate: why });
 
@@ -24,6 +24,12 @@ const bare = (s: string) => s.replace(/(^|[ (|])(?:وال|بال|لل|ال)(?=[\
 const bareRe = new Map<RegExp, RegExp>();
 const stripped = (re: RegExp) => { let b = bareRe.get(re); if (!b) { b = new RegExp(bare(norm(re.source).replace(/\\b/g, "")), re.flags.replace("g", "")); bareRe.set(re, b); } return b; };
 const hit = (re: RegExp, raw: string, n: string) => re.test(raw) || re.test(n) || stripped(re).test(bare(n));
+/** Everyday Gulf and Egyptian wording → the standard words the rules are written in. */
+const canon = (n: string) => n
+  .replace(/(^| )(وش|ايش|اش|شنو|شو|ايه هو|ايه هي)(?= )/g, "$1ما").replace(/(^| )(ازاي|شلون|كيف اقدر|كيف ممكن|ازاى)(?= )/g, "$1كيف").replace(/(^| )(كام|قد ايه|قديش|اديش)(?= |$)/g, "$1كم")
+  .replace(/(^| )(دلوقتي|الحين|هالحين|حاليا|هسه)(?= |$|؟)/g, "$1الان").replace(/(^| )(ابغى|ابغي|ابي|ودي|عايز|عاوز|محتاج|اريد|ارغب|ممكن|لو سمحت|من فضلك|فضلا|رجاء)( ان)?( تعطيني| تعرض لي| تقول لي| توريني| اعرف| اشوف)?(?= )/g, "$1")
+  .replace(/(^| )(ليه|علشان ايه|عشان ايش)(?= )/g, "$1لماذا").replace(/(^| )(فلوس|مصاري)(?= |$|؟)/g, "$1نقد").replace(/(^| )(النهارده|انهارده)(?= |$|؟)/g, "$1اليوم").replace(/(^| )(امبارح|مبارح)(?= |$|؟)/g, "$1امس")
+  .replace(/(^| )اللي فات(?= |$|؟)/g, "$1الماضي").replace(/(^| )(الجاي|الجايه)(?= |$|؟)/g, "$1القادم").replace(/\s+/g, " ").trim();
 const money = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const MONTHS: Record<string, number> = { يناير: 1, فبراير: 2, مارس: 3, ابريل: 4, مايو: 5, يونيو: 6, يوليو: 7, اغسطس: 8, سبتمبر: 9, اكتوبر: 10, نوفمبر: 11, ديسمبر: 12 };
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -63,11 +69,14 @@ function parsePartner(raw: string, role: "SUPPLIER" | "CUSTOMER"): string | null
 }
 
 // ─── reading the conversation ──────────────────────────────────────────────
+const CLARIFY = /أحتاج:|كم المبلغ؟|كم \*\*المبلغ|من أي حساب؟|نوع المصروف|شامل الضريبة؟|السداد\*\*؟|من هو (العميل|المورد)|أين استُلم|من أين دُفع|أيهم تقصد|الاسم الصحيح كاملاً|أي حساب تقصد|أي صنف تقصد|تأكيد وترحيل|تعذّر تجهيز الخطة|راجعها ثم أكّد|لتسجيلها اكتب/;
 type Qr = { seller?: string; vat?: string; date?: string; total?: number; vatAmount?: number };
 function openTurn(messages: any[]) {
   const texts: string[] = []; let qr: Qr | null = null; let lastAssistant = ""; let unread = 0; let cut = 0; let yesNo: boolean | null = null;
   let start = 0;
   messages.forEach((m, i) => { if (m.role === "user" && m.content.some((b: any) => b.type === "text" && /^\[النظام\] (أكّد|ألغى)/.test(b.text))) start = i; });
+  // an answer that asked for nothing closes the exchange; only a question for missing details (or an open plan) keeps it open
+  for (let i = start; i < messages.length; i++) { const m = messages[i]; if (m.role !== "assistant" || m.content.some((b: any) => b.type === "tool_use")) continue; const t = m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join(" "); if (t && !CLARIFY.test(t)) start = i + 1; }
   for (let i = start; i < messages.length; i++) {
     const m = messages[i];
     if (m.role === "assistant") { const t = m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join(" "); if (t) lastAssistant = t; continue; }
@@ -117,8 +126,8 @@ function parseVatIncl(n: string): boolean | "NONE" | null {
 function analyse(msgs: any[], ctx: LocalCtx) {
   const { texts, qr, lastAssistant, unread, yesNo } = openTurn(msgs);
   const raw = texts.join(" ، ");
-  const n = norm(raw);
-  const last = norm(texts[texts.length - 1] || "");
+  const n = canon(norm(raw));
+  const last = canon(norm(texts[texts.length - 1] || ""));
   let kind = EXPENSE_KINDS.find((k) => hit(k.keys, raw, n)) || null;
   const GENERAL = EXPENSE_KINDS.find((k) => k.id === "general")!;
   const guide = GUIDES.find((g) => hit(g.keys, raw, n)) || null;
@@ -229,23 +238,46 @@ function explainEntry(e: any) {
 
 // ─── the agent ─────────────────────────────────────────────────────────────
 // ─── questions about the establishment's own data ──────────────────────────
-function parsePeriod(n: string, today: string): { from: string; to: string; label: string } {
+type Per = { from: string; to: string; label: string };
+/** Every period named in the sentence, in the order written (two of them make a comparison). */
+function periodsIn(n: string, today: string): Per[] {
   const y = +today.slice(0, 4), m = +today.slice(5, 7);
   const last = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
-  const mon = n.match(/(?:شهر )?(يناير|فبراير|مارس|ابريل|مايو|يونيو|يوليو|اغسطس|سبتمبر|اكتوبر|نوفمبر|ديسمبر)(?:\s+(\d{4}))?/) ;
-  const num = n.match(/شهر (\d{1,2})(?:\s*[\/\-]\s*(\d{4}))?(?= |$|؟|\?)/);
-  if (/اول امس|قبل امس/.test(n)) return { from: shift(today, -2), to: shift(today, -2), label: "أول أمس" };
-  if (/(^| )(امس|البارحه)( |$|؟)/.test(n)) return { from: shift(today, -1), to: shift(today, -1), label: "أمس" };
-  if (/(^| )اليوم( |$|؟)/.test(n)) return { from: today, to: today, label: "اليوم" };
-  if (/(هذا |ه)?الاسبوع|اخر 7|اخر سبع/.test(n) && !/الماضي|السابق/.test(n)) return { from: shift(today, -6), to: today, label: "آخر 7 أيام" };
-  if (/الاسبوع (الماضي|السابق)/.test(n)) return { from: shift(today, -13), to: shift(today, -7), label: "الأسبوع السابق" };
-  if (/الشهر (الماضي|السابق|الفائت)/.test(n)) { const yy = m === 1 ? y - 1 : y, mm = m === 1 ? 12 : m - 1; return { from: iso(yy, mm, 1), to: iso(yy, mm, last(yy, mm)), label: "الشهر الماضي" }; }
-  if (/(السنه|العام) (الماضي|السابق|الماضيه|السابقه|الفائت)/.test(n)) return { from: iso(y - 1, 1, 1), to: iso(y - 1, 12, 31), label: `سنة ${y - 1}` };
-  if (/(هذه |ه)?(السنه|العام)|منذ بدايه السنه|سنوي/.test(n)) return { from: iso(y, 1, 1), to: today, label: "هذه السنة" };
-  if (/ربع|الربع/.test(n)) { const q0 = Math.floor((m - 1) / 3) * 3 + 1; return { from: iso(y, q0, 1), to: today, label: "هذا الربع" }; }
-  if (mon) { const mm = MONTHS[mon[1]], yy = mon[2] ? +mon[2] : mm > m ? y - 1 : y; return { from: iso(yy, mm, 1), to: iso(yy, mm, last(yy, mm)), label: `${mon[1]} ${yy}` }; }
-  if (num && +num[1] >= 1 && +num[1] <= 12) { const mm = +num[1], yy = num[2] ? +num[2] : mm > m ? y - 1 : y; return { from: iso(yy, mm, 1), to: iso(yy, mm, last(yy, mm)), label: `شهر ${mm}/${yy}` }; }
-  return { from: iso(y, m, 1), to: today, label: "هذا الشهر" };
+  const month = (yy: number, mm: number, label: string): Per => ({ from: iso(yy, mm, 1), to: yy === y && mm === m ? today : iso(yy, mm, last(yy, mm)), label });
+  const q0 = Math.floor((m - 1) / 3) * 3 + 1;
+  const M: [RegExp, (x: RegExpExecArray) => Per | null][] = [
+    [/اول امس|قبل امس/, () => ({ from: shift(today, -2), to: shift(today, -2), label: "أول أمس" })],
+    [/(?:^| )(?:امس|البارحه)(?= |$|؟|\?)/, () => ({ from: shift(today, -1), to: shift(today, -1), label: "أمس" })],
+    [/(?:^| )اليوم(?= |$|؟|\?)/, () => ({ from: today, to: today, label: "اليوم" })],
+    [/الاسبوع (?:الماضي|السابق|الفائت)/, () => ({ from: shift(today, -13), to: shift(today, -7), label: "الأسبوع السابق" })],
+    [/(?:هذا |ه)?الاسبوع|اخر 7|اخر سبع/, () => ({ from: shift(today, -6), to: today, label: "آخر 7 أيام" })],
+    [/اخر (\d{1,3}) يوم/, (x) => (+x[1] >= 1 && +x[1] <= 366 ? { from: shift(today, -(+x[1] - 1)), to: today, label: `آخر ${+x[1]} يوماً` } : null)],
+    [/الشهر (?:الماضي|السابق|الفائت)/, () => { const yy = m === 1 ? y - 1 : y, mm = m === 1 ? 12 : m - 1; return month(yy, mm, "الشهر الماضي"); }],
+    [/(?:السنه|العام) (?:الماضي|السابق|الماضيه|السابقه|الفائت|الفائته)/, () => ({ from: iso(y - 1, 1, 1), to: iso(y - 1, 12, 31), label: `سنة ${y - 1}` })],
+    [/(?:سنه|عام|السنه|العام) (20\d{2})/, (x) => ({ from: iso(+x[1], 1, 1), to: +x[1] === y ? today : iso(+x[1], 12, 31), label: `سنة ${x[1]}` })],
+    [/(?:هذه |ه)?(?:السنه|العام)(?! المالي)|منذ بدايه السنه|سنوي/, () => ({ from: iso(y, 1, 1), to: today, label: "هذه السنة" })],
+    [/الربع (?:الماضي|السابق|الفائت)/, () => { const pq = q0 === 1 ? 10 : q0 - 3, yy = q0 === 1 ? y - 1 : y; return { from: iso(yy, pq, 1), to: iso(yy, pq + 2, last(yy, pq + 2)), label: "الربع السابق" }; }],
+    [/الربع (الاول|الثاني|الثالث|الرابع)(?:\s+(20\d{2}))?/, (x) => { const qi = ["الاول", "الثاني", "الثالث", "الرابع"].indexOf(x[1]), st = qi * 3 + 1, yy = x[2] ? +x[2] : st > m ? y - 1 : y, end = iso(yy, st + 2, last(yy, st + 2)); return { from: iso(yy, st, 1), to: end > today ? today : end, label: `الربع ${["الأول", "الثاني", "الثالث", "الرابع"][qi]} ${yy}` }; }],
+    [/(?:^| )(?:هذا )?(?:ال)?ربع(?: الحالي| سنوي)?(?= |$|؟|\?)/, () => ({ from: iso(y, q0, 1), to: today, label: "هذا الربع" })],
+    [/(?:شهر )?(يناير|فبراير|مارس|ابريل|مايو|يونيو|يوليو|اغسطس|سبتمبر|اكتوبر|نوفمبر|ديسمبر)(?:\s+(20\d{2}))?/, (x) => { const mm = MONTHS[x[1]], yy = x[2] ? +x[2] : mm > m ? y - 1 : y; return month(yy, mm, `${x[1]} ${yy}`); }],
+    [/شهر (\d{1,2})(?:\s*[\/\-]\s*(20\d{2}))?(?= |$|؟|\?)/, (x) => (+x[1] >= 1 && +x[1] <= 12 ? month(x[2] ? +x[2] : +x[1] > m ? y - 1 : y, +x[1], `شهر ${+x[1]}/${x[2] ? +x[2] : +x[1] > m ? y - 1 : y}`) : null)],
+    [/(?:هذا |ه)الشهر|الشهر الحالي|الشهر الجاري/, () => month(y, m, "هذا الشهر")],
+  ];
+  const got: { at: number; end: number; rank: number; per: Per }[] = [];
+  M.forEach(([re, f], rank) => { const g = new RegExp(re.source, "g"); let x: RegExpExecArray | null; while ((x = g.exec(n))) { const at = x.index, end = at + x[0].length; if (!got.some((o) => at < o.end && end > o.at)) { const per = f(x); if (per) got.push({ at, end, rank, per }); } if (!x[0].length) g.lastIndex++; } });
+  return got.sort((a, b) => a.at - b.at).map((o) => o.per);
+}
+function parsePeriod(n: string, today: string): Per & { explicit: boolean } {
+  const all = periodsIn(n, today);
+  if (all.length) return { ...all[0], explicit: true };
+  return { from: `${today.slice(0, 8)}01`, to: today, label: "هذا الشهر", explicit: false };
+}
+/** The period of equal length just before this one (a whole month goes back to the whole month before). */
+function previousOf(p: Per): Per {
+  const wholeMonth = p.from.endsWith("-01") && p.from.slice(0, 7) === p.to.slice(0, 7);
+  if (wholeMonth) { const yy = +p.from.slice(0, 4), mm = +p.from.slice(5, 7), py = mm === 1 ? yy - 1 : yy, pm = mm === 1 ? 12 : mm - 1; return { from: iso(py, pm, 1), to: iso(py, pm, new Date(Date.UTC(py, pm, 0)).getUTCDate()), label: "الشهر الذي قبله" }; }
+  const days = Math.round((Date.parse(p.to) - Date.parse(p.from)) / 86400000) + 1;
+  return { from: shift(p.from, -days), to: shift(p.from, -1), label: "الفترة السابقة" };
 }
 function dataMetric(n: string): string | null {
   if (/(اكثر|اعلي|افضل|اكبر).*(مبيع|صنف|اصناف|منتج|رواج|طلب)|الاكثر مبيعا|الاصناف الرابح/.test(n)) return "top_products";
@@ -325,6 +357,105 @@ function lessonFor(raw: string, n: string, eg: boolean) {
 }
 const lessonAnswer = (l: any) => `**${l.title}**\n${l.steps.map((st: string, i: number) => `${i + 1}. ${st}`).join("\n")}${l.entry ? `\n\n**القيد الذي ينشئه البرنامج:** ${l.entry}` : ""}${l.tips?.length ? `\n\n${l.tips.map((t: string) => `💡 ${t}`).join("\n")}` : ""}\n\n${l.go ? `[${l.go.label}](${l.go.to}) · ` : ""}[الدرس في مركز التعلّم](/learn?s=${l.section}&l=${l.id})`;
 
+// ─── the analyst: ratios, comparisons, one item, VAT, payroll, the management report ──────────────────────────
+const GRADE: Record<string, string> = { good: "🟢 جيد", ok: "🟡 مقبول", weak: "🔴 ضعيف", na: "—" };
+const rv = (r: any) => (r.value === null ? "—" : r.unit === "%" ? `${r.value}%` : r.unit === "d" ? `${Math.round(r.value)} يوماً` : r.unit === "x" ? `${r.value} مرة` : String(r.value));
+const scoreWord = (v: number | null) => (v === null ? "غير محسوبة" : v >= 75 ? "جيدة" : v >= 50 ? "متوسطة" : "تحتاج معالجة");
+function analysisAnswer(r: any, cur: string, label?: string): string {
+  if (r.error) return r.error;
+  const f = r.figures, P = `${r.period.from} إلى ${r.period.to}`;
+  const shown = r.ratios.filter((x: any) => x.value !== null);
+  return [`**التحليل المالي — ${label || "الفترة"}** (${P})`,
+    `**الصحة المالية: ${r.score === null ? "—" : `${r.score} / 100`} (${scoreWord(r.score)})** — من ${shown.filter((x: any) => x.grade !== "na").length} مؤشراً محسوباً من الدفاتر المرحّلة.`,
+    shown.length ? `| المؤشر | القيمة | التقييم | المرجع |\n|---|---|---|---|\n${shown.map((x: any) => `| ${x.name} | ${rv(x)} | ${GRADE[x.grade]} | ${x.bench} |`).join("\n")}` : "لا توجد قيود مرحّلة كافية في هذه الفترة لحساب المؤشرات.",
+    `**الأرقام الأساسية (${cur}):** المبيعات ${money(f.sales)} · مجمل الربح ${money(f.grossProfit)} · صافي الربح ${money(f.net)}\nالنقد والبنوك ${money(f.cash)} · العملاء ${money(f.receivables)} · المخزون ${money(f.inventory)} · الموردون ${money(f.payables)}\nرأس المال العامل ${money(f.workingCapital)} · إجمالي الأصول ${money(f.totalAssets)} · حقوق الملكية ${money(f.equity)}`,
+    `**التوصيات:**\n${r.actions.map((x: string, i: number) => `${i + 1}. ${x}`).join("\n")}`,
+    `${r.balanced ? "" : "⚠ الميزانية غير متوازنة — اكتب «افحص الدفاتر» قبل الاعتماد على هذه الأرقام.\n"}[قائمة الدخل](/reports/income) · [الميزانية العمومية](/reports/balance-sheet) · [لوحة الإدارة](/insights)`].join("\n\n");
+}
+const chg = (a: number, b: number) => (Math.abs(b) < 0.005 ? (Math.abs(a) < 0.005 ? "=" : "جديد") : `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round(((a - b) / Math.abs(b)) * 1000) / 10)}%`);
+function compareAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const A = r.a, B = r.b, a = A.kpis, b = B.kpis;
+  const rows: [string, number, number, boolean?][] = [["المبيعات", a.sales, b.sales], ["مجمل الربح", a.grossProfit, b.grossProfit], ["هامش الربح %", a.margin, b.margin, true], ["المصروفات", a.expenses, b.expenses], ["صافي الربح التشغيلي", a.netProfit, b.netProfit], ["عدد الفواتير", a.invoices, b.invoices, true], ["متوسط الفاتورة", a.avgTicket, b.avgTicket], ["المشتريات", a.purchases, b.purchases], ["المحصّل من العملاء", a.collected, b.collected]];
+  const cell = (v: number, plain?: boolean) => (plain ? String(v) : money(v));
+  const table = `| البند | ${A.label} | ${B.label} | التغيّر |\n|---|---|---|---|\n${rows.map(([n, x, y, plain]) => `| ${n} | ${cell(x, plain)} | ${cell(y, plain)} | ${plain && n.includes("%") ? `${x - y >= 0 ? "+" : "−"}${Math.abs(Math.round((x - y) * 10) / 10)} نقطة` : chg(x, y)} |`).join("\n")}`;
+  const notes: string[] = [];
+  const dS = b.sales ? (a.sales - b.sales) / Math.abs(b.sales) : 0, dE = b.expenses ? (a.expenses - b.expenses) / Math.abs(b.expenses) : 0;
+  if (!a.sales && !b.sales) notes.push("لا مبيعات مرحّلة في الفترتين.");
+  else {
+    notes.push(a.sales >= b.sales ? `المبيعات ${b.sales ? `ارتفعت ${Math.abs(Math.round(dS * 100))}%` : "بدأت في الفترة الأولى"}${a.invoices !== b.invoices ? ` (${a.invoices} فاتورة مقابل ${b.invoices})` : ""}.` : `المبيعات انخفضت ${Math.abs(Math.round(dS * 100))}%${a.invoices < b.invoices ? ` لأن عدد الفواتير نزل من ${b.invoices} إلى ${a.invoices}` : a.avgTicket < b.avgTicket ? " لأن متوسط الفاتورة أقل" : ""}.`);
+    if (Math.abs(a.margin - b.margin) >= 1) notes.push(a.margin > b.margin ? `الهامش تحسّن من ${b.margin}% إلى ${a.margin}%.` : `الهامش تراجع من ${b.margin}% إلى ${a.margin}% — راجع الخصومات وتكلفة الشراء.`);
+    if (b.expenses && dE > dS + 0.05 && dE > 0) notes.push(`المصروفات زادت ${Math.round(dE * 100)}% أي أسرع من المبيعات${A.topExpense ? ` (أكبر بند: ${A.topExpense.k})` : ""}.`);
+    notes.push(a.netProfit >= b.netProfit ? `صافي الربح التشغيلي أفضل بـ ${money(a.netProfit - b.netProfit)} ${cur}.` : `صافي الربح التشغيلي أقل بـ ${money(b.netProfit - a.netProfit)} ${cur}.`);
+  }
+  return `**مقارنة ${A.label} مع ${B.label}** — المبالغ قبل الضريبة\n(${A.from} إلى ${A.to}) مقابل (${B.from} إلى ${B.to})\n\n${table}\n\n**القراءة:**\n${notes.map((x) => `- ${x}`).join("\n")}\n\n[مقارنة قائمة الدخل](/reports/income-compare) · [لوحة الإدارة](/insights)`;
+}
+function productAnswer(r: any, cur: string, label?: string): string {
+  if (r.error) return r.error;
+  if (!r.found) return "لم أجد صنفاً بهذا الاسم. اكتب الاسم أو رمز الصنف كما هو مسجل، أو جزءاً منه.";
+  if (r.candidates) return `وجدت أكثر من صنف مطابق: ${r.candidates.join("، ")}.\nأي صنف تقصد؟`;
+  const L: string[] = [`**${r.name}** (${r.sku})`];
+  if (!r.isService) L.push(`- الرصيد الآن: **${r.onHand} ${r.unit || ""}** بتكلفة ${money(r.stockValue)} ${cur} (متوسط التكلفة ${money(r.avgCost)})${r.reorderLevel > 0 && r.onHand <= r.reorderLevel ? ` ⚠ عند حد إعادة الطلب (${r.reorderLevel})` : ""}${r.onHand < 0 ? " ⛔ رصيد سالب: بيع قبل تسجيل الشراء" : ""}`);
+  L.push(`- سعر البيع ${money(r.salePrice)}${r.unitMargin !== null ? ` — هامش الوحدة ${r.unitMargin}%${r.unitMargin < 0 ? " ⛔ يُباع بأقل من تكلفته" : ""}` : ""}`);
+  L.push(r.soldQty ? `- مبيعات ${label || "الفترة"} (${r.period.from} إلى ${r.period.to}): **${r.soldQty} ${r.unit || ""}** بقيمة ${money(r.soldNet)} وربح ${money(r.soldProfit)} في ${r.invoices} فاتورة` : `- لا مبيعات له في ${label || "الفترة"} (${r.period.from} إلى ${r.period.to})`);
+  if (r.daysCover !== null) L.push(`- بمعدل البيع الحالي يكفي الرصيد **${r.daysCover} يوماً**${r.daysCover < 7 ? " — اطلبه الآن" : ""}`);
+  if (r.lastPurchase) L.push(`- آخر شراء: ${r.lastPurchase.date} بسعر ${money(r.lastPurchase.price)}${r.lastPurchase.supplier ? ` من ${r.lastPurchase.supplier}` : ""} (${r.lastPurchase.number})`);
+  L.push(`[ملف الصنف وكرت الحركة](/products/${r.id})`);
+  return L.join("\n");
+}
+function vatAnswer(r: any, cur: string, label: string | undefined, eg: boolean): string {
+  if (r.error) return r.error;
+  return `**${eg ? "ضريبة القيمة المضافة" : "موقف ضريبة القيمة المضافة"} — ${label || "الفترة"}** (${r.period.from} إلى ${r.period.to})\n- ضريبة المخرجات (على المبيعات): ${money(r.outputVat)}\n- ضريبة المدخلات (على المشتريات والمصروفات): ${money(r.inputVat)}\n- ${r.net >= 0 ? `**المستحق سداده للهيئة: ${money(r.net)} ${cur}**` : `**رصيد دائن لصالحك: ${money(-r.net)} ${cur}** (يُرحَّل للفترة التالية أو يُسترد)`}\n${r.reconciled ? "✓ الإقرار يطابق حسابات الضريبة في الأستاذ العام." : "⚠ الإقرار لا يطابق حسابات الضريبة في الأستاذ: يوجد قيد يدوي على حساب الضريبة بلا مستند. اكتب «افحص الدفاتر»."}\nالأرقام من المستندات المرحّلة فقط؛ المسودات لا تدخل.\n[الإقرار الضريبي](/vat)`;
+}
+function hrAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const ST: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", PAID: "مدفوع" };
+  return `**الرواتب والموظفون**\n- الموظفون على رأس العمل: **${r.employees}** — إجمالي الأجور الشهرية الثابتة ${money(r.wages)} ${cur}\n${r.lastRun ? `- آخر مسير: ${r.lastRun.period} (${ST[r.lastRun.status] || r.lastRun.status}) — الإجمالي ${money(r.lastRun.gross)}، الاستقطاعات ${money(r.lastRun.deductions)}، **الصافي ${money(r.lastRun.net)}**${r.lastRun.employerCost ? `، حصة المنشأة في التأمينات ${money(r.lastRun.employerCost)}` : ""}` : "- لم يُنشأ مسير رواتب بعد"}\n- السلف القائمة: ${r.loans.count} بمتبقٍّ ${money(r.loans.rest)}${r.openItems ? `\n- حركات إضافي وحسميات لم تدخل مسيراً: ${r.openItems}` : ""}\n[مسيرات الرواتب](/payroll) · [السلف](/payroll/loans)`;
+}
+function reportAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const e = r.exec, k = e.kpis, c = e.change || {}, an = r.analysis, ck = r.check, L = e.label || "الفترة";
+  const risks: string[] = [];
+  if (k.netProfit < 0) risks.push(`النتيجة التشغيلية خسارة ${money(-k.netProfit)}.`);
+  if (e.receivables.overdue > 0) risks.push(`متأخرات العملاء ${money(e.receivables.overdue)} من ${money(e.receivables.total)}${e.receivables.top[0] ? ` — أكبرها ${e.receivables.top[0].name}` : ""}.`);
+  if (e.forecast.projected < 0) risks.push(`عجز سيولة متوقع خلال 30 يوماً: ${money(-e.forecast.projected)}.`);
+  if (e.stock.counts.outOfStock) risks.push(`${e.stock.counts.outOfStock} صنف نافد ومطلوب${e.stock.outOfStock.length ? ` (${e.stock.outOfStock.slice(0, 3).join("، ")})` : ""}.`);
+  if (e.stock.counts.dead) risks.push(`${e.stock.counts.dead} صنف راكد منذ 90 يوماً يجمّد سيولة.`);
+  if (ck.failed) risks.push(`فحوص تطابق لم تنجح في الدفاتر: ${ck.failed} — يجب علاجها قبل اعتماد الأرقام.`);
+  if (ck.danger) risks.push(`ملاحظات خطرة في الدفاتر (نقدية أو مخزون سالب): ${ck.danger} — اكتب «افحص الدفاتر» للتفاصيل.`);
+  const weak = an.ratios.filter((x: any) => x.grade === "weak" && x.value !== null).map((x: any) => `${x.name} ${rv(x)}`);
+  return [`**تقرير الإدارة — ${L}** (${e.period.from} إلى ${e.period.to})`,
+    `**1. الأداء**\n| البند | القيمة (${cur}) | عن الفترة السابقة |\n|---|---|---|\n| المبيعات | ${money(k.sales)} | ${c.sales ? `${c.sales > 0 ? "▲" : "▼"} ${Math.abs(c.sales)}%` : "—"} |\n| مجمل الربح | ${money(k.grossProfit)} (${k.margin}%) | ${c.grossProfit ? `${c.grossProfit > 0 ? "▲" : "▼"} ${Math.abs(c.grossProfit)}%` : "—"} |\n| المصروفات | ${money(k.expenses)} | ${c.expenses ? `${c.expenses > 0 ? "▲" : "▼"} ${Math.abs(c.expenses)}%` : "—"} |\n| صافي الربح التشغيلي | ${money(k.netProfit)} | ${c.netProfit ? `${c.netProfit > 0 ? "▲" : "▼"} ${Math.abs(c.netProfit)}%` : "—"} |\nعدد الفواتير ${k.invoices} · عدد العملاء ${k.customers} · متوسط الفاتورة ${money(k.avgTicket)}.${e.topProducts[0] ? ` الأكثر مبيعاً: ${e.topProducts.slice(0, 3).map((x: any) => x.name).join("، ")}.` : ""}`,
+    `**2. السيولة والذمم**\n- النقد والبنوك: **${money(e.cash.total)}**\n- مستحقاتنا على العملاء: ${money(e.receivables.total)} (متأخر ${money(e.receivables.overdue)})\n- علينا للموردين: ${money(e.payables.total)} (حلّ موعده ${money(e.payables.overdue)})\n- خلال 30 يوماً: تحصيل متوقع ${money(e.forecast.inflow30)} − سداد ${money(e.forecast.outflow30)} = سيولة متوقعة **${money(e.forecast.projected)}**`,
+    `**3. المؤشرات المالية** — الصحة المالية ${an.score === null ? "—" : `${an.score}/100`} (${scoreWord(an.score)})\n${weak.length ? `مؤشرات ضعيفة: ${weak.join("، ")}.` : "لا مؤشرات ضعيفة."} نسبة التداول ${rv(an.ratios[0])}، هامش صافي الربح ${rv(an.ratios.find((x: any) => x.key === "nm"))}، فترة التحصيل ${rv(an.ratios.find((x: any) => x.key === "dso"))}.`,
+    `**4. الضريبة والدفاتر**\n- ضريبة الفترة: ${r.vat.net >= 0 ? `مستحق ${money(r.vat.net)}` : `رصيد دائن ${money(-r.vat.net)}`} (مخرجات ${money(r.vat.outputVat)} − مدخلات ${money(r.vat.inputVat)})\n- فحص الدفاتر: نجح ${ck.passed} من ${ck.total}${ck.issues ? `، وعدد الملاحظات ${ck.issues}` : "، بلا ملاحظات"}.`,
+    `**5. المخاطر**\n${risks.length ? risks.map((x) => `- ${x}`).join("\n") : "- لا مخاطر ظاهرة في هذه الفترة."}`,
+    `**6. التوصيات**\n${an.actions.slice(0, 5).map((x: string, i: number) => `${i + 1}. ${x}`).join("\n")}`,
+    "أُعدّ هذا التقرير من الدفاتر المرحّلة لحظة السؤال. استخدم زر «طباعة / PDF» أسفل الرد لحفظه.\n[لوحة الإدارة](/insights) · [مركز التقارير](/reports-center)"].join("\n\n");
+}
+/** What the user is likely to ask next, offered as one-tap chips. */
+const NEXT: Record<string, string[]> = {
+  sales: ["قارن المبيعات بالشهر الماضي", "ما الأكثر مبيعاً؟", "من أكبر العملاء؟"], profit: ["حلّل الوضع المالي", "أين تذهب المصروفات؟", "قارن الربح بالشهر الماضي"], expenses: ["قارن المصروفات بالشهر الماضي", "كم صافي الربح؟"],
+  purchases: ["كم علينا للموردين؟", "ماذا أطلب من المخزون؟"], top_products: ["ماذا أطلب من المخزون؟", "كم صافي الربح؟"], top_customers: ["من لم يسدد؟", "كم المبيعات هذه السنة؟"], top_suppliers: ["كم علينا للموردين؟"],
+  receivables: ["كم السيولة المتوفرة؟", "حلّل الوضع المالي"], payables: ["كم السيولة المتوفرة؟", "من لم يسدد؟"], cash: ["من لم يسدد؟", "كم علينا للموردين؟", "حلّل الوضع المالي"], stock: ["ما الأكثر مبيعاً؟", "كم قيمة المشتريات هذا الشهر؟"],
+  summary: ["اكتب تقريراً للإدارة", "حلّل الوضع المالي", "افحص الدفاتر"], analysis: ["اكتب تقريراً للإدارة", "من لم يسدد؟", "ماذا أطلب من المخزون؟"], compare: ["حلّل الوضع المالي", "أين تذهب المصروفات؟"],
+  report: ["افحص الدفاتر", "قارن هذا الشهر بالشهر الماضي"], vat: ["افحص الدفاتر", "كم المبيعات هذا الربع؟"], hr: ["كم المصروفات هذا الشهر؟"], check: ["حلّل الوضع المالي", "ملخص هذا الشهر"], product: ["ماذا أطلب من المخزون؟", "ما الأكثر مبيعاً؟"],
+};
+/** The last figures question in the conversation, so «والشهر الماضي؟» and «والمصروفات؟» continue it. */
+function lastQuery(msgs: any[]): { name: string; input: any } | null {
+  for (let i = msgs.length - 2; i >= 0; i--) { const m = msgs[i]; if (m.role !== "assistant") continue; const u = m.content.find((b: any) => b.type === "tool_use" && ["business_query", "financial_analysis", "compare_periods", "vat_position", "product_info", "management_report"].includes(b.name)); if (u) return { name: u.name, input: u.input || {} }; }
+  return null;
+}
+const wordsOf = (x: string) => bare(canon(norm(x))).split(/[^ء-يa-z0-9]+/).filter((w) => w.length > 2 && !/^(كيف|ماذا|هذا|هذه|التي|الذي|على|الى|عند|هل|انا|اريد|يمكن|عمل|اعمل|طريقه|شرح|في|من|عن|مع|او|ثم|كل|ما)$/.test(w));
+/** Nothing matched: the closest lessons and accounting topics, so the user is one tap from an answer. */
+function nearest(raw: string, eg: boolean) {
+  const q = wordsOf(raw); if (!q.length) return [];
+  const score = (text: string) => { const w = wordsOf(text); return q.reduce((a, x) => a + (w.some((y) => y === x) ? 2 : w.some((y) => y.length > 3 && x.length > 3 && (y.startsWith(x.slice(0, 4)) || x.startsWith(y.slice(0, 4)))) ? 1 : 0), 0); };
+  const ls = LESSONS.filter((l: any) => !(l.sa && eg) && !(l.eg && !eg)).map((l: any) => ({ kind: "lesson", title: l.title, link: `/learn?s=${l.section}&l=${l.id}`, sc: score(`${l.title} ${l.goal || ""}`) }));
+  const ts = TOPICS.map((t: any) => ({ kind: "topic", title: t.title, link: "", sc: score(t.title) }));
+  return [...ls, ...ts].filter((x) => x.sc >= 2).sort((a, b) => b.sc - a.sc).slice(0, 4);
+}
+
 export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Promise<Out> {
   const msgs = body.messages;
   const lastMsg = msgs[msgs.length - 1];
@@ -339,9 +470,15 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     const prev = msgs[msgs.length - 2].content.find((b: any) => b.type === "tool_use");
     let res: any = {}; try { res = JSON.parse(tr.content); } catch { /* keep {} */ }
     if (prev.name === "get_entry") return say(explainEntry(res));
-    if (prev.name === "books_check") return say(checkAnswer(res));
-    if (prev.name === "business_query") return say(dataAnswer(res, ctx.currency));
-    if (prev.name === "partner_balance") return say(partnerAnswer(res, ctx.currency));
+    if (prev.name === "books_check") return say(checkAnswer(res), NEXT.check);
+    if (prev.name === "business_query") return say(dataAnswer(res, ctx.currency), NEXT[res.metric] || NEXT.summary);
+    if (prev.name === "partner_balance") return say(partnerAnswer(res, ctx.currency), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `رصيد ${prev.input.role === "SUPPLIER" ? "المورد" : "العميل"} ${x}`) : undefined);
+    if (prev.name === "financial_analysis") return say(analysisAnswer(res, ctx.currency, prev.input.label), NEXT.analysis);
+    if (prev.name === "compare_periods") return say(compareAnswer(res, ctx.currency), NEXT.compare);
+    if (prev.name === "product_info") return say(productAnswer(res, ctx.currency, prev.input.label), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `مبيعات ومخزون صنف ${x}`) : NEXT.product);
+    if (prev.name === "vat_position") return say(vatAnswer(res, ctx.currency, prev.input.label, ctx.vatRate === 14), NEXT.vat);
+    if (prev.name === "hr_summary") return say(hrAnswer(res, ctx.currency), NEXT.hr);
+    if (prev.name === "management_report") return say(reportAnswer(res, ctx.currency), NEXT.report);
     if (prev.name === "account_balance") return say(res.error ? res.error : `رصيد **${res.account}** حتى ${res.to}: **${money(Math.abs(res.balance))}** ${ctx.currency} (${res.side}).`);
     if (prev.name === "propose") {
       if (res.error) return say(`تعذّر تجهيز الخطة: ${res.error}\nصحّح المطلوب أو أعد صياغة الطلب.`);
@@ -368,7 +505,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   // ── a new message from the user ──
   if (!a.texts.length && !a.qr) return a.unread ? giveUp("attachment") : say(ABOUT);
   // several steps, allocations, reversals, analysis: beyond fixed rules — the advanced model's job when it is enabled
-  if (/(^| )(وزع|توزيع|اعكس|عكس القيد|قارن|حلل|تحليل|بنسبه|نسبه وتناسب|عده فواتير|مجموعه فواتير|كل الفواتير)( |$)| ثم /.test(n)) return giveUp("complex");
+  if (/(^| )(اعكس|عكس|الغ|الغاء) (ال)?(قيد|سند|فاتوره|مصروف)/.test(n) && !isQuestion(n)) return { ...say("عكس القيد أو إلغاء المستند يتم من شاشته حتى يُعكس أثره كاملاً (الحسابات والمخزون والضريبة):\n- **قيد يدوي:** المحاسبة العامة ← القيود اليومية ← افتح القيد ← **عكس القيد**.\n- **فاتورة مرحّلة:** أصدر لها **إشعاراً دائناً** (مرتجع) من الفاتورة نفسها.\n- **مصروف أو سند:** افتحه من سجله واضغط **إلغاء** فيُعكس قيده تلقائياً.\nلا أعكس المستندات من المحادثة حتى لا يُلغى شيء بالخطأ.\n[القيود اليومية](/journals)", ["كيف أصدر إشعاراً دائناً؟"]), escalate: "reverse" };
+  if (/(^| )(وزع|توزيع|بنسبه|نسبه وتناسب|عده فواتير|مجموعه فواتير|كل الفواتير)( |$)| ثم /.test(n) && (a.amount || wantsRecord(n))) return giveUp("complex");
   if (/^(مرحبا|السلام|اهلا|هلا|صباح|مساء|هاي|hi|hello)|ماذا تستطيع|ماذا تفعل|ما الذي تستطيع|ساعدني$|^مساعده$|من انت/.test(n) && !a.amount) return say(ABOUT);
 
   // the establishment's own figures, a named partner's balance, and a health check of the books
@@ -384,8 +522,41 @@ ${pr.text}
 اكتب «افحص الدفاتر» لأبحث عن هذه المشكلة في بياناتك.`);
       return call("books_check", {});
     }
+    const eg = ctx.vatRate === 14, per = parsePeriod(n, ctx.today), how = /^(كيف|طريقه|ما هو|ماهو|ما هي|ماهي|ما معني|عرف|اشرح|متي) /.test(n) && !/(كيف|ما) (هو |هي )?(الوضع|الاداء|اداء|حال|وضع)|^كيف (احسن|ازيد|ارفع|اطور)|^ما (هو|هي) (نسبه|فتره|دوران|هامش)/.test(n);
+    const prevQ = lastQuery(msgs);
+    // a number that is part of a date («سنة 2026»، «آخر 30 يوم»، «شهر 3») is not an amount to record
+    const dateNo = !!a.amount && new RegExp(`(سنه|عام|السنه|العام|شهر|اخر|يناير|فبراير|مارس|ابريل|مايو|يونيو|يوليو|اغسطس|سبتمبر|اكتوبر|نوفمبر|ديسمبر|الاول|الثاني|الثالث|الرابع|[\\/\\-]) ?${a.amount}(?!\\d)`).test(n);
+    const loose = dataMetric(n) || (/مبيعات|بعنا/.test(n) ? "sales" : /مصروف|مصاريف/.test(n) ? "expenses" : /مشتريات/.test(n) ? "purchases" : /ربح|ارباح|خسار/.test(n) ? "profit" : /مخزون|اصناف/.test(n) ? "stock" : /سيوله|نقد|كاش/.test(n) ? "cash" : /عملاء|مدين/.test(n) ? "receivables" : /موردين|دائن/.test(n) ? "payables" : null);
+    if ((!a.amount || dateNo) && !how) {
+      // a management report, a financial analysis, a comparison of two periods
+      if (/تقرير (ل|الي |الى )?(ال)?(اداره|مدير|ملاك|مالك|شركاء|مجلس)|تقرير (اداري|شامل|مالي|تنفيذي|كامل|مفصل|الاداء)|(اكتب|اعد|جهز|حضر|اعمل|اعطني|سو) (لي )?تقرير|ملخص تنفيذي/.test(n)) return call("management_report", { from: per.from, to: per.to, label: per.label });
+      const cmp = /(^| )(قارن|مقارنه|قارني|قارنلي)|الفرق بين|مقابل| ضد /.test(n), pers = periodsIn(n, ctx.today);
+      if (cmp && (pers.length || /(^| )(قارن|مقارنه)/.test(n)) && !findTopic(a.raw, n)) { const A = pers[0] || per, B = pers[1] || previousOf(A); return call("compare_periods", { metric: dataMetric(n) || "summary", a: A, b: B }); }
+      if (/(حلل|تحليل) (لي )?(ال)?(وضع|مركز|اداء|مالي|ماليه|قوائم|ميزانيه|حسابات|منشاه|شركه|نشاط)|تحليل مالي|النسب الماليه|نسب ماليه|نسبه (ال)?(سيوله|تداول|مديونيه)|الوضع المالي|المركز المالي|الصحه الماليه|صحه (المنشاه|الشركه) الماليه|نقاط (ال)?(ضعف|قوه)|دوران (ال)?مخزون|فتره (ال)?تحصيل|دوره (ال)?نقد|راس المال العامل|العائد علي|كيف (احسن|ازيد|ارفع|اطور) (ال)?(ربح|ارباح|سيوله|اداء)|هل (الشركه|المنشاه|المحل|نشاطي|وضعنا|وضعي) (رابح|ناجح|بخير|جيد|سليم|خسران)/.test(n) || (/(^| )(حلل|تحليل)( |$)/.test(n) && !loose))
+        return call("financial_analysis", per.explicit ? { from: per.from, to: per.to, label: per.label } : { from: `${ctx.today.slice(0, 4)}-01-01`, to: ctx.today, label: "منذ بداية السنة" });
+      // one item
+      const im = n.match(/(?:صنف|الصنف|منتج|المنتج|ماده|الماده|سلعه|السلعه) (.+?)(?=\s*(?:؟|\?|$| هذا | هذه | خلال | في شهر | الشهر | اليوم| امس| الان| اخر | منذ | هذا$| السنه| الاسبوع))/);
+      if (im && im[1].trim().length > 1 && /(كم|ما |مبيعات|بعنا|مخزون|رصيد|كميه|سعر|تكلفه|ربح|متوفر|باقي|تحرك|حركه|معلومات|بيانات|تفاصيل)/.test(n) && !/(اكثر|اعلي|افضل|اكبر) /.test(n)) return call("product_info", { query: im[1].trim().replace(/^(اسمه|رقم|رمز|كود) /, ""), from: per.from, to: per.to, label: per.label });
+      // VAT position
+      if (/(كم|مبلغ|صافي|مقدار|قيمه|احسب|ما ) ?.*(ضريبه القيمه المضافه|الضريبه المستحقه|ضريبه المخرجات|ضريبه المدخلات|(ال)?ضريبه (علينا|المطلوب|التي|اللي))|كم (علينا|ندفع|سندفع|ادفع) (من )?(ال)?(ضريبه|للضريبه|للهيئه|للزكاه والضريبه)|موقف(نا)? (ال)?ضريبي|(الضريبه|ضريبه) (هذا |ه)?(الربع|الشهر) كم/.test(n)) {
+        const q0 = Math.floor((+ctx.today.slice(5, 7) - 1) / 3) * 3 + 1;
+        return call("vat_position", per.explicit ? { from: per.from, to: per.to, label: per.label } : eg ? { from: per.from, to: per.to, label: "هذا الشهر" } : { from: iso(+ctx.today.slice(0, 4), q0, 1), to: ctx.today, label: "هذا الربع" });
+      }
+      // payroll
+      if (/(كم|اجمالي|مجموع|تكلفه|ملخص|قيمه) (ال)?(رواتب|اجور)|(رواتب|اجور) (هذا |ه)?الشهر كم|عدد (ال)?موظفين|كم (عدد )?(ال)?موظف|(كم|اجمالي|رصيد|مجموع) (ال)?سلف|السلف القائمه/.test(n) && !a.kind) return call("hr_summary", {});
+      // a short follow-up continues the last figures question: «والشهر الماضي؟» · «والمصروفات؟»
+      const short = n.length <= 42 && /^(و|طيب|وماذا عن|ماذا عن|وكم|نفس|كذلك)/.test(n);
+      if (prevQ && short && per.explicit && !dataMetric(n)) {
+        if (prevQ.name === "business_query") return call("business_query", { metric: prevQ.input.metric, from: per.from, to: per.to, label: per.label });
+        if (prevQ.name === "financial_analysis" || prevQ.name === "vat_position" || prevQ.name === "management_report") return call(prevQ.name, { from: per.from, to: per.to, label: per.label });
+        if (prevQ.name === "product_info") return call("product_info", { query: prevQ.input.query, from: per.from, to: per.to, label: per.label });
+        if (prevQ.name === "compare_periods") return call("compare_periods", { metric: prevQ.input.metric, a: per, b: previousOf(per) });
+      }
+      if (/(^| )(حلل|تحليل)( |$)/.test(n) && loose) return call("business_query", { metric: loose, from: per.from, to: per.to, label: per.label });
+      if (prevQ && short && loose && prevQ.name !== "compare_periods") { const P = per.explicit ? per : prevQ.input.from && prevQ.input.to ? { from: prevQ.input.from, to: prevQ.input.to, label: prevQ.input.label } : per; return call("business_query", { metric: loose, from: P.from, to: P.to, label: P.label }); }
+    }
     const metric = dataMetric(n);
-    if (metric && !(a.amount && a.kind) && !/^(كيف|طريقه|ما هو|ماهو|ما هي|ماهي|ما معني|عرف|اشرح) (ا?سجل|ا?دخل|ا?حسب|تسجيل|ادخال|احتساب)/.test(n)) { const p = parsePeriod(n, ctx.today); return call("business_query", { metric, from: p.from, to: p.to, label: p.label }); }
+    if (metric && !(a.amount && a.kind) && !/^(كيف|طريقه|ما هو|ماهو|ما هي|ماهي|ما معني|عرف|اشرح) (ا?سجل|ا?دخل|ا?حسب|تسجيل|ادخال|احتساب)/.test(n)) return call("business_query", { metric, from: per.from, to: per.to, label: per.label });
   }
 
   // explain an existing entry by its number
@@ -406,11 +577,17 @@ ${pr.text}
     const topic = findTopic(a.raw, n);
     const lesson = lessonFor(a.raw, n, ctx.vatRate === 14);
     const problem = PROBLEMS.find((x) => hit(x.keys, a.raw, n));
+    // a chip offered by the assistant: the exact title of a lesson or a topic
+    const title = norm(a.texts[a.texts.length - 1] || "").replace(/^(شرح|كيف) ?: ?/, "");
+    const byTitle = LESSONS.find((l: any) => norm(l.title) === title && !(l.sa && ctx.vatRate === 14) && !(l.eg && ctx.vatRate !== 14)); if (byTitle) return say(lessonAnswer(byTitle));
+    const topicByTitle = TOPICS.find((t: any) => norm(t.title) === title); if (topicByTitle) return say(`**${topicByTitle.title}**\n\n${topicByTitle.text}`);
     if (problem) return say(`**${problem.title}**\n\n${problem.text}`);
     if (topic) return say(`**${topic.title}**\n\n${topic.text}${lesson ? `\n\n[طريقة التنفيذ في البرنامج: ${lesson.title}](/learn?s=${lesson.section}&l=${lesson.id})` : ""}`);
     if (lesson) return say(lessonAnswer(lesson));
     if (guide) return say(guide.text);
     if (a.kind) { const acc = pickAccount(ctx, a.kind); return say(`**${a.kind.ar}** تُسجَّل مصروفاً على حساب «${acc?.account.nameAr}».\nالقيد: من ح/ ${acc?.account.nameAr}${a.kind.tax === "O" ? "" : " + ح/ ضريبة المدخلات"} إلى ح/ الصندوق أو البنك (أو ح/ الموردين إن كانت آجلة).${a.kind.note ? `\n${a.kind.note}` : ""}\n\nلتسجيلها اكتب المبلغ وطريقة السداد، مثل: «${a.kind.ar} 500 ريال شامل الضريبة نقداً».`); }
+    const near = nearest(a.texts[a.texts.length - 1] || a.raw, ctx.vatRate === 14);
+    if (near.length) return { ...say(`لم أجد إجابة مطابقة تماماً. أقرب ما عندي:\n${near.map((x) => (x.link ? `- [${x.title}](${x.link})` : `- ${x.title}`)).join("\n")}\nاختر أحدها، أو أعد صياغة السؤال بكلمات أخرى.`, near.map((x) => (x.kind === "lesson" ? `شرح: ${x.title}` : x.title))), escalate: "unknown-question" };
     return giveUp("unknown-question");
   }
 

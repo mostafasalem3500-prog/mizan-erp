@@ -658,3 +658,17 @@ html[data-theme="dark"] .close-row.lv-block { background: rgba(220,38,38,.12); }
 .att-l { background: var(--accent-soft); color: #92400e; } .att-o { color: var(--muted); }
 html[data-theme="dark"] .att-a { background: rgba(220,38,38,.18); color: #fca5a5; } html[data-theme="dark"] .att-l { color: #fcd34d; }
 .nowrap { white-space: nowrap; }
+
+/* ── assistant: tables, lists, follow-up chips, answer tools ── */
+.ai-tbl { margin: 8px 0; background: var(--surface); border-radius: 10px; } .ai-tbl .tbl th, .ai-tbl .tbl td { padding: 6px 10px; }
+.ai-li { display: flex; gap: 8px; padding-inline-start: 4px; } .ai-bul { color: var(--primary); font-weight: 700; min-width: 16px; flex: none; }
+.ai-next { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { border: 1px solid var(--primary); color: var(--primary); background: var(--surface); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip:hover { background: var(--primary-soft); }
+.ai-tools { display: flex; gap: 4px; justify-content: flex-end; margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 4px; }
+.ai-cats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; text-align: start; }
+.ai-cat { display: grid; gap: 6px; align-content: start; } .ai-cat-h { font-weight: 700; font-size: 13px; }
+.ai-cat .btn { white-space: normal; text-align: start; justify-content: flex-start; line-height: 1.6; font-size: 12.5px; }
+.ai-empty { max-width: 760px; }
+.ai-print { background: #fff; color: #111; padding: 18px; width: 720px; line-height: 1.9; }
+@media (max-width: 700px) { .ai-cats { grid-template-columns: minmax(0, 1fr); } }

@@ -4,12 +4,11 @@ import { Link } from "react-router-dom";
 import { CUR } from "../shared/country";
 import { api, session, useFetch, money, Loading, Field, Input, useToast, useCompanyContext, fmtDT, confirmDlg } from "../lib";
 
-const SUGGEST = [
-  "فاتورة مياه المكتب بقيمة 200 ريال شامل الضريبة من المورد شركة المياه الوطنية، دُفعت نقداً",
-  "إيجار المكتب 5,000 ريال غير شامل الضريبة، آجل على المورد مؤسسة العقار المتحد",
-  "إيداع نقدي في البنك 10,000",
-  "كيف أعالج المصروفات المدفوعة مقدماً؟",
-  "ماذا تستطيع أن تفعل؟",
+const SUGGEST = (): [string, string, string[]][] => [
+  ["📝", "سجّل عملية", [`فاتورة مياه المكتب بقيمة 200 ${CUR()} شامل الضريبة من المورد شركة المياه الوطنية، دُفعت نقداً`, "إيداع نقدي في البنك 10,000"]],
+  ["📊", "اسأل عن أرقامك", ["ملخص هذا الشهر", "قارن هذا الشهر بالشهر الماضي", "من لم يسدد؟"]],
+  ["🧠", "تحليل وتقارير", ["حلّل الوضع المالي", "اكتب تقريراً للإدارة", "افحص الدفاتر"]],
+  ["🎓", "تعلّم واسأل", ["كيف أعالج المصروفات المدفوعة مقدماً؟", "ماذا تستطيع أن تفعل؟"]],
 ];
 /** ZATCA tax-invoice QR (base64 TLV: 1 seller, 2 VAT number, 3 timestamp, 4 total, 5 VAT) read from the image in the browser. */
 async function readZatcaQr(file: File): Promise<any | null> {
@@ -38,8 +37,39 @@ async function openFile(id: string) {
   if (!r.ok) throw new Error("تعذّر فتح المرفق");
   const url = URL.createObjectURL(await r.blob()); window.open(url, "_blank"); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-/** **bold**, [text](/in-app-link) and line breaks — the assistant answers in short plain Arabic. Only in-app links are made clickable. */
-const Rich = ({ text }: { text: string }) => <>{String(text || "").split("\n").map((ln, i) => <div key={i} style={{ minHeight: ln ? undefined : 8 }}>{ln.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(\/[^)\s]*\))/).map((p, j) => { const m = p.match(/^\[([^\]]+)\]\((\/[^)\s]*)\)$/); return m ? <Link key={j} to={m[2]}>{m[1]}</Link> : p.startsWith("**") && p.endsWith("**") ? <b key={j}>{p.slice(2, -2)}</b> : p; })}</div>)}</>;
+/** The assistant's answer: **bold**, [text](/in-app-link), «- » and «1. » lists, and | tables |. Only in-app links are made clickable. */
+const inline = (ln: string) => ln.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(\/[^)\s]*\))/).map((p, j) => { const m = p.match(/^\[([^\]]+)\]\((\/[^)\s]*)\)$/); return m ? <Link key={j} to={m[2]}>{m[1]}</Link> : p.startsWith("**") && p.endsWith("**") ? <b key={j}>{p.slice(2, -2)}</b> : p; });
+const cells = (ln: string) => ln.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+const Rich = ({ text }: { text: string }) => {
+  const lines = String(text || "").split("\n"); const out: React.ReactNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(ln)) { // a table: header, separator, rows
+      const rows: string[][] = []; let j = i; while (j < lines.length && /^\s*\|.*\|\s*$/.test(lines[j])) { if (!/^\s*\|[\s:|-]+\|\s*$/.test(lines[j])) rows.push(cells(lines[j])); j++; }
+      const [head, ...body] = rows; const numeric = (v: string) => /^[−\-+▲▼]?\s?[\d,.]+(%| .{0,8})?$/.test(v) || v === "—";
+      out.push(<div key={i} className="table-wrap ai-tbl"><table className="tbl compact"><thead><tr>{head.map((c, k) => <th key={k} className={k ? "n" : ""}>{inline(c)}</th>)}</tr></thead><tbody>{body.map((r, k) => <tr key={k}>{r.map((c, q) => <td key={q} className={q && numeric(c) ? "n num" : q ? "n" : ""}>{/^[−\-+]?[\d,.]+%?$/.test(c) ? <span dir="ltr">{c}</span> : inline(c)}</td>)}</tr>)}</tbody></table></div>);
+      i = j - 1; continue;
+    }
+    const li = ln.match(/^(\s*)(-|•|\d+\.)\s+(.*)$/);
+    if (li) { out.push(<div key={i} className="ai-li"><span className="ai-bul">{/\d/.test(li[2]) ? li[2] : "•"}</span><span>{inline(li[3])}</span></div>); continue; }
+    out.push(<div key={i} style={{ minHeight: ln ? undefined : 8 }}>{inline(ln)}</div>);
+  }
+  return <>{out}</>;
+};
+/** Copy / PDF under an answer (shown for the longer, report-like ones). */
+function AnswerTools({ text, box }: { text: string; box: React.RefObject<HTMLDivElement | null> }) {
+  const toast = useToast(); const [busy, setBusy] = useState(false);
+  const plain = text.replace(/\*\*/g, "").replace(/\[([^\]]+)\]\(\/[^)\s]*\)/g, "$1").replace(/^\s*\|[\s:|-]+\|\s*$/gm, "").replace(/\n{3,}/g, "\n\n");
+  return <div className="ai-tools no-print">
+    <button className="btn sm ghost" onClick={async () => { try { await navigator.clipboard.writeText(plain); toast("نُسخ الرد", "ok"); } catch { toast("تعذّر النسخ", "err"); } }}>📋 نسخ</button>
+    <button className="btn sm ghost" disabled={busy} onClick={async () => { if (!box.current) return; setBusy(true); try { const { elementToPdf } = await import("../shared/pdf"); box.current.classList.add("ai-print"); await elementToPdf(box.current, `تقرير المساعد ${new Date().toISOString().slice(0, 10)}.pdf`); } catch (e: any) { toast(e.message || "تعذّر إنشاء الملف", "err"); } finally { box.current?.classList.remove("ai-print"); setBusy(false); } }}>⬇ طباعة / PDF</button>
+  </div>;
+}
+function Answer({ m, children }: { m: any; children?: React.ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const long = m.role === "assistant" && (String(m.text || "").length > 350 || /^\s*\|/m.test(m.text || ""));
+  return <div className="bubble"><div ref={box}>{children}<Rich text={m.text} /></div>{long && <AnswerTools text={m.text} box={box} />}</div>;
+}
 
 function PlanCard({ plan, live, busy, onConfirm, onCancel }: { plan: any; live: boolean; busy: boolean; onConfirm: () => void; onCancel: () => void }) {
   const ST: Record<string, [string, string]> = { pending: ["بانتظار تأكيدك", "amber"], done: ["تم الترحيل", "green"], cancelled: ["ملغاة", "gray"], superseded: ["استُبدلت", "gray"] };
@@ -121,19 +151,17 @@ export function AiAssistantPage() {
         <div className="ai-msgs">
           {!view.length && <div className="ai-empty">
             <div style={{ fontSize: 40 }}>✨</div><h2>المساعد المحاسبي الذكي</h2>
-            <p className="muted">اكتب العملية بكلامك أو صوّر الفاتورة الضريبية (أقرأ رمز QR). أجهّز القيد وأعرضه عليك، ولا يُرحَّل شيء قبل تأكيدك.</p>
-            <div className="ai-sug">{SUGGEST.map((x) => <button key={x} className="btn" onClick={() => send(x)}>{x}</button>)}</div>
+            <p className="muted">سجّل العمليات بكلامك، اسأل عن أرقام منشأتك، واطلب تحليلاً مالياً أو تقريراً للإدارة. لا يُرحَّل شيء قبل تأكيدك.</p>
+            <div className="ai-cats">{SUGGEST().map(([ic, t, xs]) => <div key={t} className="ai-cat"><div className="ai-cat-h">{ic} {t}</div>{xs.map((x) => <button key={x} className="btn" onClick={() => send(x)}>{x}</button>)}</div>)}</div>
           </div>}
           {view.map((m, i) => m.role === "system" ? (
             <div key={i} className="ai-sys">{m.text}{m.results?.map((r: any, j: number) => <div key={j} className="small">{r.title}{r.number && <> — <b className="num">{r.number}</b></>} {r.link && <Link to={r.link}>فتح ←</Link>}</div>)}</div>
           ) : (
             <div key={i} className={"ai-msg " + m.role}>
               <div className="who">{m.role === "user" ? "أنت" : m.engine === "advanced" ? "✨ النموذج المتقدم" : "⚡ المساعد المدمج"}</div>
-              <div className="bubble">
-                {m.files?.length > 0 && <div className="row" style={{ gap: 6, marginBottom: 6 }}>{m.files.map((f: any, j: number) => <span key={j} className="badge blue" style={{ cursor: f.id ? "pointer" : undefined }} onClick={() => f.id && openFile(f.id).catch((e) => toast(e.message, "err"))}>📎 {f.name}{f.qr ? " · QR ✓" : ""}</span>)}</div>}
-                <Rich text={m.text} />
-                {m.plan && <PlanCard plan={m.plan} live={m.plan === lastPlan && !!conv?.pending} busy={busy} onConfirm={() => act("confirm")} onCancel={() => act("cancel")} />}
-              </div>
+              <Answer m={m}>{m.files?.length > 0 && <div className="row" style={{ gap: 6, marginBottom: 6 }}>{m.files.map((f: any, j: number) => <span key={j} className="badge blue" style={{ cursor: f.id ? "pointer" : undefined }} onClick={() => f.id && openFile(f.id).catch((e) => toast(e.message, "err"))}>📎 {f.name}{f.qr ? " · QR ✓" : ""}</span>)}</div>}</Answer>
+              {m.plan && <div className="bubble" style={{ marginTop: 6 }}><PlanCard plan={m.plan} live={m.plan === lastPlan && !!conv?.pending} busy={busy} onConfirm={() => act("confirm")} onCancel={() => act("cancel")} /></div>}
+              {m.suggest?.length > 0 && i === view.length - 1 && !busy && <div className="ai-next">{m.suggest.map((x: string) => <button key={x} className="chip" onClick={() => send(x)}>{x}</button>)}</div>}
             </div>))}
           {busy && <div className="ai-msg assistant"><div className="who">{adv ? "✨ النموذج المتقدم" : "⚡ المساعد المدمج"}</div><div className="bubble"><span className="spinner" /> يفكّر…</div></div>}
           <div ref={end} />
@@ -143,7 +171,7 @@ export function AiAssistantPage() {
           <div className="row" style={{ flexWrap: "nowrap", alignItems: "flex-end" }}>
             <button className="btn" title="إرفاق فاتورة أو إيصال (صورة / PDF)" onClick={() => inp.current?.click()}>📎</button>
             <input ref={inp} type="file" hidden multiple accept="image/*,application/pdf,.csv,.txt" onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }} />
-            <textarea className="input grow" rows={2} value={text} placeholder="مثال: فاتورة كهرباء 460 ريال شامل الضريبة من الشركة السعودية للكهرباء، دُفعت من البنك…" onChange={(e) => setText(e.target.value)}
+            <textarea className="input grow" rows={2} value={text} placeholder="اكتب عملية لتسجيلها، أو سؤالاً: «حلّل الوضع المالي»، «قارن هذا الشهر بالماضي»، «كم الضريبة المستحقة؟»…" onChange={(e) => setText(e.target.value)}
               onPaste={(e) => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
             <button className="btn primary" disabled={busy || (!text.trim() && !files.length)} onClick={() => send()}>إرسال</button>

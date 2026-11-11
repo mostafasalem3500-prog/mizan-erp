@@ -17,6 +17,7 @@ import { localAgent } from "./aiLocal";
 import { executive } from "./insights";
 import { integrity } from "./reports";
 import { VAT_RATE, BASE_CURRENCY, CFG } from "../lib/country";
+import { financialAnalysis, comparePeriods, productInfo, vatPosition, hrSummary } from "./aiAnalyst";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = () => process.env.AI_MODEL || "claude-sonnet-5-5";
@@ -136,6 +137,18 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
       receivables: { total: d.receivables.total, overdue: d.receivables.overdue, top: d.receivables.top.slice(0, 6) }, payables: { total: d.payables.total, overdue: d.payables.overdue, top: d.payables.top.slice(0, 6) }, cash: d.cash, forecast: d.forecast,
       stock: { value: d.inventory.value, counts: d.inventory.counts, outOfStock: d.inventory.outOfStock.slice(0, 6).map((x: any) => x.name), belowReorder: d.inventory.belowReorder.slice(0, 6).map((x: any) => x.name) }, insights: d.insights.slice(0, 5) };
   }
+  if (["financial_analysis", "compare_periods", "vat_position", "management_report"].includes(name)) {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    if (name === "financial_analysis") return financialAnalysis(t, C, input);
+    if (name === "compare_periods") return comparePeriods(t, C, input);
+    if (name === "vat_position") return vatPosition(t, C, input);
+    const exec: any = await runTool(t, company, "business_query", { metric: "summary", from: input.from, to: input.to, label: input.label }, auth);
+    const ck = await booksCheck(t, C);
+    return { exec, analysis: await financialAnalysis(t, C, { from: exec.period.from, to: exec.period.to }), vat: await vatPosition(t, C, { from: exec.period.from, to: exec.period.to }),
+      check: { total: ck.checksTotal, passed: ck.checksPassed, failed: ck.failed.length, issues: ck.issues.length, danger: ck.issues.filter((i) => i.level === "danger").length } };
+  }
+  if (name === "product_info") { if (!perms(auth, "products.read")) return { error: "صلاحيتك لا تسمح بعرض الأصناف" }; return productInfo(t, C, input); }
+  if (name === "hr_summary") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض الرواتب" }; return hrSummary(t, C); }
   if (name === "partner_balance") {
     if (!perms(auth, "partners.read")) return { error: "صلاحيتك لا تسمح بعرض العملاء والموردين" };
     const found = await searchPartners(t, C, String(input.query || ""), input.role);
@@ -359,7 +372,7 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   let engine: "local" | "advanced" = wantAdvanced || (advancedLeft && lastA?.role === "assistant" && lastA.engine === "advanced" && !/^\s*$/.test(text)) ? "advanced" : "local";
   // an attachment the built-in agent cannot read (no QR found by the browser) goes to the advanced model when there is one
   if (advancedLeft && ready.some((f) => !f.qr)) engine = "advanced";
-  let reply = "", plan: any = null, dIn = 0, dOut = 0;
+  let reply = "", plan: any = null, dIn = 0, dOut = 0, suggest: string[] | undefined;
   try {
     for (let step = 0; step < 8; step++) {
       const hist = await hydrate(company.id, c.messages);
@@ -373,6 +386,7 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
       }
       if (!r) r = await callLlm(a.key!, { model: MODEL(), max_tokens: 2500, system, tools: TOOLS, messages: hist });
       dIn += r.usage?.input_tokens || 0; dOut += r.usage?.output_tokens || 0;
+      suggest = Array.isArray(r.suggest) ? r.suggest : undefined;
       c.messages.push({ role: "assistant", content: r.content });
       const txt = r.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
       if (txt) reply = reply ? `${reply}\n\n${txt}` : txt;
@@ -403,7 +417,7 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   // the history must not end on a tool_result with no assistant answer (step limit)
   if (c.messages[c.messages.length - 1].role === "user") c.messages.push({ role: "assistant", content: [{ type: "text", text: reply || "…" }] });
   if (plan) c.pending = { summary: plan.summary, actions: plan.actions, at: new Date().toISOString() };
-  c.view.push({ role: "assistant", text: reply || (plan ? "هذه الخطة المقترحة — راجعها ثم أكّد." : "…"), plan: plan ? { status: "pending", summary: plan.summary, preview: plan.preview } : undefined, engine, at: new Date().toISOString() });
+  c.view.push({ role: "assistant", text: reply || (plan ? "هذه الخطة المقترحة — راجعها ثم أكّد." : "…"), plan: plan ? { status: "pending", summary: plan.summary, preview: plan.preview } : undefined, suggest: plan ? undefined : suggest, engine, at: new Date().toISOString() });
   c.userTurns = Number(c.userTurns || 0) + 1; c.tokensIn += dIn; c.tokensOut += dOut;
   await save(c);
   if (engine === "advanced") await db.exec(`INSERT INTO ai_usage (company_id, month, turns, tokens_in, tokens_out) VALUES ($1,$2,1,$3,$4) ON CONFLICT (company_id, month) DO UPDATE SET turns=ai_usage.turns+1, tokens_in=ai_usage.tokens_in+$3, tokens_out=ai_usage.tokens_out+$4`, [company.id, month(), dIn, dOut]);
