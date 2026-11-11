@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api, q, useFetch, Money, money, Loading, Empty, Field, Input, NumInput, Select, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, JTYPE_AR, confirmDlg, SearchBox, FilterInfo, matches } from "../lib";
 import { AccountLedger } from "./Statements";
 import { BankStatementPanel } from "./Pricing";
+import { BankReportBtn } from "./Round31";
 
 export function BankPage() {
   const { can } = useCompanyContext();
@@ -47,7 +48,7 @@ export function BankPage() {
         <div className="card-h"><h3>حركات الحساب</h3><div className="row">
           {can("accounting.write") && <><button className="btn sm" disabled={!selectedIds.length || busy} onClick={() => mark(true)}>✓ تأشير المحدد كمطابق</button><button className="btn sm ghost" disabled={!selectedIds.length || busy} onClick={() => mark(false)}>إلغاء التأشير</button>
             <button className="btn primary sm" disabled={busy || stmt === "" || !data} onClick={() => run(async () => { if (!confirmDlg(`اعتماد التسوية بتاريخ ${to} برصيد كشف ${money(stmtN)}؟`)) return; await api(`/bank/${accId}/reconcile`, { body: { date: to, statementBalance: stmtN } }); reload(); }, "تم اعتماد التسوية البنكية")}>اعتماد التسوية</button></>}
-          {accId && <button className="btn sm" onClick={() => setLedger(true)}>📄 كشف الحساب</button>}<PrintBtn />{data && <ExportBtn name="التسوية البنكية" rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, النوع: JTYPE_AR[r.type], البيان: r.description || r.memo, المرجع: r.reference, مدين: r.debit, دائن: r.credit, مطابق: r.clearedDate ? "نعم" : "" }))} />}
+          <BankReportBtn accountId={accId} to={to} statementBalance={stmt} />{accId && <button className="btn sm" onClick={() => setLedger(true)}>📄 كشف الحساب</button>}<PrintBtn />{data && <ExportBtn name="التسوية البنكية" rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, القيد: r.number, النوع: JTYPE_AR[r.type], البيان: r.description || r.memo, المرجع: r.reference, مدين: r.debit, دائن: r.credit, مطابق: r.clearedDate ? "نعم" : "" }))} />}
         </div></div>
         {data && data.rows.length > 0 && <div className="card-b no-print" style={{ paddingBottom: 0 }}><div className="toolbar"><SearchBox value={text} onChange={setText} placeholder="بحث بالقيد / البيان / المرجع / المبلغ" /><Select value={cl} onChange={(e) => setCl(e.target.value)}><option value="">المطابق والمعلّق</option><option value="open">المعلّق فقط</option><option value="done">المطابق فقط</option></Select><Select value={dir} onChange={(e) => setDir(e.target.value)}><option value="">إيداع وسحب</option><option value="in">الإيداعات</option><option value="out">السحوبات</option></Select><FilterInfo shown={rows.length} total={data.rows.length} active={!!(text || cl || dir)} onClear={() => { setText(""); setCl(""); setDir(""); }} /></div></div>}
         {loading || !data ? <Loading /> : !rows.length ? <Empty text={data.rows.length ? "لا نتائج مطابقة" : undefined} /> : (

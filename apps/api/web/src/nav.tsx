@@ -47,6 +47,8 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/recurring", label: "المصروفات والقيود الدورية", perm: "accounting.read", company: true },
     { to: "/reports/expenses", label: "تحليل المصروفات", perm: "reports.read", company: true },
     { to: "/reports/cost-centers", label: "مراكز التكلفة", perm: "reports.read", company: true },
+    { to: "/cost-allocations", label: "توزيع التكاليف المشتركة", perm: "accounting.read", company: true },
+    { to: "/cvp", label: "نقطة التعادل وهامش المساهمة", perm: "reports.read", company: true },
     { to: "/reports-center?m=expenses", label: "تقارير المصروفات التفصيلية", perm: "reports.read" },
   ] },
   { key: "inventory", ic: "🏬", label: "المخزون", items: [
@@ -71,9 +73,11 @@ export const NAV_TREE: NavGroup[] = [
   { key: "gl", ic: "📒", label: "المحاسبة العامة", items: [
     { to: "/journals?new=manual", label: "قيد يومية جديد", perm: "accounting.write", action: true },
     { to: "/journals", label: "القيود اليومية", perm: "accounting.read" },
+    { to: "/journal-approvals", label: "قيود بانتظار الاعتماد", perm: "accounting.read", company: true },
     { to: "/accounts", label: "دليل الحسابات", perm: "accounting.read", company: true },
     { to: "/assets", label: "الأصول الثابتة والإهلاك", perm: "assets.read", company: true },
     { to: "/budgets", label: "الموازنات التقديرية", perm: "reports.read", company: true },
+    { to: "/closing", label: "إقفال الشهر (قائمة التحقق)", perm: "accounting.read", company: true },
     { to: "/periods", label: "السنوات والفترات المالية", perm: "accounting.read", company: true },
   ] },
   { key: "payroll", ic: "👔", label: "الرواتب والموظفون", items: [
@@ -101,6 +105,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/final-accounts?tab=eq", label: "التغيرات في حقوق الملكية", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=cf", label: "التدفقات النقدية", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=chk", label: "ترابط القوائم", perm: "reports.read", company: true },
+    { to: "/closing", label: "إقفال الشهر (قائمة التحقق)", perm: "accounting.read", company: true },
     { to: "/periods?tab=close", label: "فحص وإقفال السنة", perm: "accounting.read", company: true },
   ] },
   { key: "reports", ic: "📊", label: "التقارير", items: [

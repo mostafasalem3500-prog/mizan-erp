@@ -637,3 +637,11 @@ html[data-theme="dark"] .offline-note { color: #fcd34d; }
 .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 12.5px; cursor: pointer; }
 .chip:hover { border-color: var(--primary); }
 .chip.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-2); font-weight: 600; }
+/* ── month-end close ── */
+.close-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.close-row:last-child { border-bottom: 0; }
+.close-row > input[type=checkbox] { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.close-ic { width: 22px; flex: none; text-align: center; font-weight: 700; }
+.close-row.lv-block { background: var(--danger-soft); }
+.lv-warn { color: #b45309; } html[data-theme="dark"] .lv-warn { color: #fcd34d; }
+html[data-theme="dark"] .close-row.lv-block { background: rgba(220,38,38,.12); }

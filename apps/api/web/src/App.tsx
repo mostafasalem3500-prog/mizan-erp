@@ -75,6 +75,10 @@ const AiAssistantPage = lz(() => import("./pages/Ai"), "AiAssistantPage");
 const InsightsPage = lz(() => import("./pages/Insights"), "InsightsPage");
 const DigestPage = lz(() => import("./pages/DigestArchive"), "DigestPage");
 const ArchivePage = lz(() => import("./pages/DigestArchive"), "ArchivePage");
+const ClosingPage = lz(() => import("./pages/Round31"), "ClosingPage");
+const JournalApprovalsPage = lz(() => import("./pages/Round31"), "JournalApprovalsPage");
+const CostAllocationsPage = lz(() => import("./pages/Round31"), "CostAllocationsPage");
+const CvpPage = lz(() => import("./pages/Round31"), "CvpPage");
 const PromotionsPage = lz(() => import("./pages/Round28"), "PromotionsPage");
 const LoyaltyPage = lz(() => import("./pages/Round28"), "LoyaltyPage");
 
@@ -203,6 +207,10 @@ export function App() {
                 <Route path="/digest" element={<DigestPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/learn" element={<LearnPage />} />
+                <Route path="/closing" element={<ClosingPage />} />
+                <Route path="/journal-approvals" element={<JournalApprovalsPage />} />
+                <Route path="/cost-allocations" element={<CostAllocationsPage />} />
+                <Route path="/cvp" element={<CvpPage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/loyalty" element={<LoyaltyPage />} />
                 <Route path="/collections" element={<CollectionsPage />} />

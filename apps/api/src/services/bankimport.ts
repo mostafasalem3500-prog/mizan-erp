@@ -51,18 +51,18 @@ export async function suggestMatches(t: Db, companyId: string, accountId: string
   const candidates = await t.rows(
     `SELECT l.id, l.debit, l.credit, l.description, e.date, e.number, e.memo, e.reference, e.type
      FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id LEFT JOIN bank_cleared_lines c ON c.line_id=l.id
-     WHERE l.account_id=$1 AND e.status='POSTED' AND c.line_id IS NULL AND NOT EXISTS (SELECT 1 FROM bank_statement_lines s WHERE s.matched_line_id=l.id)
+     WHERE l.account_id=$1 AND e.status='POSTED' AND c.line_id IS NULL AND NOT EXISTS (SELECT 1 FROM bank_statement_lines s WHERE s.account_id=l.account_id AND (s.matched_line_id=l.id OR l.id = ANY(s.matched_line_ids)))
      ORDER BY e.date`, [accountId]);
   const used = new Set<string>();
   const out = open.map((s) => {
     const amt = Number(s.amount);
     const best = candidates
       .filter((c) => !used.has(c.id) && Math.abs((amt > 0 ? Number(c.debit) : Number(c.credit)) - Math.abs(amt)) < 0.005 && (amt > 0 ? Number(c.debit) : Number(c.credit)) > 0)
-      .map((c) => ({ c, dist: Math.abs((Date.parse(String(c.date).slice(0, 10)) - Date.parse(String(s.date).slice(0, 10))) / 86400000) }))
-      .filter((x) => x.dist <= windowDays)
-      .sort((a, b) => a.dist - b.dist)[0];
+      .map((c) => ({ c, dist: Math.abs((Date.parse(day(c.date)) - Date.parse(day(s.date))) / 86400000), ref: refHit(s, c) }))
+      .filter((x) => x.dist <= windowDays || (x.ref && x.dist <= windowDays * 6))
+      .sort((a, b) => Number(b.ref) - Number(a.ref) || a.dist - b.dist)[0];
     if (best) used.add(best.c.id);
-    return { ...s, suggestion: best ? { ...best.c, daysApart: best.dist } : null };
+    return { ...s, suggestion: best ? { ...best.c, daysApart: best.dist, byReference: best.ref } : null };
   });
   const unclearedCount = candidates.length - used.size;
   return { rows: out, unclearedJournalLines: unclearedCount, candidates: candidates.slice(0, 500) };
@@ -81,8 +81,13 @@ export async function confirmMatch(t: Db, companyId: string, statementLineId: st
 
 export async function unmatch(t: Db, companyId: string, statementLineId: string) {
   const s = await t.one(`SELECT * FROM bank_statement_lines WHERE id=$1 AND company_id=$2 FOR UPDATE`, [statementLineId, companyId], "سطر الكشف غير موجود");
-  if (s.matchedLineId) await t.exec(`DELETE FROM bank_cleared_lines WHERE line_id=$1 AND reconciliation_id IS NULL`, [s.matchedLineId]);
-  await t.exec(`UPDATE bank_statement_lines SET status='OPEN', matched_line_id=NULL WHERE id=$1`, [s.id]);
+  const ids: string[] = [...new Set([s.matchedLineId, ...(s.matchedLineIds || [])].filter(Boolean))];
+  if (ids.length) {
+    const locked = await t.one(`SELECT COUNT(*)::int c FROM bank_cleared_lines WHERE line_id = ANY($1::uuid[]) AND reconciliation_id IS NOT NULL`, [`{${ids.join(",")}}`]);
+    if (locked.c) throw bad("الحركة ضمن تسوية بنكية معتمدة — لا تُلغى مطابقتها");
+    await t.exec(`DELETE FROM bank_cleared_lines WHERE line_id = ANY($1::uuid[]) AND reconciliation_id IS NULL`, [`{${ids.join(",")}}`]);
+  }
+  await t.exec(`UPDATE bank_statement_lines SET status='OPEN', matched_line_id=NULL, matched_line_ids=NULL WHERE id=$1`, [s.id]);
   return { ok: true };
 }
 
@@ -96,4 +101,10 @@ export async function statementSummary(t: Db, companyId: string, accountId: stri
   return { ...r, openAmount: r2(r.openAmount) };
 }
 
+const day = (v: any) => String(v instanceof Date ? v.toISOString() : v).slice(0, 10);
+/** The entry's number or reference (4+ characters) is quoted in the bank's description or reference. */
+function refHit(s: any, c: any) {
+  const text = `${s.description || ""} ${s.reference || ""}`.toLowerCase().replace(/\s+/g, "");
+  return [c.reference, c.number].some((r) => { const k = String(r || "").toLowerCase().replace(/\s+/g, ""); return k.length >= 4 && text.includes(k); });
+}
 export const windowFrom = (d: string, n: number) => addDays(d, -n);
