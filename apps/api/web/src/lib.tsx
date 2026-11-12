@@ -96,7 +96,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="toasts">{list.map((t) => <div key={t.id} className={"toast " + t.kind}>{t.msg}</div>)}</div>
+      <div className="toasts" aria-live="polite">{list.map((t) => <div key={t.id} role={t.kind === "err" ? "alert" : "status"} className={"toast " + t.kind}>{t.msg}</div>)}</div>
     </ToastCtx.Provider>
   );
 }
@@ -143,11 +143,27 @@ export function Modal({ title, onClose, children, footer, wide, narrow }: { titl
   const box = useRef<HTMLDivElement>(null);
   const tryClose = () => { if (!dirty.current || window.confirm("توجد بيانات لم تُحفظ — إغلاق النافذة وفقدانها؟")) onClose(); };
   const closeRef = useRef(tryClose); closeRef.current = tryClose;
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape" && box.current && box.current === [...document.querySelectorAll(".modal")].pop()) closeRef.current(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
+  const opener = useRef(document.activeElement as HTMLElement | null); // what had the focus before the dialog was drawn
+  const titleId = useRef(`m${Math.random().toString(36).slice(2, 8)}`).current;
+  const FOCUS = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  useEffect(() => {
+    const top = () => !!box.current && box.current === [...document.querySelectorAll(".modal")].pop();
+    const k = (e: KeyboardEvent) => {
+      if (!top()) return;
+      if (e.key === "Escape") closeRef.current();
+      // Tab stays inside the open dialog
+      if (e.key === "Tab") { const f = [...box.current!.querySelectorAll<HTMLElement>(FOCUS)].filter((x) => x.offsetParent !== null); if (!f.length) return; const first = f[0], last = f[f.length - 1], a = document.activeElement; if (e.shiftKey && (a === first || !box.current!.contains(a))) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && (a === last || !box.current!.contains(a))) { e.preventDefault(); first.focus(); } }
+    };
+    window.addEventListener("keydown", k);
+    // focus enters the dialog when it opens and returns to where it was when it closes
+    const before = opener.current;
+    const t = setTimeout(() => { if (box.current && !box.current.contains(document.activeElement)) ((window.matchMedia("(pointer: fine)").matches && box.current.querySelector<HTMLElement>(".m-b input:not([type=hidden]):not([disabled]):not([type=date]):not([type=file]), .m-b textarea:not([disabled])")) || box.current).focus({ preventScroll: true }); }, 30);
+    return () => { window.removeEventListener("keydown", k); clearTimeout(t); if (before && document.contains(before)) before.focus({ preventScroll: true }); };
+  }, []);
   return (
     <div className="modal-bg" onMouseDown={(e) => { if (e.target === e.currentTarget) { box.current?.classList.remove("nudge"); void box.current?.offsetWidth; box.current?.classList.add("nudge"); } }}>
-      <div ref={box} className={"modal" + (wide ? " wide" : "") + (narrow ? " narrow" : "")} onInput={() => { dirty.current = true; }}>
-        <div className="m-h"><h3>{title}</h3><button className="btn ghost sm" title="إغلاق" onClick={tryClose}>✕</button></div>
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={"modal" + (wide ? " wide" : "") + (narrow ? " narrow" : "")} onInput={() => { dirty.current = true; }}>
+        <div className="m-h"><h3 id={titleId}>{title}</h3><button className="btn ghost sm" title="إغلاق" aria-label="إغلاق" onClick={tryClose}>✕</button></div>
         <div className="m-b">{children}</div>
         {footer && <div className="m-f">{footer}</div>}
       </div>
@@ -156,7 +172,10 @@ export function Modal({ title, onClose, children, footer, wide, narrow }: { titl
 }
 
 export function Field({ label, children, span2, span3, hint }: { label?: string; children: React.ReactNode; span2?: boolean; span3?: boolean; hint?: string }) {
-  return <div className={"field" + (span2 ? " span2" : "") + (span3 ? " span3" : "")}>{label && <label>{label}</label>}{children}{hint && <span className="hint">{hint}</span>}</div>;
+  // the label names every control inside the field for screen readers (controls come from many components)
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!label || !ref.current) return; ref.current.querySelectorAll("input, select, textarea").forEach((el) => { if (!el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby")) el.setAttribute("aria-label", label); }); });
+  return <div ref={ref} className={"field" + (span2 ? " span2" : "") + (span3 ? " span3" : "")}>{label && <label>{label}</label>}{children}{hint && <span className="hint">{hint}</span>}</div>;
 }
 
 export const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) => <input {...p} className={"input " + (p.className || "")} />;
@@ -168,10 +187,10 @@ export function Badge({ s, map }: { s: string; map?: Record<string, string> }) {
 }
 
 export function Empty({ text = "لا توجد بيانات" }: { text?: string }) { return <div className="empty">{text}</div>; }
-export function Loading() { return <div className="empty"><span className="spinner" /></div>; }
+export function Loading() { return <div className="empty" role="status" aria-label="جارٍ التحميل"><span className="spinner" /></div>; }
 
 export function Tabs({ tabs, value, onChange }: { tabs: { key: string; label: string }[]; value: string; onChange: (k: string) => void }) {
-  return <div className="tabs">{tabs.map((t) => <button key={t.key} className={value === t.key ? "active" : ""} onClick={() => onChange(t.key)}>{t.label}</button>)}</div>;
+  return <div className="tabs" role="tablist">{tabs.map((t) => <button key={t.key} role="tab" aria-selected={value === t.key} className={value === t.key ? "active" : ""} onClick={() => onChange(t.key)}>{t.label}</button>)}</div>;
 }
 
 export function DateRange({ from, to, onChange }: { from: string; to: string; onChange: (f: string, t: string) => void }) {

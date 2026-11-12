@@ -32,9 +32,9 @@ export function IntegrationsTab() {
       <div className="card"><div className="card-h"><h3>دليل الربط السريع</h3></div><div className="card-b">
         <div className="small" style={{ lineHeight: 1.9 }}>
           <div>العنوان الأساسي: <code dir="ltr">{base}/api/v1</code> — أرسل المفتاح في الترويسة <code dir="ltr">X-API-Key: mzn_live_…</code> أو <code dir="ltr">Authorization: Bearer mzn_live_…</code> (حد 120 طلباً/دقيقة).</div>
-          <table className="tbl compact mt" dir="ltr" style={{ textAlign: "left" }}><tbody>
+          <div className="table-wrap mt"><table className="tbl compact" dir="ltr" style={{ textAlign: "left" }}><tbody>
             {[["GET", "/me", "بيانات المنشأة والمفتاح"], ["GET", "/products?q=&sku=&limit=&offset=", "الأصناف مع السعر والمخزون والعبوات"], ["GET", "/stock", "الأرصدة حسب المستودع"], ["GET", "/partners?q=&role=CUSTOMER", "العملاء/الموردون"], ["POST", "/partners", "إضافة عميل (يُطابَق بالجوال/البريد)"], ["POST", "/orders", "طلب ← فاتورة مرحّلة (مع سداد اختياري)، idempotent بـ externalRef"], ["GET", "/invoices?from=&to=&externalRef=", "قائمة المستندات"], ["GET", "/invoices/:id", "تفاصيل مستند"], ["POST", "/payments", "سند قبض/صرف"]].map(([m, path, d]) => <tr key={path}><td><b>{m}</b></td><td><code>{path}</code></td><td dir="rtl" style={{ textAlign: "right" }}>{d}</td></tr>)}
-          </tbody></table>
+          </tbody></table></div>
           <div className="mt"><b>مثال طلب من متجر:</b></div>
           <pre dir="ltr" style={{ background: "#0f1f1e", color: "#d1fae5", padding: 12, borderRadius: 8, overflow: "auto", fontSize: 12 }}>{`curl -X POST ${base}/api/v1/orders \\
   -H "X-API-Key: mzn_live_..." -H "Content-Type: application/json" \\

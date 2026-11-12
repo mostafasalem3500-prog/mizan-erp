@@ -103,7 +103,9 @@ function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedB
   const label = active?.i?.label || active?.g.label || "";
   // the menu entry itself when it is a plain screen; otherwise the open address (a profile, a report…)
   const to = active?.i && !active.i.action && active.s >= 1000 ? active.i.to : active?.g.to && active.s >= 1000 ? active.g.to : null;
-  return <><div className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : label}</div><FavStar to={to} label={label} /></>;
+  // the browser tab and history carry the screen's name
+  useEffect(() => { if (label) document.title = `${label} — ${CFG.appName || "ميزان ERP"}`; }, [label]);
+  return <><h1 className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : label}</h1><FavStar to={to} label={label} /></>;
 }
 
 export function App() {
@@ -132,6 +134,7 @@ export function App() {
         <React.Suspense fallback={Wait}><PosPage /></React.Suspense>
       ) : (
         <div className="app">
+          <a className="skip-link" href="#content">تخطَّ إلى المحتوى</a>
           <aside className={"sidebar" + (menu ? " open" : "")}>
             <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}{CFG.desktop && <span className="badge" title="قاعدة البيانات على هذا الجهاز" style={{ marginInlineStart: 6, fontSize: 11 }}>💻 محلي</span>}</div>
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
@@ -146,8 +149,8 @@ export function App() {
             </div>
           </aside>
           <div className="main">
-            <div className="topbar">
-              <button className="btn sm burger" onClick={() => setMenu((m) => !m)}>☰</button>
+            <div className="topbar" role="banner">
+              <button className="btn sm burger" aria-label="القائمة الرئيسية" onClick={() => setMenu((m) => !m)}>☰</button>
               <PageTitle can={can} lockedBranch={!!me.lockedBranch} />
               <div className="grow" />
               <GlobalSearch />
@@ -158,7 +161,7 @@ export function App() {
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
             </div>
             <NetBar /><OfflineNote />
-            <div className="content">
+            <div className="content" id="content" role="main" tabIndex={-1}>
               <React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />

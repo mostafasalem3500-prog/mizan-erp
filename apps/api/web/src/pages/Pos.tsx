@@ -153,7 +153,7 @@ export function PosPage() {
   if (!session) {
     return (
       <div className="auth"><div className="form"><div className="box card"><div className="card-b">
-        <div className="row mb"><button className="btn sm" onClick={() => nav("/")}>← الرئيسية</button><h2>فتح وردية نقطة البيع</h2></div>
+        <div className="row mb"><button className="btn sm" onClick={() => nav("/")}>← الرئيسية</button><h1 style={{ fontSize: 20, margin: 0 }}>فتح وردية نقطة البيع</h1></div>
         <p className="muted">الكاشير: <b>{me.user.fullName}</b> · المنشأة: {me.company.nameAr}</p>
         {(posWh.data?.length || 0) > 1 && <Field label="المستودع / الفرع"><Select value={posWhId} onChange={(e) => setPosWhId(e.target.value)}><option value="">تلقائي{posWh.data![0]?.mine ? " — مستودع فرعي" : ""}</option>{posWh.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
         <Field label={`النقدية الافتتاحية في الدرج (${CUR()})`}><NumInput autoFocus value={openCash} onChange={(e) => setOpenCash(e.target.value)} placeholder="0" /></Field>
@@ -163,7 +163,7 @@ export function PosPage() {
     );
   }
   return (
-    <div className="pos">
+    <div className="pos"><h1 className="sr-only">نقطة البيع</h1>
       <div className="catalog">
         <div className="cat-head">
           <button className="btn sm" onClick={() => nav("/")}>← النظام</button>
