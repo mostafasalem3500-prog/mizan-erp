@@ -32,14 +32,16 @@ export function aiAccess(company: any, auth: { superAdmin: boolean }) {
   // the establishment's own key comes first; then a server-wide one (Anthropic, or Google Gemini)
   const key = company?.ai?.apiKey || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY || (mock ? "mock" : null);
   const plans = (process.env.AI_PLANS || "ENTERPRISE").split(",").map((s) => s.trim());
-  const trial = company?.plan === "TRIAL";
-  const entitled = !!auth.superAdmin || plans.includes(company?.plan) || company?.ai?.addon === true || trial;
+  // open period: the assistant is available on every plan until the packages are arranged (AI_OPEN=0 restores the plan gate)
+  const open = process.env.AI_OPEN !== "0";
+  const trial = company?.plan === "TRIAL" && !open;
+  const entitled = open || !!auth.superAdmin || plans.includes(company?.plan) || company?.ai?.addon === true || trial;
   return {
     // the built-in agent always works; `key` only unlocks the advanced model for what the agent cannot do
     entitled, trial: trial && !auth.superAdmin && company?.ai?.addon !== true, configured: true, advanced: !!key, key,
     keySource: company?.ai?.apiKey ? "company" : process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY ? "server" : mock ? "mock" : null,
     provider: !key || key === "mock" ? null : isGeminiKey(key) ? "gemini" : "anthropic",
-    plans, trialTurns: Number(process.env.AI_TRIAL_TURNS || 15), monthlyTurns: Number(process.env.AI_MONTHLY_TURNS || 600),
+    open, plans, trialTurns: Number(process.env.AI_TRIAL_TURNS || 15), monthlyTurns: Number(process.env.AI_MONTHLY_TURNS || 600),
   };
 }
 const month = () => today().slice(0, 7);
@@ -52,7 +54,7 @@ export async function aiStatus(company: any, auth: Auth) {
   const a = aiAccess(company, auth);
   const u = await usage(company.id);
   return {
-    entitled: a.entitled, configured: true, advanced: a.advanced, keySource: a.keySource, trial: a.trial, plan: company.plan, plans: a.plans,
+    entitled: a.entitled, configured: true, advanced: a.advanced, keySource: a.keySource, trial: a.trial, open: a.open, plan: company.plan, plans: a.plans,
     used: a.trial ? u.total : u.month, limit: a.trial ? a.trialTurns : a.monthlyTurns, model: a.keySource === "mock" ? "mock" : a.provider === "gemini" ? geminiModelOf(a.key!) : MODEL(), provider: a.provider,
     hasCompanyKey: !!company?.ai?.apiKey,
   };

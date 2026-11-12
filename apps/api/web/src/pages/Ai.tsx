@@ -139,6 +139,7 @@ export function AiAssistantPage() {
           <button className="x" title="حذف" onClick={async (e) => { e.stopPropagation(); if (!confirmDlg("حذف المحادثة؟ (المستندات المرحّلة لا تتأثر)")) return; await api(`/ai/conversations/${c.id}`, { method: "DELETE" }); if (conv?.id === c.id) setConv(null); list.reload(); }}>✕</button></div>)}</div>
         <div className="ai-eng small">
           <div>⚡ <b>المساعد المدمج</b>: يعمل دائماً، بلا إنترنت وبلا حدّ.</div>
+          {s.open && <div className="badge green" style={{ whiteSpace: "normal", justifySelf: "start" }}>متاح الآن لكل الباقات — فترة تجربة مفتوحة</div>}
           <div>✨ <b>النموذج المتقدم</b>: {s.advanced ? <>مفعّل{s.provider === "gemini" ? " (Google Gemini)" : s.provider === "anthropic" ? " (Anthropic)" : ""} — {s.used} / {s.limit} رسالة {s.trial ? "(تجربة)" : "هذا الشهر"}</> : "غير مفعّل"}</div>
           {can("settings.write") && s.keySource !== "server" && (s.keySource === "company"
             ? <button className="btn sm ghost" onClick={async () => { if (!confirmDlg("إزالة مفتاح API من المنشأة؟")) return; await api("/ai/key", { method: "PUT", body: { apiKey: null } }); st.reload(); }}>إزالة مفتاح API</button>
