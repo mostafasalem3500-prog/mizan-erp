@@ -697,3 +697,4 @@ html[data-theme="dark"] .print-doc .badge.amber { background: var(--accent-soft)
 html[data-theme="dark"] .print-doc .alert.warn { color: #92400e; border-color: #fcd34d; } html[data-theme="dark"] .print-doc .alert.err { color: #7f1d1d; border-color: #fca5a5; }
 html[data-theme="dark"] .print-doc .alert.ok { color: #14532d; border-color: #86efac; } html[data-theme="dark"] .print-doc .alert.info { color: #1e3a8a; border-color: #93c5fd; }
 html[data-theme="dark"] .print-doc .alert .btn.ghost { color: var(--primary-2); }
+html[data-theme="dark"] .print-doc .btn.primary { color: #fff; }
