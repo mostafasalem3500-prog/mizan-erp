@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "skills": {
+    "skill-inspector": {
+      "source": "nvidia/skillspector",
+      "sourceType": "github",
+      "skillPath": "skills/skill-inspector/SKILL.md",
+      "computedHash": "5056fb112425b322e3fddbf6572c1c3d23650a1a9025515eabe865f16f865bd9"
+    }
+  }
+}
