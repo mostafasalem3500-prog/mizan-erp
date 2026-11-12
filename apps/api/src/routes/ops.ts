@@ -12,6 +12,7 @@ import { createExpense, cancelExpense } from "../services/expenses";
 import { createAsset, runDepreciation, disposeAsset } from "../services/assets";
 import { closeFiscalYear, reopenFiscalYear } from "../services/closing";
 import * as pos from "../services/pos";
+import { settle as settleOrder } from "../services/restaurant";
 import * as misc from "../services/misc";
 import * as rep from "../services/reports";
 import { reverse } from "../accounting/engine";
@@ -185,7 +186,8 @@ ops.get("/pos/session/:id/report", perm("pos.use"), h(async (req) => {
   return { session: s, invoices, byMethod, products };
 }));
 ops.post("/pos/sale", perm("pos.use"), h(async (req) => {
-  const r = await tx((t) => pos.posSale(t, req.company, { id: req.auth.userId, name: actor(req) }, req.body));
+  // a restaurant order is paid through the same sale: the paid lines then leave the order (all of them, or a split)
+  const r: any = await tx(async (t) => { const inv: any = await pos.posSale(t, req.company, { id: req.auth.userId, name: actor(req) }, req.body); if (req.body?.orderId) { const st = await settleOrder(t, cid(req), String(req.body.orderId), inv, req.body.paidLines); if (st) Object.assign(inv, { tableName: st.tableName, orderType: st.type, orderNo: st.number, orderClosed: st.closed }); } return inv; });
   if (r.zatcaStatus === "PENDING") submitInvoice(req.company, r.id).catch(() => undefined);
   if (IS_EG) await autoSubmit(req.company, r.id);
   if (!(r as any).replayed) emit(cid(req), "pos.sale", invoiceDto(r));

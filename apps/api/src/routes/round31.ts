@@ -11,6 +11,7 @@ import * as s from "../services/round31";
 import * as pay from "../services/payroll";
 import * as hr from "../services/hr";
 import * as att from "../services/attendance";
+import * as rest from "../services/restaurant";
 import { IS_EG } from "../lib/country";
 import { computeLineEG } from "../services/egypt";
 
@@ -115,4 +116,34 @@ r31.put("/attendance/day", perm("accounting.write"), h(async (req) => tx((t) => 
 r31.post("/attendance/import", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.importRows(t, req.company, actor(req), req.body?.rows)); await audit(req, "IMPORT", "attendance", cid(req), { saved: r.saved, skipped: r.skipped }); return r; }));
 r31.put("/attendance/settings", perm("settings.write"), h(async (req) => tx((t) => att.saveSettings(t, cid(req), req.body || {}))));
 r31.post("/attendance/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.postToPayroll(t, req.company, actor(req), String(req.body?.period || ""))); await audit(req, "CREATE", "payroll", cid(req), { attendance: req.body?.period, items: r.created }); return r; }));
+// ── restaurant / café layer of the point of sale ──
+r31.get("/pos/restaurant", perm("pos.use"), h(async (req) => rest.overview(db, req.company)));
+r31.put("/pos/restaurant/settings", perm("settings.write"), h(async (req) => { const r = await tx((t) => rest.saveSettings(t, cid(req), req.body || {})); await audit(req, "UPDATE", "pos_settings", cid(req), { mode: r.mode }); return r; }));
+r31.post("/pos/floors", perm("settings.write"), h(async (req) => tx((t) => rest.saveFloor(t, cid(req), req.body || {}))));
+r31.put("/pos/floors/:id", perm("settings.write"), h(async (req) => tx((t) => rest.saveFloor(t, cid(req), req.body || {}, p(req).id))));
+r31.delete("/pos/floors/:id", perm("settings.write"), h(async (req) => { await tx((t) => rest.deleteFloor(t, cid(req), p(req).id)); return { ok: true }; }));
+r31.post("/pos/tables", perm("settings.write"), h(async (req) => tx((t) => rest.addTables(t, cid(req), req.body || {}))));
+r31.put("/pos/tables/:id", perm("settings.write"), h(async (req) => tx((t) => rest.saveTable(t, cid(req), p(req).id, req.body || {}))));
+r31.delete("/pos/tables/:id", perm("settings.write"), h(async (req) => { await tx((t) => rest.deleteTable(t, cid(req), p(req).id)); return { ok: true }; }));
+r31.get("/pos/kitchen", perm("pos.use"), h(async (req) => rest.kitchen(db, cid(req))));
+r31.get("/pos/restaurant/report", perm("pos.use"), h(async (req) => { const to = isDate(req.query.to) ? String(req.query.to) : today(); return rest.report(db, cid(req), isDate(req.query.from) ? String(req.query.from) : to, to); }));
+r31.post("/pos/orders", perm("pos.use"), h(async (req) => tx((t) => rest.openOrder(t, req.company, actor(req), req.body || {}))));
+r31.get("/pos/orders/:id", perm("pos.use"), h(async (req) => rest.getOrder(db, cid(req), p(req).id)));
+r31.put("/pos/orders/:id", perm("pos.use"), h(async (req) => tx((t) => rest.saveOrder(t, cid(req), p(req).id, req.body || {}))));
+r31.post("/pos/orders/:id/send", perm("pos.use"), h(async (req) => tx((t) => rest.sendToKitchen(t, cid(req), p(req).id, req.body || {}))));
+r31.post("/pos/orders/:id/move", perm("pos.use"), h(async (req) => tx((t) => rest.moveOrder(t, cid(req), p(req).id, String(req.body?.tableId || "")))));
+r31.post("/pos/orders/:id/merge", perm("pos.use"), h(async (req) => tx((t) => rest.mergeOrder(t, cid(req), p(req).id, String(req.body?.intoId || "")))));
+r31.post("/pos/orders/:id/ready", perm("pos.use"), h(async (req) => tx((t) => rest.markReady(t, cid(req), p(req).id, req.body?.keys))));
+r31.post("/pos/orders/:id/cancel", perm("pos.use"), h(async (req) => { const r = await tx((t) => rest.cancelOrder(t, cid(req), p(req).id, String(req.body?.reason || ""))); await audit(req, "CANCEL", "pos_order", p(req).id, { number: r.number, table: r.tableName, reason: req.body?.reason }); return r; }));
+
+// ── print templates: the establishment's own designs and which one is the default for sheets and for receipts ──
+r31.get("/print-templates", perm("dashboard.read"), h(async (req) => (await db.one(`SELECT invoice_template FROM companies WHERE id=$1`, [cid(req)])).invoiceTemplate || { defaults: {}, items: [] }));
+r31.put("/print-templates", perm("settings.write"), h(async (req) => {
+  const b = req.body || {}; const raw = JSON.stringify({ defaults: b.defaults || {}, items: Array.isArray(b.items) ? b.items.slice(0, 30) : [] });
+  if (raw.length > 60000) throw bad("القوالب أكبر من المسموح");
+  if (/<\s*script|javascript:/i.test(raw)) throw bad("نص غير مسموح في القالب");
+  await db.exec(`UPDATE companies SET invoice_template=$2::jsonb, updated_at=now() WHERE id=$1`, [cid(req), raw]);
+  await audit(req, "UPDATE", "print_templates", cid(req), { items: JSON.parse(raw).items.length });
+  return JSON.parse(raw);
+}));
 void can; void today; void IS_EG; void computeLineEG;

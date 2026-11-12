@@ -28,19 +28,18 @@ function Readiness() {
   const { data } = useFetch(can("settings.read") ? "/readiness" : null);
   const [open, setOpen] = useState(false);
   if (!data || hidden[me.company.id]) return null;
-  if (data.ready && !open) return null;
   const req = data.items.filter((i: any) => !i.optional), opt = data.items.filter((i: any) => i.optional);
   return (
-    <div className="card readiness">
-      <div className="card-h"><div><h3>جاهزية المنشأة للتشغيل الفعلي <span className="badge teal">{data.done} / {data.total}</span></h3><div className="small muted">الخطوات الأساسية قبل بدء العمل الحقيقي — اضغط على أي خطوة للانتقال إليها</div></div><div className="row"><button className="btn sm ghost" onClick={() => setOpen((o) => !o)}>{open ? "طي" : "التفاصيل"}</button><button className="btn sm ghost" title="إخفاء البطاقة" onClick={() => setHidden({ ...hidden, [me.company.id]: true })}>✕</button></div></div>
+    <details className="card fold readiness" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary><span className="fold-t">جاهزية المنشأة للتشغيل الفعلي</span><span className={"badge " + (data.ready ? "green" : "amber")}>{data.done} / {data.total}</span><span className="bar grow"><i style={{ width: `${(data.done / data.total) * 100}%` }} /></span><span className="small muted">{data.ready ? "مكتملة" : `${req.filter((i: any) => !i.ok).length} خطوة مطلوبة`}</span><span className="fold-ic" aria-hidden>▾</span></summary>
       <div className="card-b">
-        <div className="bar"><i style={{ width: `${(data.done / data.total) * 100}%` }} /></div>
-        {(open || !data.ready) && <div className="mt">
+        <div className="row between small muted"><span>الخطوات الأساسية قبل بدء العمل الحقيقي — اضغط على أي خطوة للانتقال إليها</span><button className="btn sm ghost" title="إخفاء القائمة نهائياً" onClick={() => setHidden({ ...hidden, [me.company.id]: true })}>إخفاء نهائياً</button></div>
+        <div className="mt">
           {req.map((i: any) => <Link key={i.key} to={i.to} className={"step req" + (i.ok ? " ok" : "")}><span className="ic">{i.ok ? "✓" : "!"}</span><span className="grow">{i.label}{i.hint && !i.ok && <div className="small muted">{i.hint}</div>}</span><span className="small muted">{i.ok ? "تم" : "مطلوب"}</span></Link>)}
-          {open && opt.map((i: any) => <Link key={i.key} to={i.to} className={"step" + (i.ok ? " ok" : "")}><span className="ic">{i.ok ? "✓" : "○"}</span><span className="grow">{i.label}{i.hint && !i.ok && <div className="small muted">{i.hint}</div>}</span><span className="small muted">{i.ok ? "تم" : "اختياري"}</span></Link>)}
-        </div>}
+          {opt.map((i: any) => <Link key={i.key} to={i.to} className={"step" + (i.ok ? " ok" : "")}><span className="ic">{i.ok ? "✓" : "○"}</span><span className="grow">{i.label}{i.hint && !i.ok && <div className="small muted">{i.hint}</div>}</span><span className="small muted">{i.ok ? "تم" : "اختياري"}</span></Link>)}
+        </div>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -51,14 +50,8 @@ export function Dashboard() {
   const d = data;
   return (
     <div className="grid">
-      <Readiness />
       {!me.company.demoLoaded && !d.recent?.length && (
         <div className="alert info">مرحباً بك في ميزان! ابدأ بإضافة الأصناف والعملاء، أو <Link to="/settings/demo">حمّل البيانات التجريبية</Link> لاستكشاف النظام بأرقام كاملة (يمكن حذفها لاحقاً بضغطة واحدة).</div>
-      )}
-      {!!d.alerts?.items?.length && (
-        <div className="card"><div className="card-h"><h3>تنبيهات المحاسب</h3><span className="small muted">{d.alerts.items.length} تنبيه · الإقرار الضريبي القادم: {d.alerts.vat.filed ? "مقدَّم ✓" : `مستحق ${d.alerts.vat.dueDate}`}</span></div>
-          <div className="ok-list">{d.alerts.items.map((a: any, i: number) => <Link key={i} to={a.to} className="item" style={{ textDecoration: "none", color: "inherit" }}><span style={{ fontSize: 18 }}>{a.level === "err" ? "🔴" : a.level === "warn" ? "🟠" : "🔵"}</span><span className="grow">{a.text}</span><span className="muted">←</span></Link>)}</div>
-        </div>
       )}
       <div className="grid c4">
         <div className="card kpi"><div className="icon">🧾</div><div className="label">مبيعات الشهر</div><div className="value"><Money v={d.salesMonth} /></div><div className="sub">اليوم: {money(d.salesToday)} {CUR()}</div></div>
@@ -89,6 +82,13 @@ export function Dashboard() {
           {!!d.zatca.length && <div className="card"><div className="card-h"><h3>حالة الفوترة الإلكترونية</h3></div><div className="card-b row">{d.zatca.map((z: any) => <span key={z.s} className="row" style={{ gap: 6 }}><Badge s={z.s} map={ZATCA_AR} /><b>{z.c}</b></span>)}</div></div>}
         </div>
       </div>
+      {!!d.alerts?.items?.length && (
+        <details className="card fold">
+          <summary><span className="fold-t">تنبيهات المحاسب</span><span className={"badge " + (d.alerts.items.some((a: any) => a.level === "err") ? "red" : d.alerts.items.some((a: any) => a.level === "warn") ? "amber" : "blue")}>{d.alerts.items.length}</span><span className="small muted grow">الإقرار الضريبي القادم: {d.alerts.vat.filed ? "مقدَّم ✓" : `مستحق ${d.alerts.vat.dueDate}`}</span><span className="fold-ic" aria-hidden>▾</span></summary>
+          <div className="ok-list">{d.alerts.items.map((a: any, i: number) => <Link key={i} to={a.to} className="item" style={{ textDecoration: "none", color: "inherit" }}><span style={{ fontSize: 18 }}>{a.level === "err" ? "🔴" : a.level === "warn" ? "🟠" : "🔵"}</span><span className="grow">{a.text}</span><span className="muted">←</span></Link>)}</div>
+        </details>
+      )}
+      <Readiness />
     </div>
   );
 }

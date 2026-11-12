@@ -139,6 +139,9 @@ export const NAV_TREE: NavGroup[] = [
   { key: "settings", ic: "⚙", label: "الإعدادات", items: [
     { to: "/settings", label: "بيانات المنشأة", perm: "settings.read", company: true },
     { to: "/settings/invoice", label: "الفاتورة والطباعة", perm: "settings.read", company: true },
+    { to: "/settings/templates", label: "قوالب الفواتير والإيصالات", perm: "settings.read", company: true },
+    { to: "/pos/setup", label: "نقطة البيع: النشاط والطاولات", perm: "settings.read", company: true },
+    { to: "/pos/kitchen", label: "شاشة المطبخ", perm: "pos.use", company: true },
     { to: "/settings/branches", label: "الفروع والمستودعات", perm: "settings.read", company: true },
     { to: "/settings/users", label: "المستخدمون والصلاحيات", perm: "settings.read", company: true },
     { to: "/settings/currencies", label: "العملات", perm: "settings.read", company: true },

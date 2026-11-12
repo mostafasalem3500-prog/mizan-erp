@@ -56,6 +56,9 @@ const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
 const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
+const KitchenPage = lz(() => import("./pages/Restaurant"), "KitchenPage");
+const PosSetupPage = lz(() => import("./pages/Restaurant"), "PosSetupPage");
+const PrintTemplatesPage = lz(() => import("./pages/PrintTemplates"), "PrintTemplatesPage");
 const ZatcaPage = lz(() => import("./pages/Settings"), "ZatcaPage");
 const AdminPage = lz(() => import("./pages/Settings"), "AdminPage");
 const ReportCenterPage = lz(() => import("./pages/ReportCenter"), "ReportCenterPage");
@@ -151,6 +154,7 @@ export function App() {
           <div className="main">
             <div className="topbar" role="banner">
               <button className="btn sm burger" aria-label="القائمة الرئيسية" onClick={() => setMenu((m) => !m)}>☰</button>
+              <NavLink to="/" end className="btn sm home-btn" title="الرجوع إلى الشاشة الرئيسية (Alt + D)"><span aria-hidden>🏠</span><span className="home-t"> الرئيسية</span></NavLink>
               <PageTitle can={can} lockedBranch={!!me.lockedBranch} />
               <div className="grow" />
               <GlobalSearch />
@@ -226,6 +230,9 @@ export function App() {
                 <Route path="/reports-center/:key" element={<ReportCenterPage />} />
                 <Route path="/zatca" element={<ZatcaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings/templates" element={<PrintTemplatesPage />} />
+                <Route path="/pos/kitchen" element={<KitchenPage />} />
+                <Route path="/pos/setup" element={<PosSetupPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />
                 <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />

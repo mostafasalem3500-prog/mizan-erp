@@ -4,10 +4,11 @@ import { useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
 import { api, q, useFetch, money, Money, Loading, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, useAction, useToast, useCompanyContext, useLocalState, fmtDT, METHOD_AR, Badge, confirmDlg, matches } from "../lib";
 import { Thermal, QuickPartner } from "./Documents";
+import { RestaurantHome, OrderBar, KitchenTicket, PreBill, MoveModal, SplitModal, NoteModal } from "./Restaurant";
 import { ProductImagesModal } from "./ProductImages";
 import { applyPromotions, combinePct } from "../shared/promoEngine";
 
-type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
+type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; note?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
 const lineKey = (l: { product: any; uom?: any }) => l.product.id + ":" + (l.uom?.id || "");
 const EMOJI: Record<string, string> = { "مواد غذائية": "🍚", "مشروبات": "🥤", "منظفات": "🧴", "قرطاسية": "📎", "إلكترونيات": "🔌", "خدمات": "🛠" };
 
@@ -24,6 +25,17 @@ export function PosPage() {
   const [held, setHeld] = useLocalState<{ id: number; at: string; cart: CartLine[]; partner: any }[]>("mz_pos_held", []);
   const [partner, setPartner] = useState<any>(null);
   const [ticketDisc, setTicketDisc] = useState(0);
+  // ── restaurant / café: an order that stays open on a table until it is paid ──
+  const restF = useFetch<any>("/pos/restaurant");
+  const mode: string = restF.data?.settings?.mode || "RETAIL";
+  const [order, setOrder] = useLocalState<any>("mz_pos_order", null);
+  const [splitting, setSplitting] = useState(false);
+  const [ticket, setTicket] = useState<any>(null);
+  const [bill, setBill] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [noteFor, setNoteFor] = useState<CartLine | null>(null);
+  const [savedSig, setSavedSig] = useState("");
   const [payOpen, setPayOpen] = useState(false);
   const [done, setDone] = useState<any>(null);
   const [queue, setQueue] = useLocalState<any[]>("mz_pos_queue", []);
@@ -147,6 +159,24 @@ export function PosPage() {
   };
   const hold = () => { if (!cart.length) return; setHeld((h) => [...h, { id: Date.now(), at: new Date().toISOString(), cart, partner }]); setCart([]); setPartner(null); toast("تم تعليق الطلب", "ok"); };
   const resume = (h: any) => { if (cart.length && !confirmDlg("استبدال السلة الحالية؟")) return; setCart(h.cart); setPartner(h.partner); setHeld((x) => x.filter((y) => y.id !== h.id)); };
+  const orderLines = (c: CartLine[]) => c.map((l) => ({ key: lineKey(l), productId: l.product.id, name: l.product.name, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null, uomName: l.uom?.name || null, note: l.note || "" }));
+  const sigOf = (c: CartLine[]) => JSON.stringify(orderLines(c));
+  const cartOf = (o: any): CartLine[] => (o.lines || []).map((l: any) => { const p = (products.data || []).find((x: any) => x.id === l.productId); if (!p) return null; const u = l.uomId ? (p.uoms || []).find((x: any) => x.id === l.uomId) || null : null; return { product: p, uom: u, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct) || 0, note: l.note || "" }; }).filter(Boolean) as CartLine[];
+  const openOrder = (o: any) => { const c = cartOf(o); setOrder(o); setCart(c); setSavedSig(sigOf(c)); setPartner(null); setTicketDisc(0); setSplitting(false); };
+  const saveOrder = async (c = cart) => { if (!order || splitting) return order; const o = await api(`/pos/orders/${order.id}`, { method: "PUT", body: { lines: orderLines(c), partnerId: partner?.id || null } }); setSavedSig(sigOf(c)); setOrder(o); return o; };
+  const leaveOrder = () => run(async () => { if (!splitting) await saveOrder(); setOrder(null); setCart([]); setPartner(null); setSplitting(false); restF.reload(); });
+  const sendKitchen = () => run(async () => { const r = await api(`/pos/orders/${order.id}/send`, { body: { lines: orderLines(cart) } }); setOrder(r.order); setSavedSig(sigOf(cart)); if (r.ticket) setTicket(r.ticket); else toast("لا جديد لإرساله للمطبخ", "info"); });
+  const endSplit = () => run(async () => { openOrder(await api(`/pos/orders/${order.id}`)); });
+  // the open order follows the cart (a moment after the last change), so another device sees the table as it is
+  useEffect(() => {
+    if (!order || splitting || !products.data || sigOf(cart) === savedSig) return;
+    const tm = setTimeout(() => { if (navigator.onLine) saveOrder().catch(() => undefined); }, 900);
+    return () => clearTimeout(tm);
+  }, [cart, order?.id, splitting, savedSig]);
+  // an order kept from the last visit: take its lines from the server, not from the old cart
+  useEffect(() => { if (order && products.data && !savedSig) api(`/pos/orders/${order.id}`).then((o) => (o.status === "OPEN" ? openOrder(o) : (setOrder(null), setCart([])))).catch(() => { setOrder(null); setCart([]); }); }, [!!products.data]);
+  const dirtyKitchen = !!order && cart.some((l) => { const s = (order.lines || []).find((x: any) => x.key === lineKey(l)); return !s || Number(s.sentQty) !== l.qty; });
+  const showHome = mode !== "RETAIL" && !order && !!restF.data;
   const session = sess.data?.session;
 
   if ((sess.loading && !sess.data) || (products.loading && !products.data)) return <Loading />;
@@ -163,8 +193,9 @@ export function PosPage() {
     );
   }
   return (
-    <div className="pos"><h1 className="sr-only">نقطة البيع</h1>
-      <div className="catalog">
+    <div className={"pos" + (showHome ? " pos-home" : "")}><h1 className="sr-only">نقطة البيع</h1>
+      {showHome && <RestaurantHome data={restF.data} reload={restF.reload} session={session} online={online} busy={busy} onOpen={openOrder} onClose={() => setCloseOpen(true)} onReturn={() => setReturnOpen(true)} />}
+      <div className="catalog" hidden={showHome}>
         <div className="cat-head">
           <button className="btn sm" onClick={() => nav("/")}>← النظام</button>
           <div className="search grow" style={{ minWidth: 220 }}><span className="ic">🔍</span><input ref={searchRef} className="input" placeholder="بحث / باركود (F2)" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearchKey} autoFocus /></div>
@@ -206,20 +237,23 @@ export function PosPage() {
           </div>
         )}
       </div>
-      <div className="cart">
+      <div className="cart" hidden={showHome}>
+        {order && <OrderBar order={order} dirty={dirtyKitchen} busy={busy} splitting={splitting} onBack={leaveOrder} onSend={sendKitchen} onBill={() => setBill(true)} onMove={() => run(async () => { await saveOrder(); await restF.reload(); setMoveOpen(true); })} onSplit={() => run(async () => { await saveOrder(); setSplitOpen(true); })} onEndSplit={endSplit}
+          onCancel={() => { const sent = (order.lines || []).some((l: any) => Number(l.sentQty) > 0); const reason = sent ? prompt("سبب إلغاء الطلب (أُرسلت أصناف للمطبخ)") : confirmDlg("إلغاء الطلب وتفريغ الطاولة؟") ? "" : null; if (reason === null) return; run(async () => { await api(`/pos/orders/${order.id}/cancel`, { body: { reason } }); setOrder(null); setCart([]); setSplitting(false); restF.reload(); }, "أُلغي الطلب"); }} />}
         <div className="cart-h">
           <div className="grow"><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("CUSTOMER")} label={(p: any) => p.name} placeholder="عميل نقدي (اختياري: اختر عميلاً)" onCreate={() => setNewPartner(true)} />{priceList && <div className="small" style={{ color: "var(--primary)" }}>قائمة الأسعار: {priceList.name}</div>}</div>
-          <button className="btn ghost sm" title="تعليق الطلب (F8)" onClick={hold}>⏸</button>
+          {!order && <button className="btn ghost sm" title="تعليق الطلب (F8)" onClick={hold}>⏸</button>}
           <button className="btn ghost sm" title="إفراغ السلة" onClick={() => cart.length && confirmDlg("إفراغ السلة؟") && setCart([])}>🗑</button>
         </div>
         <div className="cart-lines">
           {cart.map((l) => (
             <div className="line" key={lineKey(l)}>
-              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>{hitOf(l) && <span className="promo-tag" title="عرض مطبّق تلقائياً">🎁 {hitOf(l)!.name} −{Math.round(hitOf(l)!.pct * 10) / 10}%</span>}
+              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>{hitOf(l) && <span className="promo-tag" title="عرض مطبّق تلقائياً">🎁 {hitOf(l)!.name} −{Math.round(hitOf(l)!.pct * 10) / 10}%</span>}{l.note && <div className="line-note">← {l.note}</div>}
                 {l.product.uoms?.length > 0 && <select className="input" style={{ padding: "2px 6px", fontSize: 12, width: "auto", marginTop: 2 }} value={l.uom?.id || ""} onChange={(e) => setUom(lineKey(l), e.target.value)}><option value="">{l.product.unit || "حبة"}</option>{l.product.uoms.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}</select>}</div>
               <div className="row" style={{ gap: 6 }}>
                 <div className="qty"><button onClick={() => setQty(lineKey(l), l.qty - 1)}>−</button><input value={l.qty} onChange={(e) => setQty(lineKey(l), Number(e.target.value) || 0)} /><button onClick={() => setQty(lineKey(l), l.qty + 1)}>＋</button></div>
                 <b className="num" style={{ minWidth: 70, textAlign: "end" }}>{money(l.qty * l.unitPrice * (1 - combinePct(l.discountPct, hitOf(l)?.pct || 0) / 100))}</b>
+                {mode !== "RETAIL" && <button className="btn ghost sm" title="ملاحظة للمطبخ" aria-label="ملاحظة للمطبخ" onClick={() => setNoteFor(l)}>📝</button>}
                 <button className="btn ghost sm" onClick={() => { const v = prompt("خصم % على هذا السطر", String(l.discountPct)); if (v !== null) setCart((c) => c.map((x) => (lineKey(x) === lineKey(l) ? { ...x, discountPct: Math.min(100, Math.max(0, Number(v) || 0)) } : x))); }}>%</button>
               </div>
             </div>))}
@@ -236,8 +270,16 @@ export function PosPage() {
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
       {payOpen && <PayModal total={totals.total} partner={partner} loyalty={loyalty} online={online} onClose={() => setPayOpen(false)} onPay={(tenders, redeemPoints) => run(async () => {
-        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString() };
-        const finish = (inv: any) => { setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(inv); };
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString(), ...(order ? { orderId: order.id, paidLines: splitting ? cart.map((l) => ({ key: lineKey(l), qty: l.qty })) : undefined } : {}) };
+        const paidOrder = order, wasSplit = splitting;
+        const finish = (inv: any) => {
+          setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(paidOrder && !inv.tableName ? { ...inv, tableName: paidOrder.tableName, orderType: paidOrder.type, orderNo: paidOrder.number } : inv);
+          if (!paidOrder) return;
+          setSplitting(false);
+          // a split leaves the rest on the table: open it again; otherwise the table is free
+          if (wasSplit && inv.orderClosed === false) api(`/pos/orders/${paidOrder.id}`).then(openOrder).catch(() => setOrder(null)); else setOrder(null);
+          restF.reload();
+        };
         if (!navigator.onLine) { setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("لا يوجد اتصال — حُفظت العملية وستُرحّل تلقائياً عند عودة الاتصال", "info"); return; }
         try {
           const inv = await api("/pos/sale", { body });
@@ -254,6 +296,11 @@ export function PosPage() {
           {syncErrors.map((e) => <div key={e.ref} className="alert err row between" style={{ margin: 0 }}><span className="small">تعذّر ترحيل عملية {e.ref.slice(0, 8)}: {e.msg}</span><button className="btn sm ghost" onClick={() => setSyncErrors((s) => s.filter((x) => x.ref !== e.ref))}>✕</button></div>)}
         </div>
       )}
+      {ticket && <KitchenTicket ticket={ticket} onClose={() => setTicket(null)} />}
+      {bill && order && <PreBill order={order} company={me.company} totals={totals} lines={cart.map((l) => ({ name: l.product.name, qty: l.qty, total: l.qty * l.unitPrice * (1 - lineDisc(l) / 100) }))} onClose={() => setBill(false)} />}
+      {moveOpen && order && restF.data && <MoveModal order={order} data={restF.data} onClose={() => setMoveOpen(false)} onDone={(o) => { setMoveOpen(false); openOrder(o); restF.reload(); toast(o.tableName ? `الطلب الآن على ${o.tableName}` : "تم", "ok"); }} />}
+      {splitOpen && order && <SplitModal guests={order.guests} lines={cart.map((l) => ({ key: lineKey(l), name: l.product.name, qty: l.qty, unit: l.unitPrice * (1 - l.discountPct / 100) }))} onClose={() => setSplitOpen(false)} onPick={(m) => { setSplitOpen(false); setSplitting(true); setCart(cart.filter((l) => m[lineKey(l)] > 0).map((l) => ({ ...l, qty: m[lineKey(l)] }))); }} />}
+      {noteFor && <NoteModal name={noteFor.product.name} value={noteFor.note || ""} quick={restF.data?.settings?.quickNotes || []} onClose={() => setNoteFor(null)} onSave={(v) => { const k = lineKey(noteFor); setCart((c) => c.map((x) => (lineKey(x) === k ? { ...x, note: v } : x))); setNoteFor(null); }} />}
       {done && <ReceiptModal inv={done} onClose={() => { setDone(null); searchRef.current?.focus(); }} />}
       {closeOpen && <CloseModal session={session} onClose={(closed) => { setCloseOpen(false); if (closed) { sess.reload(); } }} />}
       {returnOpen && <ReturnModal session={session} onClose={(r) => { setReturnOpen(false); if (r) { sess.reload(); products.reload(); setDone(r); } }} />}

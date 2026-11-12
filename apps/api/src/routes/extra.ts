@@ -19,7 +19,7 @@ pub.get(
     if (!inv) throw notFound("الرابط غير صالح");
     const doc = await getInvoice(db, inv.companyId, inv.id);
     doc.partner = doc.partnerId ? await db.maybe(`SELECT name, vat_number, phone, city, street, district, building_no FROM partners WHERE id=$1`, [doc.partnerId]) : null;
-    doc.company = await db.one(`SELECT name_ar, name_en, vat_number, cr_number, phone, email, logo, street, building_no, additional_no, district, city, postal_code, invoice_footer, invoice_terms FROM companies WHERE id=$1`, [inv.companyId]);
+    doc.company = await db.one(`SELECT name_ar, name_en, vat_number, cr_number, phone, email, logo, street, building_no, additional_no, district, city, postal_code, invoice_footer, invoice_terms, invoice_template FROM companies WHERE id=$1`, [inv.companyId]);
     delete doc.xml; delete doc.zatcaResponse; delete doc.costTotal;
     doc.lines = doc.lines.map((l: any) => { const { unitCost, ...rest } = l; return rest; });
     return doc;

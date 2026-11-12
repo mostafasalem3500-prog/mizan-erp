@@ -11,6 +11,8 @@ export const etaQrText = (d: any) => !d?.etaUuid ? "" : d.etaKind === "RECEIPT"
 import { amountToArabicWords } from "../shared/tafqeet";
 import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
 import { PartnerStatement } from "./Statements";
+import { InvoicePaper } from "./InvoicePaper";
+import { resolveTpl, allTemplates, isRoll, SIZE_AR } from "../shared/printTemplates";
 
 const KIND_TITLE: Record<string, Record<string, string>> = {
   SALE: { QUOTATION: "عرض سعر", ORDER: "أمر بيع", INVOICE: "فاتورة ضريبية", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" },
@@ -281,7 +283,7 @@ export function DocumentView() {
   const { can } = useCompanyContext();
   const { data: d, loading, reload } = useFetch(id ? `/invoices/${id}` : null);
   const [qr, setQr] = useState("");
-  const [layout, setLayout] = useState<"a4" | "thermal">("a4");
+  const [layout, setLayout] = useState<string>(""); // "" = the establishment's default template
   const [cn, setCn] = useState<any>(null);
   const [pay, setPay] = useState(false);
   const [landed, setLanded] = useState(false);
@@ -332,12 +334,13 @@ export function DocumentView() {
         {etaOpen && <EtaDocModal id={d.id} onClose={(ch) => { setEtaOpen(false); if (ch) reload(); }} />}
         {d.partnerId && can("reports.read") && <button className="btn sm" onClick={() => setPstmt(true)}>📄 كشف حساب {isSale ? "العميل" : "المورد"}</button>}
         {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
-        <Select value={layout} onChange={(e) => setLayout(e.target.value as any)} style={{ width: 130 }}><option value="a4">A4</option><option value="thermal">حراري 80مم</option></Select>
+        <Select value={layout} onChange={(e) => setLayout(e.target.value)} style={{ width: 190 }} title="قالب الطباعة" aria-label="قالب الطباعة"><option value="">القالب الافتراضي</option>{(["A4", "A5", "T80", "T58"] as const).map((sz) => <optgroup key={sz} label={SIZE_AR[sz]}>{allTemplates(d.company?.invoiceTemplate).filter((t) => t.opts.size === sz).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>)}</Select>
+        {can("settings.write") && <Link className="btn sm ghost" to="/settings/templates" title="تصميم قوالب الطباعة">🎨</Link>}
         <PrintBtn />
         {isSale && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && <ShareBtn d={d} />}
         {isSale && mail.data?.configured && (d.status === "POSTED" || d.kind === "QUOTATION" || d.kind === "ORDER") && can("sales.write") && <button className="btn sm" disabled={busy} onClick={() => run(async () => { const to = prompt("إرسال المستند بالبريد إلى:", d.partner?.email || ""); if (!to) return; await api(`/invoices/${d.id}/email`, { body: { to } }); }, "تم إرسال البريد")}>✉ بريد</button>}
       </div>
-      {layout === "thermal" ? <Thermal d={d} qr={qr} /> : <InvoiceA4 d={d} qr={qr} />}
+      {layout && isRoll(resolveTpl(d.company?.invoiceTemplate, "doc", layout).opts.size) ? <Thermal d={d} qr={qr} tplId={layout} /> : <InvoiceA4 d={d} qr={qr} tplId={layout || null} />}
       <div className="grid c3 no-print">
         <NotesCard d={d} canEdit={can(isSale ? "sales.write" : "purchases.write")} onSaved={reload} />
         {extras.data?.profit && <div className="card"><div className="card-h"><h3>💹 ربح الفاتورة</h3></div><div className="card-b stat-list">
@@ -436,99 +439,21 @@ export function QuickPayment({ doc, onClose }: { doc: any; onClose: (s?: boolean
   );
 }
 
-export function InvoiceA4({ d, qr, publicView }: { d: any; qr: string; publicView?: boolean }) {
-  const isSale = d.direction === "SALE";
-  const title = KIND_TITLE[d.direction][d.kind];
-  const c = d.company;
-  const remaining = Number(d.total) - Number(d.amountPaid);
-  const docTitle = isSale ? (d.kind === "INVOICE" ? (CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية") : title) : title;
-  const showVat = d.lines.some((l: any) => Number(l.vatAmount) > 0);
-  const fc = d.currency && d.currency !== CFG.currency;
-  const fx = (v: any) => money(Number(v) / Number(d.exchangeRate || 1));
-  return (
-        <div className="card print-doc">
-          <div className="head">
-            <div>
-              {c.logo && <img src={c.logo} style={{ height: 60, marginBottom: 6 }} alt="" />}
-              <h2>{c.nameAr}</h2>{c.nameEn && <div className="muted">{c.nameEn}</div>}
-              <div className="small">{[c.buildingNo, c.street, c.district, c.city, c.postalCode].filter(Boolean).join("، ")}</div>
-              <div className="small">{c.vatNumber && <>{CFG.taxIdLabel}: <span className="num">{c.vatNumber}</span></>}{c.crNumber && <> · س.ت: <span className="num">{c.crNumber}</span></>}</div>
-              <div className="small">{c.phone && <>هاتف: <span className="num">{c.phone}</span></>}{c.email && <> · {c.email}</>}</div>
-            </div>
-            <div style={{ textAlign: "start" }}>
-              <h2 style={{ color: "var(--primary)" }}>{docTitle}</h2>
-              <table style={{ border: "none", marginTop: 6 }}><tbody>
-                <tr><td style={{ border: "none" }} className="muted">الرقم</td><td style={{ border: "none" }}><b className="num">{d.number}</b></td></tr>
-                <tr><td style={{ border: "none" }} className="muted">التاريخ</td><td style={{ border: "none" }} className="num">{fmtDate(d.date)} {new Date(d.issuedAt).toTimeString().slice(0, 5)}</td></tr>
-                {d.dueDate && d.kind === "INVOICE" && <tr><td style={{ border: "none" }} className="muted">الاستحقاق</td><td style={{ border: "none" }} className="num">{fmtDate(d.dueDate)}</td></tr>}
-                {d.origin && <tr><td style={{ border: "none" }} className="muted">مرجع الفاتورة</td><td style={{ border: "none" }} className="num">{d.origin.number}</td></tr>}
-                {d.supplierRef && <tr><td style={{ border: "none" }} className="muted">فاتورة المورد</td><td style={{ border: "none" }} className="num">{d.supplierRef}</td></tr>}
-                {d.branchName && !d.branchIsMain && <tr><td style={{ border: "none" }} className="muted">الفرع</td><td style={{ border: "none" }}>{d.branchName}{d.branchPhone ? <span className="num"> · {d.branchPhone}</span> : ""}</td></tr>}
-                {(d.channel === "SALLA" || d.channel === "ZID") && d.externalRef && <tr><td style={{ border: "none" }} className="muted">{d.channel === "ZID" ? "طلب زد" : "طلب سلة"}</td><td style={{ border: "none" }} className="num">{d.externalRef.replace(/^(salla|zid):/, "#")}</td></tr>}
-                {fc && <tr><td style={{ border: "none" }} className="muted">العملة</td><td style={{ border: "none" }} className="num">{d.currency} — سعر الصرف {Number(d.exchangeRate)}</td></tr>}
-              </tbody></table>
-            </div>
-            {qr && <div style={{ textAlign: "center" }}><img src={qr} alt="QR" style={{ width: 120, height: 120 }} />{d.etaUuid && <div className="small num" dir="ltr" style={{ fontSize: 9, maxWidth: 140, wordBreak: "break-all" }}>{d.etaUuid}</div>}</div>}
-          </div>
-          <div className="grid c2 mb">
-            <div><div className="muted small">{isSale ? "العميل" : "المورد"}</div><b>{d.partnerName}</b>{d.partner && <div className="small">
-              {[d.partner.buildingNo && `مبنى ${d.partner.buildingNo}`, d.partner.street, d.partner.district, d.partner.city, d.partner.postalCode, d.partner.additionalNo && `إضافي ${d.partner.additionalNo}`].filter(Boolean).join("، ")}
-              {d.partner.vatNumber ? <div>الرقم الضريبي: <span className="num">{d.partner.vatNumber}</span></div> : (d.partner.idType && d.partner.idType !== "CRN" ? d.partner.idNumber : d.partner.crNumber) ? <div>{({ CRN: "السجل التجاري", NAT: "الهوية الوطنية", IQA: "الإقامة", "700": "الرقم الموحد", PAS: "جواز السفر", GCC: "هوية خليجية" } as any)[d.partner.idType || "CRN"] || "رقم الهوية"}: <span className="num">{d.partner.idType && d.partner.idType !== "CRN" ? d.partner.idNumber : d.partner.crNumber}</span></div> : null}
-              {d.partner.vatNumber && d.partner.crNumber && <div>السجل التجاري: <span className="num">{d.partner.crNumber}</span></div>}
-              {(d.partner.phone || d.partner.email) && <div>{d.partner.phone && <span className="num">{d.partner.phone}</span>}{d.partner.phone && d.partner.email && " · "}{d.partner.email && <span dir="ltr">{d.partner.email}</span>}</div>}
-            </div>}</div>
-            {d.reason && <div><div className="muted small">سبب الإشعار</div>{d.reason}</div>}
-          </div>
-          <table><thead><tr><th>#</th><th>البيان</th><th>الكمية</th><th>سعر الوحدة</th>{d.lines.some((l: any) => Number(l.discountPct)) && <th>خصم</th>}<th>المبلغ قبل الضريبة</th>{showVat && <><th>الضريبة</th><th>الإجمالي</th></>}</tr></thead>
-            <tbody>{d.lines.map((l: any, i: number) => <tr key={l.id}><td className="num">{i + 1}</td><td>{l.description}{l.sku && <span className="muted small num" style={{ marginInlineStart: 4 }}>{l.sku}</span>}</td><td className="num">{Number(l.qty)} {l.uom || l.unit || ""}{l.uom && Number(l.factor) > 1 ? <span className="small muted"> (= {Number(l.qty) * Number(l.factor)} {l.unit})</span> : null}</td><td className="num">{fc ? <>{money(l.fcUnitPrice ?? Number(l.unitPrice) / Number(d.exchangeRate))} {d.currency}<div className="small muted">{money(l.unitPrice)} {CUR()}</div></> : money(l.unitPrice)}</td>{d.lines.some((x: any) => Number(x.discountPct)) && <td className="num">{Number(l.discountPct) ? l.discountPct + "%" : ""}</td>}<td className="num">{money(l.netAmount)}</td>{showVat && <><td className="num">{money(l.vatAmount)} ({Number(l.taxRate)}%)</td><td className="num">{money(l.total)}</td></>}</tr>)}</tbody>
-          </table>
-          <div className="row mt" style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
-            <div className="small muted" style={{ maxWidth: 380 }}>{d.notes && <div>ملاحظات: {d.notes}</div>}{c.invoiceTerms && <div>{c.invoiceTerms}</div>}{d.tenders?.length > 0 && <div>طريقة الدفع: {d.tenders.map((t: any) => `${METHOD_AR[t.method] || t.method} ${money(t.amount)}`).join(" + ")}</div>}</div>
-            <table style={{ width: 300 }}><tbody>
-              <tr><td>الإجمالي قبل الخصم</td><td className="num">{money(d.subtotal)}</td></tr>
-              {Number(d.discountTotal) > 0 && <tr><td>الخصم</td><td className="num">{money(d.discountTotal)}</td></tr>}
-              <tr><td>الإجمالي الخاضع للضريبة</td><td className="num">{money(d.taxable)}</td></tr>
-              <tr><td>ضريبة القيمة المضافة {CFG.vatRate}%</td><td className="num">{money(d.vatTotal)}</td></tr>
-              {Number(d.customsVat) > 0 && <tr><td className="small">منها ضريبة استيراد تُسدد للجمارك (لا تُدفع للمورد)</td><td className="num">−{money(d.customsVat)}</td></tr>}
-              <tr style={{ fontWeight: 700, fontSize: 15 }}><td>{Number(d.customsVat) > 0 ? "المستحق للمورد" : "الإجمالي شامل الضريبة"}</td><td className="num">{money(d.total)} {CUR()}</td></tr>
-              {fc && <tr style={{ fontWeight: 700 }}><td>الإجمالي بعملة المستند</td><td className="num">{money(d.fcTotal ?? fx(d.total))} {d.currency}</td></tr>}
-              <tr><td colSpan={2} className="small" style={{ background: "#f8fafa" }}>{amountToArabicWords(Number(d.total))}</td></tr>
-              {d.kind === "INVOICE" && d.status === "POSTED" && Number(d.amountPaid) > 0 && <><tr><td>المسدد</td><td className="num">{money(d.amountPaid)}</td></tr><tr><td>المتبقي</td><td className="num">{money(remaining)}</td></tr></>}
-            </tbody></table>
-          </div>
-          {c.invoiceFooter && <div className="small muted mt" style={{ textAlign: "center", borderTop: "1px solid #ddd", paddingTop: 8 }}>{c.invoiceFooter}</div>}
-        </div>
-  );
+/** The document's printed title, as the tax rules name it. */
+export function docTitleOf(d: any) {
+  const title = KIND_TITLE[d.direction]?.[d.kind] || "";
+  const tax = CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية";
+  return d.direction === "SALE" && d.kind === "INVOICE" ? tax : title;
 }
-
-export function Thermal({ d, qr }: { d: any; qr: string }) {
-  const c = d.company;
-  return (
-    <div className="thermal card">
-      <div className="c">{c.logo && <img src={c.logo} style={{ height: 40 }} alt="" />}<div style={{ fontWeight: 700, fontSize: 14 }}>{c.nameAr}</div><div>{c.nameEn}</div><div>{[c.street, c.city].filter(Boolean).join("، ")}</div>{c.phone && <div className="num">{c.phone}</div>}{c.vatNumber && <div>الرقم الضريبي: <span className="num">{c.vatNumber}</span></div>}</div>
-      <div className="c" style={{ margin: "6px 0", fontWeight: 700 }}>{CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية"}{d.kind === "CREDIT_NOTE" ? " — إشعار دائن" : ""}</div>
-      <div>رقم: <span className="num">{d.number}</span></div>
-      <div>التاريخ: <span className="num">{fmtDT(d.issuedAt)}</span></div>
-      {d.partnerName && d.partnerName !== "عميل نقدي" && <div>العميل: {d.partnerName}</div>}
-      {d.createdBy && <div>الكاشير: {d.createdBy}</div>}
-      <table style={{ marginTop: 6 }}><thead><tr><th style={{ textAlign: "start" }}>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
-        <tbody>{d.lines.map((l: any) => <tr key={l.id}><td>{l.description}{l.uom && <span style={{ fontSize: 10 }}> ({l.uom})</span>}<div style={{ fontSize: 10 }} className="num">{money(l.unitPrice)} × {Number(l.qty)}</div></td><td className="c num">{Number(l.qty)}</td><td className="c num">{money(l.total)}</td></tr>)}</tbody></table>
-      <div style={{ marginTop: 6 }}>
-        <div className="row between"><span>الإجمالي قبل الضريبة</span><span className="num">{money(d.taxable)}</span></div>
-        {Number(d.discountTotal) > 0 && <div className="row between"><span>الخصم</span><span className="num">{money(d.discountTotal)}</span></div>}
-        <div className="row between"><span>ضريبة القيمة المضافة {CFG.vatRate}%</span><span className="num">{money(d.vatTotal)}</span></div>
-        <div className="row between" style={{ fontWeight: 700, fontSize: 15, borderTop: "1px solid #000", paddingTop: 3 }}><span>الإجمالي</span><span className="num">{money(d.total)} {CUR()}</span></div>
-        {d.tenders?.map((t: any, i: number) => <div key={i} className="row between"><span>{METHOD_AR[t.method] || t.method}</span><span className="num">{money(t.amount)}</span></div>)}
-        {Number(d.pointsRedeemed) > 0 && <div className="row between"><span>⭐ استبدال {Number(d.pointsRedeemed)} نقطة ولاء</span><span className="num">{money(d.pointsValue)}</span></div>}
-        {d.lines?.some((l: any) => Number(l.promoDiscount) > 0) && <div className="c" style={{ marginTop: 4, fontWeight: 700 }}>🎁 وفّرت مع العروض: <span className="num">{money(d.lines.reduce((a: number, l: any) => a + Number(l.promoDiscount || 0), 0))}</span> {CUR()}</div>}
-      </div>
-      {qr && <div className="c" style={{ marginTop: 8 }}><img src={qr} style={{ width: 110 }} alt="QR" /></div>}
-      {c.invoiceFooter && <div className="c" style={{ marginTop: 6 }}>{c.invoiceFooter}</div>}
-      <div className="c" style={{ marginTop: 4, fontSize: 10 }}>شكراً لتسوقكم معنا</div>
-    </div>
-  );
+/** Sheet print with the establishment's default template (or the one asked for). */
+export function InvoiceA4({ d, qr, tplId }: { d: any; qr: string; publicView?: boolean; tplId?: string | null }) {
+  return <InvoicePaper d={d} qr={qr} tpl={resolveTpl(d.company?.invoiceTemplate, "doc", tplId)} docTitle={docTitleOf(d)} />;
 }
-
+/** Roll receipt (point of sale) with the establishment's default receipt template. */
+export function Thermal({ d, qr, tplId }: { d: any; qr: string; tplId?: string | null }) {
+  const tax = CFG.country === "EG" ? (d.etaKind === "RECEIPT" ? "إيصال إلكتروني" : "فاتورة ضريبية إلكترونية") : d.invoiceType === "SIMPLIFIED" ? "فاتورة ضريبية مبسطة" : "فاتورة ضريبية";
+  return <InvoicePaper d={d} qr={qr} tpl={resolveTpl(d.company?.invoiceTemplate, "pos", tplId)} docTitle={tax} />;
+}
 
 /** posts; on credit-limit rejection lets a manager override after confirmation */
 export async function postWithCreditCheck(id: string, canOverride: boolean) {
