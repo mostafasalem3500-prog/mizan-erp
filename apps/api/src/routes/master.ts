@@ -360,7 +360,7 @@ master.delete(
   }),
 );
 
-master.get("/cost-centers", perm("accounting.read"), h(async (req) => db.rows(`SELECT * FROM cost_centers WHERE company_id=$1 ORDER BY code`, [cid(req)])));
+master.get("/cost-centers", perm("dashboard.read"), h(async (req) => db.rows(`SELECT * FROM cost_centers WHERE company_id=$1 ORDER BY code`, [cid(req)])));
 master.post("/cost-centers", perm("accounting.write"), h(async (req) => db.insert("cost_centers", { companyId: cid(req), code: String(need(req.body, "code", "الكود")), name: String(need(req.body, "name", "الاسم")) })));
 
 // ─── company settings & users ──────────────────────────────────────────────

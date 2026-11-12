@@ -54,6 +54,7 @@ export interface InvoiceInput {
   currency?: string; // document currency (default: partner currency, else SAR); line prices are entered in it
   exchangeRate?: number; // SAR per 1 unit (default: company rate table for the date)
   priceListId?: string | null;
+  costCenterId?: string | null; // cost centre or project: every line of the entry carries it
 }
 
 export async function defaultWarehouse(t: Db, companyId: string) {
@@ -133,6 +134,8 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
   else if (id) input = { ...input, warehouseId: (await t.maybe(`SELECT warehouse_id FROM invoices WHERE id=$1 AND company_id=$2`, [id, companyId]))?.warehouseId || null };
   if (!input.warehouseId && input.originId) input = { ...input, warehouseId: (await t.maybe(`SELECT warehouse_id FROM invoices WHERE id=$1 AND company_id=$2`, [input.originId, companyId]))?.warehouseId || null };
   const incl = input.pricesIncludeVat ?? (input.direction === "SALE" ? !!company.pricesIncludeVat : false);
+  // a note (return, debit note) belongs to the same cost centre / project as the invoice it corrects
+  if (input.costCenterId === undefined && input.originId) input = { ...input, costCenterId: (await t.maybe(`SELECT cost_center_id FROM invoices WHERE id=$1 AND company_id=$2`, [input.originId, companyId]))?.costCenterId || null };
   // currency: explicit → partner default → SAR. Notes inherit the original document's currency and rate.
   let currency = String(input.currency || partner.currency || BASE).toUpperCase();
   let rate = num(input.exchangeRate) > 0 ? Number(input.exchangeRate) : 0;
@@ -177,6 +180,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     invoiceType,
     originId: input.originId || null,
     supplierRef: input.supplierRef || null,
+    costCenterId: /^[0-9a-f-]{36}$/i.test(String(input.costCenterId || "")) ? input.costCenterId : null,
     reason: input.reason || null,
     notes: input.notes || null,
     subtotal,
@@ -365,6 +369,8 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     jl.push({ key: "AP", [cr]: Number(inv.total), partnerId, description: desc } as Line);
   }
 
+  // the document's cost centre / project follows every line, so its revenue, cost of sales and purchases are reported under it
+  if (inv.costCenterId) for (const l of jl as any[]) if (!l.costCenterId) l.costCenterId = inv.costCenterId;
   const kindAr = isSale ? (isReturn ? "إشعار دائن / مرتجع مبيعات" : inv.kind === "DEBIT_NOTE" ? "إشعار مدين" : "فاتورة مبيعات") : isReturn ? "مرتجع مشتريات" : inv.kind === "DEBIT_NOTE" ? "إشعار مدين مورد" : "فاتورة مشتريات";
   const entry = await post(t, companyId, {
     date: inv.date,
@@ -428,7 +434,7 @@ export async function convert(t: Db, company: any, id: string, user: string, toK
   if (src.status === "CONVERTED") throw conflict("تم تحويل هذا المستند مسبقاً");
   const draft = await saveDraft(t, company, user, {
     direction: src.direction, kind: toKind, date: today(), partnerId: src.partnerId, warehouseId: src.warehouseId, branchId: src.branchId,
-    invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo, currency: src.currency, exchangeRate: Number(src.exchangeRate), priceListId: src.priceListId,
+    invoiceType: src.invoiceType, originId: null, notes: src.notes, isDemo: src.isDemo, currency: src.currency, exchangeRate: Number(src.exchangeRate), priceListId: src.priceListId, costCenterId: src.costCenterId || null,
     lines: src.lines.map((l: any) => ({ productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, unitPrice: l.fcUnitPrice ?? l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uomId || null })),
     pricesIncludeVat: false,
   });

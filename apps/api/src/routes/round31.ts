@@ -12,6 +12,7 @@ import * as pay from "../services/payroll";
 import * as hr from "../services/hr";
 import * as att from "../services/attendance";
 import * as rest from "../services/restaurant";
+import * as prj from "../services/projects";
 import { IS_EG } from "../lib/country";
 import { computeLineEG } from "../services/egypt";
 
@@ -116,6 +117,13 @@ r31.put("/attendance/day", perm("accounting.write"), h(async (req) => tx((t) => 
 r31.post("/attendance/import", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.importRows(t, req.company, actor(req), req.body?.rows)); await audit(req, "IMPORT", "attendance", cid(req), { saved: r.saved, skipped: r.skipped }); return r; }));
 r31.put("/attendance/settings", perm("settings.write"), h(async (req) => tx((t) => att.saveSettings(t, cid(req), req.body || {}))));
 r31.post("/attendance/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.postToPayroll(t, req.company, actor(req), String(req.body?.period || ""))); await audit(req, "CREATE", "payroll", cid(req), { attendance: req.body?.period, items: r.created }); return r; }));
+// ── cost centres and projects ──
+r31.get("/projects", perm("reports.read"), h(async (req) => prj.listCentres(db, cid(req), req.query)));
+r31.get("/projects/:id", perm("reports.read"), h(async (req) => prj.centreDetail(db, cid(req), p(req).id, req.query)));
+r31.post("/projects", perm("accounting.write"), h(async (req) => { const r = await tx((t) => prj.saveCentre(t, cid(req), req.body || {})); await audit(req, "CREATE", "cost_center", r.id, { code: r.code, kind: r.kind }); return r; }));
+r31.put("/projects/:id", perm("accounting.write"), h(async (req) => tx((t) => prj.saveCentre(t, cid(req), req.body || {}, p(req).id))));
+r31.delete("/projects/:id", perm("accounting.write"), h(async (req) => { await tx((t) => prj.deleteCentre(t, cid(req), p(req).id)); await audit(req, "DELETE", "cost_center", p(req).id); return { ok: true }; }));
+
 // ── restaurant / café layer of the point of sale ──
 r31.get("/pos/restaurant", perm("pos.use"), h(async (req) => rest.overview(db, req.company)));
 r31.put("/pos/restaurant/settings", perm("settings.write"), h(async (req) => { const r = await tx((t) => rest.saveSettings(t, cid(req), req.body || {})); await audit(req, "UPDATE", "pos_settings", cid(req), { mode: r.mode }); return r; }));

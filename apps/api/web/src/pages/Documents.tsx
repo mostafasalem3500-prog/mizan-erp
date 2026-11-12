@@ -117,6 +117,8 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
   const [supplierRef, setSupplierRef] = useState("");
+  const [costCenterId, setCostCenterId] = useState("");
+  const centres = useFetch<any[]>("/cost-centers");
   const [reason, setReason] = useState("");
   const [revReason, setRevReason] = useState("");
   const [incl, setIncl] = useState(direction === "SALE" && !!me.company.pricesIncludeVat);
@@ -147,7 +149,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
     if (!id) return;
     api(`/invoices/${id}`).then((d) => {
       setPartner(d.partner || { id: d.partnerId, name: d.partnerName });
-      setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setReason(d.reason || "");
+      setDate(d.date); setDueDate(d.dueDate || ""); setNotes(d.notes || ""); setSupplierRef(d.supplierRef || ""); setCostCenterId(d.costCenterId || ""); setReason(d.reason || "");
       setCurrency(d.currency || CFG.currency); setRate(Number(d.exchangeRate) || 1); setWarehouseId(d.warehouseId || "");
       if (d.priceListId) api(`/price-lists/${d.priceListId}`).then(setPriceList).catch(() => undefined);
       setLines(d.lines.map((l: any) => ({ key: Math.random(), promotionId: l.promotionId || null, promoPct: l.promotionId && Number(l.qty) * Number(l.unitPrice) ? Math.round((Number(l.promoDiscount || 0) / (Number(l.qty) * Number(l.unitPrice))) * 1e6) / 1e4 : 0, product: l.productId ? { id: l.productId, name: l.description, sku: l.sku, unit: l.unit, uoms: [], trackLots: l.trackLots } : null, account: l.accountId ? { id: l.accountId } : null, description: l.description, qty: Number(l.qty), unitPrice: Number(l.fcUnitPrice ?? l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, lotNo: l.lotNo || "", expiryDate: l.expiryDate ? String(l.expiryDate).slice(0, 10) : "", uom: l.uomId ? { id: l.uomId, name: l.uom, factor: Number(l.factor) } : null })));
@@ -175,7 +177,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
     if (!p) return upd(k, { product: null, uom: null });
     upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
   };
-  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
+  const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, costCenterId: costCenterId || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
     lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, promotionId: l.promotionId || null, promoPct: l.promoPct || 0 })) });
   /** Sales: apply the offers valid on the document date (best offer per line, on top of the manual discount). */
   const applyOffers = () => run(async () => {
@@ -238,6 +240,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
         {kind !== "QUOTATION" && <Field label="تاريخ الاستحقاق"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>}
         {(whs.data?.length || 0) > 1 && !isNote && <Field label={isSale ? "يُصرف من مستودع / فرع" : "يُستلم في مستودع / فرع"}><Select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">تلقائي{whs.data![0]?.mine ? " (مستودع فرعي)" : " (المستودع الافتراضي)"}</option>{whs.data!.map((w: any) => <option key={w.id} value={w.id}>{w.name}{w.branchName ? ` — ${w.branchName}` : ""}</option>)}</Select></Field>}
         {!isSale && <Field label="رقم فاتورة المورد"><Input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} dir="ltr" /></Field>}
+        {(centres.data?.length || 0) > 0 && <Field label="مركز التكلفة / المشروع" hint="تدخل إيرادات وتكاليف هذا المستند في تقرير المركز"><Select value={costCenterId} onChange={(e) => setCostCenterId(e.target.value)}><option value="">— بلا —</option>{centres.data!.filter((c: any) => c.isActive || c.id === costCenterId).map((c: any) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}</Select></Field>}
         {isNote && <Field label="سبب الإشعار (إلزامي للهيئة)" span2><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: إرجاع بضاعة / خطأ في السعر" /></Field>}
         <Field label="العملة"><div className="row" style={{ gap: 6 }}><Select value={currency} disabled={isNote} onChange={(e) => changeCurrency(e.target.value)} style={{ width: 110 }}>{(currencies || [{ code: CFG.currency }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code}</option>)}</Select>{fc && <NumInput title={`سعر الصرف: ${CFG.currencySymbol} لكل وحدة`} value={rate} disabled={isNote} onChange={(e) => setRate(Number(e.target.value) || 0)} style={{ width: 100 }} />}</div></Field>
         <Field label="خيارات"><label className="check"><input type="checkbox" checked={incl} onChange={(e) => setIncl(e.target.checked)} /> الأسعار شاملة الضريبة</label>{priceList && <div className="small" style={{ color: "var(--primary)" }}>قائمة الأسعار: {priceList.name}{priceList.kind === "DISCOUNT" ? ` (خصم ${priceList.discountPct}%)` : ""}</div>}</Field>

@@ -56,6 +56,8 @@ const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
 const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
+const ProjectsPage = lz(() => import("./pages/Projects"), "ProjectsPage");
+const ProjectDetailPage = lz(() => import("./pages/Projects"), "ProjectDetailPage");
 const KitchenPage = lz(() => import("./pages/Restaurant"), "KitchenPage");
 const PosSetupPage = lz(() => import("./pages/Restaurant"), "PosSetupPage");
 const PrintTemplatesPage = lz(() => import("./pages/PrintTemplates"), "PrintTemplatesPage");
@@ -231,6 +233,8 @@ export function App() {
                 <Route path="/zatca" element={<ZatcaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/templates" element={<PrintTemplatesPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/projects/:id" element={<ProjectDetailPage />} />
                 <Route path="/pos/kitchen" element={<KitchenPage />} />
                 <Route path="/pos/setup" element={<PosSetupPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />
