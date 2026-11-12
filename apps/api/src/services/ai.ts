@@ -17,6 +17,7 @@ import { localAgent } from "./aiLocal";
 import { executive } from "./insights";
 import { integrity } from "./reports";
 import { VAT_RATE, BASE_CURRENCY, CFG } from "../lib/country";
+import { callGemini, isGeminiKey, geminiModelOf, verifyGeminiKey } from "./aiGemini";
 import { financialAnalysis, comparePeriods, productInfo, vatPosition, hrSummary } from "./aiAnalyst";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -28,14 +29,16 @@ type Auth = { userId: string; userName: string; role: string | null; superAdmin:
 // ─── access ────────────────────────────────────────────────────────────────
 export function aiAccess(company: any, auth: { superAdmin: boolean }) {
   const mock = process.env.AI_MOCK === "1";
-  const key = process.env.ANTHROPIC_API_KEY || company?.ai?.apiKey || (mock ? "mock" : null);
+  // the establishment's own key comes first; then a server-wide one (Anthropic, or Google Gemini)
+  const key = company?.ai?.apiKey || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY || (mock ? "mock" : null);
   const plans = (process.env.AI_PLANS || "ENTERPRISE").split(",").map((s) => s.trim());
   const trial = company?.plan === "TRIAL";
   const entitled = !!auth.superAdmin || plans.includes(company?.plan) || company?.ai?.addon === true || trial;
   return {
     // the built-in agent always works; `key` only unlocks the advanced model for what the agent cannot do
     entitled, trial: trial && !auth.superAdmin && company?.ai?.addon !== true, configured: true, advanced: !!key, key,
-    keySource: process.env.ANTHROPIC_API_KEY ? "server" : company?.ai?.apiKey ? "company" : mock ? "mock" : null,
+    keySource: company?.ai?.apiKey ? "company" : process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY ? "server" : mock ? "mock" : null,
+    provider: !key || key === "mock" ? null : isGeminiKey(key) ? "gemini" : "anthropic",
     plans, trialTurns: Number(process.env.AI_TRIAL_TURNS || 15), monthlyTurns: Number(process.env.AI_MONTHLY_TURNS || 600),
   };
 }
@@ -50,18 +53,25 @@ export async function aiStatus(company: any, auth: Auth) {
   const u = await usage(company.id);
   return {
     entitled: a.entitled, configured: true, advanced: a.advanced, keySource: a.keySource, trial: a.trial, plan: company.plan, plans: a.plans,
-    used: a.trial ? u.total : u.month, limit: a.trial ? a.trialTurns : a.monthlyTurns, model: a.keySource === "mock" ? "mock" : MODEL(),
+    used: a.trial ? u.total : u.month, limit: a.trial ? a.trialTurns : a.monthlyTurns, model: a.keySource === "mock" ? "mock" : a.provider === "gemini" ? geminiModelOf(a.key!) : MODEL(), provider: a.provider,
     hasCompanyKey: !!company?.ai?.apiKey,
   };
 }
 export async function saveAiKey(companyId: string, apiKey: string | null) {
-  if (apiKey && !/^sk-ant-[A-Za-z0-9_\-]{20,}$/.test(apiKey)) throw bad("مفتاح Anthropic API غير صحيح (يبدأ بـ sk-ant-)");
+  const gemini = !!apiKey && isGeminiKey(apiKey);
+  if (apiKey && !gemini && !/^sk-ant-[A-Za-z0-9_\-]{20,}$/.test(apiKey)) throw bad("المفتاح غير معروف: مفتاح Google Gemini يبدأ بـ AIza، ومفتاح Anthropic يبدأ بـ sk-ant-");
+  // a Gemini key is tried once before it is stored, so a wrong key is refused on the spot
+  const check = gemini ? await verifyGeminiKey(apiKey!) : null;
   await db.exec(`UPDATE companies SET ai = CASE WHEN $2::text IS NULL THEN ai - 'apiKey' ELSE jsonb_set(ai, '{apiKey}', to_jsonb($2::text)) END WHERE id=$1`, [companyId, apiKey]);
+  return { ok: true, provider: !apiKey ? null : gemini ? "gemini" : "anthropic", verified: check ? check.verified : null, model: check?.model || null, note: check?.note || null };
 }
 
 // ─── model call ────────────────────────────────────────────────────────────
 async function callLlm(key: string, body: any): Promise<{ content: any[]; stop_reason: string; usage?: { input_tokens: number; output_tokens: number } }> {
   if (key === "mock") return mockLlm(body);
+  if (isGeminiKey(key)) return callGemini(key, body);
+  // fields kept for Gemini (thought signatures, call ids) are not part of this API
+  body = { ...body, messages: body.messages.map((m: any) => ({ ...m, content: m.content.map((b: any) => { if (b.sig === undefined && b.gid === undefined) return b; const { sig, gid, ...rest } = b; return rest; }) })) };
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {

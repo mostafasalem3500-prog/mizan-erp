@@ -105,7 +105,7 @@ import * as ai from "../services/ai";
 const A = (req: Request) => ({ userId: req.auth.userId, userName: actor(req), role: req.auth.role, superAdmin: !!req.auth.superAdmin });
 const needCo = (req: Request) => { if (!req.company) throw new AppError(400, "اختر المنشأة أولاً", "NO_COMPANY"); if (subscriptionState(req.company).readOnly) throw new AppError(402, "النظام في وضع القراءة فقط", "SUBSCRIPTION"); };
 r28.get("/ai/status", perm("dashboard.read"), h(async (req) => ai.aiStatus(req.company, A(req))));
-r28.put("/ai/key", perm("settings.write"), h(async (req) => { await ai.saveAiKey(cid(req), req.body?.apiKey ? String(req.body.apiKey).trim() : null); await audit(req, "UPDATE", "ai_key", cid(req), { set: !!req.body?.apiKey }); return { ok: true }; }));
+r28.put("/ai/key", perm("settings.write"), h(async (req) => { const r = await ai.saveAiKey(cid(req), req.body?.apiKey ? String(req.body.apiKey).trim() : null); await audit(req, "UPDATE", "ai_key", cid(req), { set: !!req.body?.apiKey, provider: r.provider }); return r; }));
 r28.get("/ai/conversations", perm("dashboard.read"), h(async (req) => ai.listConversations(cid(req), req.auth.userId)));
 r28.get("/ai/conversations/:id", perm("dashboard.read"), h(async (req) => ai.getConversation(cid(req), req.auth.userId, p(req).id)));
 r28.delete("/ai/conversations/:id", perm("dashboard.read"), h(async (req) => { await ai.deleteConversation(cid(req), req.auth.userId, p(req).id); return { ok: true }; }));
