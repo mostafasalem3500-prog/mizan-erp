@@ -369,8 +369,14 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     jl.push({ key: "AP", [cr]: Number(inv.total), partnerId, description: desc } as Line);
   }
 
-  // the document's cost centre / project follows every line, so its revenue, cost of sales and purchases are reported under it
-  if (inv.costCenterId) for (const l of jl as any[]) if (!l.costCenterId) l.costCenterId = inv.costCenterId;
+  // the document's cost centre / project is carried by the lines that are its revenue or its cost
+  // (revenue, cost of sales, purchase expense, and stock bought for it). Receivables, payables, VAT and cash are not
+  // costs or revenues of a centre and stay untagged — the same rule the expense voucher follows.
+  if (inv.costCenterId) {
+    const NOT_CC = new Set(["AR", "AP", "VAT_OUT", "VAT_IN", "POS_CASH", "CARD_CLEARING", "CUSTOMS_PAYABLE"]);
+    const pl = new Set((await t.rows(`SELECT id FROM accounts WHERE company_id=$1 AND type IN ('REVENUE','EXPENSE')`, [companyId])).map((a) => a.id));
+    for (const l of jl as any[]) if (!l.costCenterId && (l.key ? !NOT_CC.has(l.key) : pl.has(l.account))) l.costCenterId = inv.costCenterId;
+  }
   const kindAr = isSale ? (isReturn ? "إشعار دائن / مرتجع مبيعات" : inv.kind === "DEBIT_NOTE" ? "إشعار مدين" : "فاتورة مبيعات") : isReturn ? "مرتجع مشتريات" : inv.kind === "DEBIT_NOTE" ? "إشعار مدين مورد" : "فاتورة مشتريات";
   const entry = await post(t, companyId, {
     date: inv.date,

@@ -781,3 +781,5 @@ html[data-theme="dark"] .tpl-thumb, html[data-theme="dark"] .tpl-preview { backg
 html[data-theme="dark"] .tbl-card { background: #13201f; color: #e3eceb; border-color: #26504a; } html[data-theme="dark"] .tbl-card.busy { background: #3a2a12; border-color: #b7791f; } html[data-theme="dark"] .tbl-card.busy.late { background: #3b1717; border-color: #f87171; }
 html[data-theme="dark"] .tbl-card .tf { color: #2bb3a3; } html[data-theme="dark"] .order-bar .btn.primary { color: #0f766e; }
 @media (max-width: 900px) { .tables { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+
+.cc-box { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 12px; display: grid; gap: 8px; background: var(--surface-2); }

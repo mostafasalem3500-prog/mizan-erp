@@ -5,6 +5,7 @@ import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch, SearchBox, FilterInfo, useSorted, Th, matches, useNewParam } from "../lib";
 import { PartnerStatement, AccountLedger, AccountStatementButton } from "./Statements";
+import { CentreEditor } from "./Projects";
 
 // ─── payments (receipt / payment vouchers) ─────────────────────────────────
 export function PaymentsPage({ direction }: { direction: "IN" | "OUT" }) {
@@ -201,7 +202,7 @@ export function ExpensesPage() {
           {data && <FilterInfo shown={data.length} total={data.length} active={active} onClear={clear} />}
           <div className="grow" />{data && <ExportBtn name="المصروفات" rows={() => data.map((e: any) => ({ الرقم: e.number, التاريخ: e.date, الحساب: `${e.accountCode} ${e.accountName}`, البيان: e.description, المستفيد: e.payee, "المبلغ": e.amount, الضريبة: e.vatAmount, الإجمالي: e.total, "طريقة الدفع": e.payAccountName || "آجل", الحالة: e.status }))} />}</div>
         {loading && !data ? <Loading /> : !data?.length ? <Empty /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الرقم</th><th>التاريخ</th><th>حساب المصروف</th><th>البيان</th><th>المستفيد</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th>الدفع</th><th /></tr></thead>
-          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td className="dt">{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td><button className="btn sm ghost" title="المرفقات (الإيصال، الفاتورة…)" onClick={() => setAtt(e)}>📎</button>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
+          <tbody>{data.map((e: any) => <tr key={e.id} className={e.status === "CANCELLED" ? "muted" : ""}><td>{e.number}</td><td className="dt">{fmtDate(e.date)}</td><td>{e.accountName}</td><td>{e.description}{(e.costCenterName || e.allocationText) && <div className="small muted" title="مركز التكلفة / المشروع">🏷 {e.costCenterName || `موزّع: ${e.allocationText}`}</div>}</td><td>{e.payee || e.partnerName}</td><td className="n"><Money v={e.amount} /></td><td className="n"><Money v={e.vatAmount} /></td><td className="n"><b><Money v={e.total} /></b></td><td>{e.payAccountName || <span className="badge amber">آجل — {e.partnerName}</span>}</td><td><button className="btn sm ghost" title="المرفقات (الإيصال، الفاتورة…)" onClick={() => setAtt(e)}>📎</button>{e.status === "POSTED" && can("expenses.write") && <button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("إلغاء المصروف بقيد عكسي؟")) { await api(`/expenses/${e.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button>}{e.status === "CANCELLED" && <Badge s="CANCELLED" />}</td></tr>)}</tbody>
           <tfoot><tr><td colSpan={5}>الإجمالي</td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.amount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.vatAmount), 0)} /></td><td className="n"><Money v={data.filter((e: any) => e.status === "POSTED").reduce((a: number, e: any) => a + Number(e.total), 0)} /></td><td colSpan={2} /></tr></tfoot></table></div>}
       </div>
       {edit && <ExpenseEditor onClose={(s) => { setEdit(false); if (s) reload(); }} />}
@@ -218,13 +219,27 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
   const [pay, setPay] = useState<any>(null);
   const [credit, setCredit] = useState(false);
   const [partner, setPartner] = useState<any>(null);
+  // cost centre / project: one for the whole expense, or shares between several (what is left is a general expense)
+  const centres = useFetch<any[]>("/cost-centers");
+  const { can } = useCompanyContext();
+  const [cc, setCc] = useState("");
+  const [split, setSplit] = useState(false);
+  const [shares, setShares] = useState<{ key: number; costCenterId: string; amount: string }[]>([{ key: 1, costCenterId: "", amount: "" }, { key: 2, costCenterId: "", amount: "" }]);
+  const [newCentre, setNewCentre] = useState<string | null>(null);
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const amt = Number(f.amount || 0);
   const rate = f.taxCode === "S" ? VATF() : 0;
   const net = f.amountIncludesVat && rate ? amt / (1 + rate) : amt;
   const vat = net * rate;
+  const open = (centres.data || []).filter((c: any) => c.status !== "DONE");
+  const used = shares.filter((x) => x.costCenterId && Number(x.amount) > 0);
+  const sharedSum = Math.round(used.reduce((a, x) => a + Number(x.amount), 0) * 100) / 100, netR = Math.round(net * 100) / 100, restAmt = Math.round((netR - sharedSum) * 100) / 100;
+  const splitBad = split && (restAmt < -0.005 || shares.some((x) => (x.costCenterId && !(Number(x.amount) > 0)) || (!x.costCenterId && Number(x.amount) > 0)) || new Set(used.map((x) => x.costCenterId)).size !== used.length);
+  const upd = (key: number, p: any) => setShares((xs) => xs.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  const ccBody = split ? { allocations: used.map((x) => ({ costCenterId: x.costCenterId, amount: Number(x.amount) })) } : { costCenterId: cc || undefined };
+  const ccOptions = (cur: string) => <><option value="">— {split ? "اختر" : "عام (بلا مركز)"} —</option>{open.filter((c: any) => c.kind === "PROJECT").length > 0 && <optgroup label="المشاريع">{open.filter((c: any) => c.kind === "PROJECT").map((c: any) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}</optgroup>}{open.filter((c: any) => c.kind !== "PROJECT").length > 0 && <optgroup label="مراكز التكلفة">{open.filter((c: any) => c.kind !== "PROJECT").map((c: any) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}</optgroup>}</>;
   return (
-    <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner)} onClick={() => run(async () => { await api("/expenses", { body: { ...f, branchId: f.branchId || undefined, amount: amt, accountId: account.id, payAccountId: credit ? null : pay.id, partnerId: credit ? partner.id : null } }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
+    <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner) || splitBad} onClick={() => run(async () => { await api("/expenses", { body: { ...f, ...ccBody, branchId: f.branchId || undefined, amount: amt, accountId: account.id, payAccountId: credit ? null : pay.id, partnerId: credit ? partner.id : null } }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
       <div className="form-grid">
         <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={s("date")} /></Field>
@@ -239,6 +254,16 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
         {credit ? <Field label="المورد" span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("SUPPLIER")} label={(p: any) => p.name} /></Field> : <Field label="من حساب" span2><Picker value={pay} onChange={setPay} fetcher={accountFetcher((a) => a.isCashBank)} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>}
         <BranchField value={f.branchId || ""} onChange={(v) => setF({ ...f, branchId: v })} hint="تلقائي: فرعك الافتراضي أو الرئيسي" />
       </div>
+      <div className="cc-box" data-cc>
+        <div className="row between"><b>مركز التكلفة / المشروع</b><div className="row" style={{ gap: 6 }}>{can("accounting.write") && <><button type="button" className="btn sm ghost" onClick={() => setNewCentre("PROJECT")}>＋ مشروع جديد</button><button type="button" className="btn sm ghost" onClick={() => setNewCentre("CENTER")}>＋ مركز جديد</button></>}
+          {open.length > 1 && <label className="check small"><input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} /> توزيع على أكثر من مركز</label>}</div></div>
+        {!open.length ? <div className="small muted">لا توجد مراكز أو مشاريع بعد. اتركه فارغاً فيُسجَّل المصروف عاماً، أو أنشئ مشروعاً أو مركزاً من الزرين أعلاه.</div>
+          : !split ? <><Select value={cc} onChange={(e) => setCc(e.target.value)} aria-label="مركز التكلفة أو المشروع">{ccOptions(cc)}</Select><div className="small muted">{cc ? "يُحمَّل صافي المصروف (قبل الضريبة) كله على هذا المركز." : "اختر مشروعاً أو مركزاً إن كان المصروف يخصّه مباشرة؛ اتركه «عام» للمصروفات المشتركة (إيجار الإدارة، رواتب عامة…) ثم وزّعها لاحقاً من «توزيع التكاليف المشتركة» إن أردت."}</div></>
+          : <><table className="tbl compact"><thead><tr><th>المركز / المشروع</th><th className="n">المبلغ قبل الضريبة</th><th className="n">النسبة</th><th /></tr></thead><tbody>{shares.map((x) => <tr key={x.key}><td><Select value={x.costCenterId} onChange={(e) => upd(x.key, { costCenterId: e.target.value })} aria-label="المركز أو المشروع">{ccOptions(x.costCenterId)}</Select></td><td className="n"><NumInput value={x.amount} onChange={(e) => upd(x.key, { amount: e.target.value })} style={{ width: 130 }} aria-label="مبلغ المركز" /></td><td className="n num small">{netR > 0 && Number(x.amount) > 0 ? `${Math.round((Number(x.amount) / netR) * 1000) / 10}%` : ""}</td><td>{shares.length > 2 && <button type="button" className="btn sm ghost" aria-label="حذف السطر" onClick={() => setShares((xs) => xs.filter((y) => y.key !== x.key))}>✕</button>}</td></tr>)}</tbody></table>
+            <div className="row between small"><div className="row" style={{ gap: 6 }}><button type="button" className="btn sm" onClick={() => setShares((xs) => [...xs, { key: Date.now(), costCenterId: "", amount: "" }])}>＋ سطر</button>{netR > 0 && <button type="button" className="btn sm" title="يقسم الصافي بالتساوي على المراكز المختارة" onClick={() => { const pick = shares.filter((x) => x.costCenterId); if (!pick.length) return; const each = Math.floor((netR / pick.length) * 100) / 100; setShares((xs) => xs.map((x) => { if (!x.costCenterId) return x; const last = pick[pick.length - 1].key === x.key; return { ...x, amount: String(last ? Math.round((netR - each * (pick.length - 1)) * 100) / 100 : each) }; })); }}>بالتساوي</button>}</div>
+              <span className={restAmt < -0.005 ? "neg-val" : restAmt > 0.005 ? "" : "pos-val"}>الصافي {money(netR)} · موزّع {money(sharedSum)} · {restAmt < -0.005 ? `زائد ${money(-restAmt)} — خفّض المبالغ` : restAmt > 0.005 ? `الباقي ${money(restAmt)} يُسجَّل عاماً (بلا مركز)` : "موزّع بالكامل ✓"}</span></div></>}
+      </div>
+      {newCentre && <CentreEditor row={{ kind: newCentre, status: "ACTIVE" }} options={(centres.data || []).map((c: any) => ({ id: c.id, code: c.code, name: c.name }))} onClose={(saved) => { setNewCentre(null); if (saved) centres.reload(); }} />}
     </Modal>
   );
 }

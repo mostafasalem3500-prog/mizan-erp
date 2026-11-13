@@ -143,7 +143,9 @@ ops.get("/expenses", perm("expenses.read"), h(async (req) => {
   if (req.query.pay === "CREDIT") where.push(`e.pay_account_id IS NULL`);
   if (req.query.pay === "NOW") where.push(`e.pay_account_id IS NOT NULL`);
   params.push(limit, offset);
-  return db.rows(`SELECT e.*, a.name_ar AS account_name, a.code AS account_code, pa.name_ar AS pay_account_name, p.name AS partner_name FROM expenses e JOIN accounts a ON a.id=e.account_id LEFT JOIN accounts pa ON pa.id=e.pay_account_id LEFT JOIN partners p ON p.id=e.partner_id WHERE ${where.join(" AND ")} ORDER BY e.date DESC, e.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+  return db.rows(`SELECT e.*, a.name_ar AS account_name, a.code AS account_code, pa.name_ar AS pay_account_name, p.name AS partner_name, cc.name AS cost_center_name,
+      (SELECT string_agg(c2.name || ' ' || (x->>'amount'), '، ') FROM jsonb_array_elements(COALESCE(e.allocations,'[]'::jsonb)) x JOIN cost_centers c2 ON c2.id = (x->>'costCenterId')::uuid) AS allocation_text
+    FROM expenses e JOIN accounts a ON a.id=e.account_id LEFT JOIN accounts pa ON pa.id=e.pay_account_id LEFT JOIN partners p ON p.id=e.partner_id LEFT JOIN cost_centers cc ON cc.id=e.cost_center_id WHERE ${where.join(" AND ")} ORDER BY e.date DESC, e.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 }));
 ops.post("/expenses", perm("expenses.write"), h(async (req) => { const e = await tx((t) => createExpense(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "expense", e.id, { number: e.number, total: e.total }); return e; }));
 ops.post("/expenses/:id/cancel", perm("expenses.write"), h(async (req) => tx((t) => cancelExpense(t, cid(req), actor(req), p(req).id))));

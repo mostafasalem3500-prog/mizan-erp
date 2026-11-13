@@ -75,6 +75,7 @@ export function PayrollPage() {
 }
 
 function EmployeeForm({ e, onClose }: { e: any; onClose: (s?: boolean) => void }) {
+  const centres = useFetch<any[]>("/cost-centers");
   const { run, busy } = useAction();
   const [f, setF] = useState<any>({ nationality: EG ? "EGYPTIAN" : "SAUDI", gosi: true, basic: 0, housing: 0, transport: 0, otherAllow: 0, isActive: true, leaveDaysPerYear: 21, leaveOpening: 0, ...e, hireDate: e.hireDate ? String(e.hireDate).slice(0, 10) : "" });
   const s = (k: string) => (ev: any) => setF({ ...f, [k]: ev.target.type === "checkbox" ? ev.target.checked : ev.target.value });
@@ -85,6 +86,7 @@ function EmployeeForm({ e, onClose }: { e: any; onClose: (s?: boolean) => void }
         <Field label="الكود (تلقائي)"><Input value={f.code || ""} onChange={s("code")} dir="ltr" /></Field>
         <Field label="الوظيفة"><Input value={f.jobTitle || ""} onChange={s("jobTitle")} /></Field>
         <Field label="القسم"><Input value={f.department || ""} onChange={s("department")} /></Field>
+        {(centres.data?.length || 0) > 0 && <Field label="مركز التكلفة / المشروع" hint="يُحمَّل عليه راتبه في قيد المسير"><Select value={f.costCenterId || ""} onChange={s("costCenterId")}><option value="">— عام —</option>{centres.data!.filter((c: any) => c.status !== "DONE" || c.id === f.costCenterId).map((c: any) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}</Select></Field>}
         <Field label="الجنسية (للتأمينات)"><Select value={f.nationality} onChange={s("nationality")}>{EG && <><option value="EGYPTIAN">مصري</option><option value="FOREIGN">أجنبي</option></>}{!EG && <option value="SAUDI">سعودي</option>}<option value="NON_SAUDI">غير سعودي</option></Select></Field>
         <Field label="تاريخ التعيين"><Input type="date" value={f.hireDate || ""} onChange={s("hireDate")} /></Field>
         <Field label="الراتب الأساسي"><NumInput value={f.basic} onChange={s("basic")} /></Field>
