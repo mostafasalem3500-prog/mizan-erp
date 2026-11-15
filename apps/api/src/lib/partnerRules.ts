@@ -23,10 +23,10 @@ export const REGIONS = ["الرياض", "مكة المكرمة", "المدينة
 const digits = (v: any) => String(v ?? "").replace(/[\s-]/g, "").replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 const has = (v: any) => String(v ?? "").trim() !== "";
 
-/** Saudi numbers: mobile 05xxxxxxxx / +9665xxxxxxxx, landline 01x…, unified 9200/800; foreign numbers in international form. */
+/** Saudi numbers: mobile 05xxxxxxxx / +9665xxxxxxxx, landline 01X + 7 digits (011 Riyadh, 012 Makkah/Jeddah, 013 Eastern…), unified 9200/800; foreign numbers in international form. */
 export function validPhone(v: any) {
   const d = digits(v).replace(/^\+/, "00");
-  return /^05\d{8}$/.test(d) || /^(00)?9665\d{8}$/.test(d) || /^5\d{8}$/.test(d) || /^01\d{7}$/.test(d) || /^(00)?9661\d{7}$/.test(d)
+  return /^05\d{8}$/.test(d) || /^(00)?9665\d{8}$/.test(d) || /^5\d{8}$/.test(d) || /^01[1-7]\d{7}$/.test(d) || /^(00)?9661[1-7]\d{7}$/.test(d)
     || /^9200\d{5}$/.test(d) || /^800\d{7}$/.test(d) || (/^00\d{8,15}$/.test(d) && !/^00966/.test(d));
 }
 export const normPhone = (v: any) => (has(v) ? digits(v) : null);
@@ -35,7 +35,7 @@ const validEmail = (v: any) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || 
 /** The ID value: CR number for CRN, the id_number column otherwise. */
 export const buyerId = (p: any) => (!p?.idType || p.idType === "CRN" ? p?.crNumber : p?.idNumber) || null;
 
-export type PartnerCheck = { errors: string[]; missing: string[]; taxReady: boolean; standardReady: boolean };
+export type PartnerCheck = { errors: string[]; missing: string[]; taxReady: boolean; standardReady: boolean; supplierMissing: string[]; supplierReady: boolean };
 
 /**
  * errors = invalid formats (always enforced); missing = what a standard tax invoice still needs.
@@ -43,7 +43,7 @@ export type PartnerCheck = { errors: string[]; missing: string[]; taxReady: bool
  */
 export function checkPartner(p: any): PartnerCheck {
   const errors: string[] = [], missing: string[] = [];
-  if (IS_EG) return { errors, missing, taxReady: true, standardReady: true };
+  if (IS_EG) return { errors, missing, taxReady: true, standardReady: true, supplierMissing: [], supplierReady: true };
   const local = !p.country || String(p.country).toUpperCase() === "SA";
   if (has(p.vatNumber) && !validTaxId(digits(p.vatNumber))) errors.push("الرقم الضريبي يجب أن يكون 15 رقماً يبدأ وينتهي بـ 3");
   const t = p.idType || "CRN";
@@ -68,7 +68,29 @@ export function checkPartner(p: any): PartnerCheck {
   if (!has(p.phone)) missing.push("رقم الجوال");
   const standardReady = !errors.length && !missing.length;
   const taxReady = p.kind === "INDIVIDUAL" ? !errors.length && has(p.name) : standardReady;
-  return { errors, missing, taxReady, standardReady };
+  const supplierMissing = supplierNeeds(p, local);
+  return { errors, missing, taxReady, standardReady, supplierMissing, supplierReady: !errors.length && !supplierMissing.length };
+}
+
+/**
+ * What a supplier record needs so that his purchase invoices support the input-VAT deduction and the VAT return:
+ * a tax invoice held by the buyer must carry the supplier's name, address and VAT number (VAT Implementing Regulations, art. 53).
+ * Local establishment: VAT number (or the reason he is not registered — then no input VAT is deductible), national address, phone.
+ * Foreign supplier: country and city, and a phone or e-mail. Individual: phone.
+ */
+function supplierNeeds(p: any, local: boolean): string[] {
+  const m: string[] = [];
+  if (p.kind === "INDIVIDUAL") { if (!has(p.phone)) m.push("رقم الجوال"); return m; }
+  if (!local || p.isNonResident) {
+    if (!has(p.country) || String(p.country).toUpperCase() === "SA") m.push("دولة المورد");
+    if (!has(p.city)) m.push("المدينة");
+    if (!has(p.phone) && !has(p.email)) m.push("الجوال أو البريد الإلكتروني");
+    return m;
+  }
+  if (!has(p.vatNumber) && !has(p.vatExemptReason)) m.push("الرقم الضريبي (أو سبب عدم تسجيل المورد في الضريبة)");
+  for (const [k, ar] of [["street", "اسم الشارع"], ["buildingNo", "رقم المبنى"], ["district", "الحي"], ["city", "المدينة"], ["postalCode", "الرمز البريدي"]] as const) if (!has(p[k])) m.push(ar);
+  if (!has(p.phone)) m.push("رقم الجوال");
+  return m;
 }
 
 /** Saving a customer through the program: formats always; a company customer must be complete for a standard tax invoice. */
@@ -77,5 +99,6 @@ export function enforcePartner(p: any, opts: { strict: boolean }) {
   if (c.errors.length) return c.errors.join(" — ");
   if (opts.strict && p.isCustomer && p.kind !== "INDIVIDUAL" && c.missing.length) return `بيانات الفاتورة الضريبية غير مكتملة للعميل (منشأة): ${c.missing.join("، ")}`;
   if (opts.strict && p.isCustomer && p.kind === "INDIVIDUAL" && !has(p.phone)) return "رقم الجوال مطلوب للعميل";
+  if (opts.strict && p.isSupplier && c.supplierMissing.length) return `بيانات المورد غير مكتملة (مطلوبة لخصم ضريبة المدخلات والإقرار الضريبي): ${c.supplierMissing.join("، ")}`;
   return null;
 }

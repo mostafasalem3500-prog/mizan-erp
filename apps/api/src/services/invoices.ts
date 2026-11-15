@@ -11,6 +11,7 @@ import { currentCtx } from "../lib/context";
 import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut, avgCost } from "../accounting/stock";
 import { stampInvoice } from "../zatca/stamp";
+import { checkPartner } from "../lib/partnerRules";
 import { rateFor, toFc, fcUnitToBase, BASE } from "./currency";
 
 export const PREFIX: Record<string, Record<string, string>> = {
@@ -240,6 +241,17 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   if (!["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"].includes(inv.kind)) throw bad("عروض الأسعار والأوامر لا تُرحّل محاسبياً — حوّلها إلى فاتورة");
   await assertOpenDate(t, companyId, inv.date);
   const lines = await t.rows(`SELECT l.*, p.type AS ptype, p.name AS pname, p.purchase_price FROM invoice_lines l LEFT JOIN products p ON p.id=l.product_id WHERE invoice_id=$1 ORDER BY sort`, [id]);
+  // tax-invoice data (Saudi edition): the buyer's details on a standard invoice, the supplier's VAT number behind deducted input VAT
+  if (!IS_EG && inv.kind === "INVOICE" && inv.partnerId) {
+    const pr = await t.one(`SELECT * FROM partners WHERE id=$1`, [inv.partnerId]);
+    const localP = (!pr.country || String(pr.country).toUpperCase() === "SA") && !pr.isNonResident;
+    if (inv.direction === "SALE" && inv.invoiceType === "STANDARD" && localP) {
+      const miss = checkPartner(pr).missing.filter((m) => m !== "رقم الجوال");
+      if (miss.length) throw bad(`لا تُصدر فاتورة ضريبية قياسية للعميل «${pr.name}» قبل استكمال بياناته: ${miss.join("، ")} — أكملها من ملف العميل ثم رحّل الفاتورة`);
+    }
+    if (inv.direction === "PURCHASE" && localP && !pr.vatNumber && lines.some((l: any) => Number(l.vatAmount) > 0 && l.taxCode !== "IM"))
+      throw bad(`المورد «${pr.name}» بلا رقم ضريبي، فلا تُخصم ضريبة مدخلات عن فاتورته. أضف رقمه الضريبي في ملف المورد، أو سجّل البنود بلا ضريبة إن كان غير مسجل`);
+  }
   const number = opts.keepNumber || await nextNumber(t, companyId, inv.channel === "POS" ? (inv.kind === "INVOICE" ? "POS" : "PRT") : PREFIX[inv.direction][inv.kind], inv.date);
   const isSale = inv.direction === "SALE";
   const isReturn = inv.kind === "CREDIT_NOTE";

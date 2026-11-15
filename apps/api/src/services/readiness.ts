@@ -20,6 +20,11 @@ export async function readiness(t: Db, companyId: string, company: any) {
       return { key: "customerTax", label: "بيانات الفاتورة الضريبية لعملاء المنشآت (الرقم الضريبي والعنوان الوطني والجوال)", ok: bad === 0, to: "/customers", optional: !cs.length, hint: bad ? `${bad} عميل بيانات ناقصة — تظهر عليهم علامة «بيانات ناقصة» في قائمة العملاء` : undefined };
     })()]),
     { key: "suppliers", label: "الموردون", ok: (await n(`SELECT COUNT(*) c FROM partners WHERE company_id=$1 AND is_supplier AND NOT is_demo`)) > 0, to: "/suppliers", optional: true },
+    ...(IS_EG ? [] : [await (async () => {
+      const ss = await t.rows(`SELECT * FROM partners WHERE company_id=$1 AND is_supplier AND is_active AND NOT is_demo`, [companyId]);
+      const bad = ss.filter((p: any) => !checkPartner(p).supplierReady).length;
+      return { key: "supplierTax", label: "بيانات الموردين لخصم ضريبة المدخلات (الرقم الضريبي والعنوان الوطني والجوال)", ok: bad === 0, to: "/suppliers", optional: !ss.length, hint: bad ? `${bad} مورد بيانات ناقصة — تظهر عليهم علامة «بيانات ناقصة» في قائمة الموردين` : undefined };
+    })()]),
     { key: "bank", label: "حساب بنكي واحد على الأقل بحركات", ok: (await n(`SELECT COUNT(*) c FROM accounts a WHERE a.company_id=$1 AND a.subtype='BANK' AND EXISTS (SELECT 1 FROM journal_lines l WHERE l.account_id=a.id)`)) > 0, to: "/accounts", optional: true },
     { key: "users", label: "مستخدمون بأدوار (كاشير، محاسب…)", ok: (await n(`SELECT COUNT(*) c FROM memberships WHERE company_id=$1 AND is_active`)) > 1, to: "/settings/users", optional: true },
     { key: "vatPeriod", label: "دورية الإقرار الضريبي (شهري/ربع سنوي)", ok: !!company.vatPeriod, to: "/settings" },

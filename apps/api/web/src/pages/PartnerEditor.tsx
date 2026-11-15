@@ -12,8 +12,10 @@ const NOT_REG = ["منشأة غير ملزمة بالتسجيل (إيرادات 
 /** Same rules as the server (lib/partnerRules.ts) — shown live while typing. */
 export function partnerCheck(f: any) {
   const errors: Record<string, string> = {}, missing: string[] = [];
-  const local = !f.country || String(f.country).toUpperCase() === "SA";
+  const local = !f.foreign && (!f.country || String(f.country).toUpperCase() === "SA");
   const t = f.idType || "CRN";
+  if (f.foreign && !/^[A-Z]{2}$/.test(String(f.country || "")) ) errors.country = "رمز الدولة حرفان";
+  else if (f.foreign && String(f.country).toUpperCase() === "SA") errors.country = "اختر «المملكة العربية السعودية» من القائمة";
   const idv = t === "CRN" ? f.crNumber : f.idNumber;
   if (has(f.vatNumber) && !/^3\d{13}3$/.test(dg(f.vatNumber))) errors.vatNumber = "15 رقماً يبدأ وينتهي بـ 3";
   if (has(idv) && ID_HINT[t] && !ID_HINT[t].test(dg(idv))) errors.idValue = "صيغة الرقم غير صحيحة";
@@ -26,7 +28,16 @@ export function partnerCheck(f: any) {
   if (!has(f.vatNumber) && has(idv) && f.kind === "COMPANY" && !has(f.vatExemptReason)) missing.push("سبب عدم التسجيل في الضريبة");
   for (const [k, ar] of [["street", "الشارع"], ["buildingNo", "رقم المبنى"], ["district", "الحي"], ["city", "المدينة"], ["postalCode", "الرمز البريدي"]]) if (!has(f[k])) missing.push(ar);
   if (!has(f.phone)) missing.push("الجوال");
-  return { errors, missing, ready: !Object.keys(errors).length && !missing.length };
+  // supplier: what his purchase invoices need for the input-VAT deduction (same as the server)
+  const sup: string[] = [];
+  if (f.kind === "INDIVIDUAL") { if (!has(f.phone)) sup.push("الجوال"); }
+  else if (!local || f.isNonResident) { if (!has(f.country) || String(f.country).toUpperCase() === "SA") sup.push("دولة المورد"); if (!has(f.city)) sup.push("المدينة"); if (!has(f.phone) && !has(f.email)) sup.push("الجوال أو البريد الإلكتروني"); }
+  else {
+    if (!has(f.vatNumber) && !has(f.vatExemptReason)) sup.push("الرقم الضريبي أو سبب عدم التسجيل");
+    for (const [k, ar] of [["street", "الشارع"], ["buildingNo", "رقم المبنى"], ["district", "الحي"], ["city", "المدينة"], ["postalCode", "الرمز البريدي"]]) if (!has(f[k])) sup.push(ar);
+    if (!has(f.phone)) sup.push("الجوال");
+  }
+  return { errors, missing, ready: !Object.keys(errors).length && !missing.length, supMissing: sup, supReady: !Object.keys(errors).length && !sup.length };
 }
 
 const Sec = ({ children }: { children: React.ReactNode }) => <div className="span3 form-sec">{children}</div>;
@@ -41,17 +52,23 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
   const whtTypes = useFetch<any>(role === "SUPPLIER" || p.isSupplier ? (EG ? "/tax/eg-wht/types" : "/tax/wht/types") : null);
   const [f, setF] = useState<any>({ kind: "COMPANY", country: CFG.country, paymentTerms: 0, creditLimit: 0, isCustomer: role === "CUSTOMER", isSupplier: role === "SUPPLIER", isActive: true, idType: "", ...p });
   const [notReg, setNotReg] = useState<boolean>(!!p.vatExemptReason);
+  const [foreign, setForeign] = useState<boolean>(!EG && ((!!p.country && String(p.country).toUpperCase() !== "SA") || !!p.isNonResident));
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const idType = f.idType || (f.kind === "INDIVIDUAL" ? "NAT" : "CRN");
   const idKey = idType === "CRN" ? "crNumber" : "idNumber";
-  const chk = useMemo(() => (EG ? { errors: {} as Record<string, string>, missing: [] as string[], ready: true } : partnerCheck({ ...f, idType })), [f, idType, EG]);
+  const chk = useMemo(() => (EG ? { errors: {} as Record<string, string>, missing: [] as string[], ready: true, supMissing: [] as string[], supReady: true } : partnerCheck({ ...f, foreign, idType, vatExemptReason: notReg ? f.vatExemptReason : null, vatNumber: notReg ? null : f.vatNumber })), [f, idType, EG, notReg, foreign]);
   const isCustomer = !!f.isCustomer;
-  const strictCo = !EG && isCustomer && f.kind === "COMPANY";
-  const local = !f.country || String(f.country).toUpperCase() === "SA";
+  const local = !foreign;
+  const isSupplier = !!f.isSupplier;
+  const supLocalCo = !EG && isSupplier && f.kind === "COMPANY" && local && !f.isNonResident;
+  const custCo = !EG && isCustomer && f.kind === "COMPANY";
+  const strictCo = custCo || supLocalCo; // the fields marked * on the form
+  const who = isSupplier && !isCustomer ? "المورد" : "العميل";
   const idTypes = meta.data?.idTypes || FALLBACK_IDS;
   const err = (k: string) => (chk.errors as any)[k];
   const lbl = (t: string, req?: boolean) => (req ? `${t} *` : t);
   const save = () => run(async () => {
+    if (Object.keys(chk.errors).length) throw new Error("صحّح الحقول المعلَّمة: " + Object.values(chk.errors).join("، "));
     const body = { ...f, idType: EG ? f.idType : idType, vatExemptReason: notReg ? f.vatExemptReason || null : null, vatNumber: notReg ? null : f.vatNumber };
     const row = p.id ? await api(`/partners/${p.id}`, { method: "PUT", body }) : await api("/partners", { body });
     onClose(row || true);
@@ -64,6 +81,10 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         {chk.ready ? "✓ البيانات مكتملة للفاتورة الضريبية القياسية (B2B) وفق متطلبات هيئة الزكاة والضريبة والجمارك."
           : f.kind === "COMPANY" ? <>عميل منشأة — الفاتورة الضريبية القياسية تتطلب: <b>{chk.missing.join("، ")}</b>{Object.keys(chk.errors).length > 0 && " — وصحّح الحقول المعلَّمة بالأحمر"}.</>
           : <>عميل فرد: يكفي الاسم والجوال للفاتورة المبسطة. أكمل العنوان الوطني والهوية إن احتاج فاتورة ضريبية قياسية.</>}
+      </div>}
+      {!EG && isSupplier && <div className={"alert small " + (chk.supReady ? "ok" : "warn")} data-sup-check style={{ marginBottom: 12 }}>
+        {chk.supReady ? (notReg ? "✓ بيانات المورد مكتملة. المورد غير مسجل في الضريبة: فواتيره لا تحمل ضريبة ولا يُخصم عنها ضريبة مدخلات." : "✓ بيانات المورد مكتملة: فواتيره تصلح مستنداً لخصم ضريبة المدخلات في الإقرار الضريبي.")
+          : <>بيانات المورد المطلوبة لخصم ضريبة المدخلات (الفاتورة الضريبية يجب أن تحمل اسم المورد وعنوانه ورقمه الضريبي): <b>{chk.supMissing.join("، ")}</b>{Object.keys(chk.errors).length > 0 && " — وصحّح الحقول المعلَّمة بالأحمر"}.</>}
       </div>}
       <div className="form-grid">
         <Sec>البيانات الأساسية</Sec>
@@ -80,16 +101,16 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
           <Field label="الرقم القومي / رقم الهوية" hint="مطلوب للأفراد في فواتير 50,000 جنيه فأكثر"><Input value={f.idNumber || ""} onChange={s("idNumber")} dir="ltr" /></Field>
         </> : <>
           {!notReg && <Field label={lbl(CFG.taxIdLabel, strictCo)} hint={err("vatNumber") || CFG.taxIdHint}><Input className={err("vatNumber") ? "invalid" : ""} value={f.vatNumber || ""} onChange={s("vatNumber")} dir="ltr" maxLength={15} placeholder="3XXXXXXXXXXXXX3" /></Field>}
-          <Field label="التسجيل في ضريبة القيمة المضافة" span2={notReg}><label className="check"><input type="checkbox" checked={notReg} onChange={(e) => setNotReg(e.target.checked)} /> العميل غير مسجل في الضريبة (يُعرَّف بالهوية)</label>
+          <Field label="التسجيل في ضريبة القيمة المضافة" span2={notReg}><label className="check"><input type="checkbox" checked={notReg} onChange={(e) => setNotReg(e.target.checked)} /> {who} غير مسجل في الضريبة{isCustomer ? " (يُعرَّف بالهوية)" : ""}</label>
             {notReg && <Select value={f.vatExemptReason || ""} onChange={s("vatExemptReason")} style={{ marginTop: 6 }}><option value="">— السبب{strictCo ? " *" : ""} —</option>{NOT_REG.map((r) => <option key={r} value={r}>{r}</option>)}</Select>}</Field>
-          <Field label={lbl("نوع هوية المشتري", strictCo && notReg)} hint="رمز الهوية في الفاتورة الإلكترونية"><Select value={idType} onChange={s("idType")}>{Object.entries(idTypes).map(([k, v]: any) => <option key={k} value={k}>{v.ar} ({k})</option>)}</Select></Field>
-          <Field label={lbl(`رقم ${idTypes[idType]?.ar || "الهوية"}`, strictCo && notReg)} hint={err("idValue") || idTypes[idType]?.hint || undefined}><Input className={err("idValue") ? "invalid" : ""} value={f[idKey] || ""} onChange={s(idKey)} dir="ltr" /></Field>
+          <Field label={lbl(isCustomer ? "نوع هوية المشتري" : "نوع الهوية", custCo && notReg)} hint="رمز الهوية في الفاتورة الإلكترونية"><Select value={idType} onChange={s("idType")}>{Object.entries(idTypes).map(([k, v]: any) => <option key={k} value={k}>{v.ar} ({k})</option>)}</Select></Field>
+          <Field label={lbl(`رقم ${idTypes[idType]?.ar || "الهوية"}`, custCo && notReg)} hint={err("idValue") || idTypes[idType]?.hint || undefined}><Input className={err("idValue") ? "invalid" : ""} value={f[idKey] || ""} onChange={s(idKey)} dir="ltr" /></Field>
           {idType !== "CRN" && f.kind === "COMPANY" && <Field label="السجل التجاري (اختياري)"><Input value={f.crNumber || ""} onChange={s("crNumber")} dir="ltr" /></Field>}
         </>}
 
         <Sec>العنوان {EG ? "" : "الوطني"}</Sec>
-        <Field label="الدولة">{EG ? <Input value={f.country || CFG.country} onChange={s("country")} dir="ltr" /> : <Select value={local ? "SA" : "XX"} onChange={(e) => setF({ ...f, country: e.target.value === "SA" ? "SA" : "" })}><option value="SA">المملكة العربية السعودية</option><option value="XX">دولة أخرى</option></Select>}</Field>
-        {!EG && !local && <Field label="رمز الدولة (ISO)" hint="مثال AE, EG, US"><Input value={f.country || ""} onChange={(e) => setF({ ...f, country: e.target.value.toUpperCase().slice(0, 2) })} dir="ltr" maxLength={2} /></Field>}
+        <Field label="الدولة">{EG ? <Input value={f.country || CFG.country} onChange={s("country")} dir="ltr" /> : <Select value={local ? "SA" : "XX"} onChange={(e) => { const sa = e.target.value === "SA"; setForeign(!sa); setF({ ...f, country: sa ? "SA" : "", isNonResident: sa ? false : f.isNonResident }); }}><option value="SA">المملكة العربية السعودية</option><option value="XX">دولة أخرى</option></Select>}</Field>
+        {!EG && !local && <Field label="رمز الدولة (ISO) *" hint={err("country") || "مثال AE, EG, US"}><Input value={f.country || ""} onChange={(e) => setF({ ...f, country: e.target.value.toUpperCase().slice(0, 2) })} dir="ltr" maxLength={2} /></Field>}
         {EG ? <Field label="المحافظة"><Input value={f.governate || ""} onChange={s("governate")} list="eg-gov" /><datalist id="eg-gov">{["القاهرة", "الجيزة", "الإسكندرية", "القليوبية", "الشرقية", "الدقهلية", "الغربية", "المنوفية", "البحيرة", "دمياط", "بورسعيد", "الإسماعيلية", "السويس", "أسيوط", "سوهاج", "قنا", "الأقصر", "أسوان"].map((g) => <option key={g} value={g} />)}</datalist></Field>
           : local && <Field label="المنطقة"><Select value={f.region || ""} onChange={s("region")}><option value="">—</option>{(meta.data?.regions || []).map((r: string) => <option key={r} value={r}>{r}</option>)}</Select></Field>}
         <Field label={lbl("المدينة", strictCo)}><Input value={f.city || ""} onChange={s("city")} /></Field>
@@ -100,7 +121,7 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         <Field label={lbl("الرمز البريدي", strictCo)} hint={err("postalCode") || (local && !EG ? "5 أرقام" : undefined)}><Input className={err("postalCode") ? "invalid" : ""} value={f.postalCode || ""} onChange={s("postalCode")} dir="ltr" maxLength={local && !EG ? 5 : 10} /></Field>
 
         <Sec>التواصل</Sec>
-        <Field label={lbl("الجوال", !EG && isCustomer)} hint={err("phone")}><Input className={err("phone") ? "invalid" : ""} value={f.phone || ""} onChange={s("phone")} dir="ltr" placeholder="05XXXXXXXX" inputMode="tel" /></Field>
+        <Field label={lbl("الجوال", !EG && (isCustomer || (isSupplier && local && !f.isNonResident)))} hint={err("phone")}><Input className={err("phone") ? "invalid" : ""} value={f.phone || ""} onChange={s("phone")} dir="ltr" placeholder="05XXXXXXXX" inputMode="tel" /></Field>
         <Field label="هاتف آخر / الثابت"><Input value={f.phone2 || ""} onChange={s("phone2")} dir="ltr" inputMode="tel" /></Field>
         <Field label="البريد الإلكتروني" hint={err("email") || "تُرسل إليه الفواتير وكشف الحساب"}><Input className={err("email") ? "invalid" : ""} value={f.email || ""} onChange={s("email")} dir="ltr" type="email" /></Field>
         {f.kind === "COMPANY" && <Field label="الشخص المسؤول"><Input value={f.contactPerson || ""} onChange={s("contactPerson")} /></Field>}
@@ -112,7 +133,7 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
         <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
         <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>
         {EG && !!f.isSupplier && <Field label="الخصم تحت حساب الضريبة (الافتراضي في سندات الصرف)" hint="يُخصم من المدفوعات للمورد ويورَّد بنموذج 41 (للتعاملات فوق 300 جنيه)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— لا يُخصم —</option>{Object.entries(whtTypes.data?.types || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(1).replace(/\.0$/, "")}%</option>)}</Select></Field>}
-        {!EG && !!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country })} /> مورد غير مقيم في المملكة</label></Field>}
+        {!EG && !!f.isSupplier && <Field label="الإقامة الضريبية" hint="المورد غير المقيم تُستقطع من مدفوعاته ضريبة الاستقطاع (المادة 68 من نظام ضريبة الدخل)"><label className="check"><input type="checkbox" checked={!!f.isNonResident} onChange={(e) => { if (e.target.checked) setForeign(true); setF({ ...f, isNonResident: e.target.checked, country: e.target.checked && (f.country || "SA") === "SA" ? "" : f.country }); }} /> مورد غير مقيم في المملكة</label></Field>}
         {!EG && !!f.isSupplier && !!f.isNonResident && <Field label="نوع الدفعات الافتراضي (نسبة الاستقطاع)"><Select value={f.whtType || ""} onChange={s("whtType")}><option value="">— يُحدد في كل سند —</option>{Object.entries(whtTypes.data || {}).map(([k, v]: any) => <option key={k} value={k}>{v.ar} — {(v.rate * 100).toFixed(0)}%</option>)}</Select></Field>}
         <Field label="ملاحظات" span3><textarea className="input" value={f.notes || ""} onChange={s("notes")} /></Field>
       </div>

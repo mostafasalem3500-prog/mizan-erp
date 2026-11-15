@@ -50,7 +50,7 @@ master.get(
        FROM partners p WHERE ${where.join(" AND ")} ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
-    for (const r of rows) { const c = checkPartner(r); r.taxReady = c.taxReady; r.taxMissing = c.missing; }
+    for (const r of rows) { const c = checkPartner(r); const asSup = role === "is_supplier" || (r.isSupplier && !r.isCustomer); r.taxReady = asSup ? c.supplierReady : c.taxReady; r.taxMissing = asSup ? c.supplierMissing : c.missing; }
     return rows;
   }),
 );

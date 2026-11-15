@@ -16,6 +16,7 @@ import { employeePosition, addLeave, createLoan, createProvision, postProvision,
 import { createBudget, fillFromActuals, getBudget } from "./budgets";
 import { createLandedCost, postLandedCost } from "./landed";
 import { savePriceList } from "./pricelists";
+import { saveCentre } from "./projects";
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -45,7 +46,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 11;
+export const DEMO_VERSION = 12;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -72,7 +73,9 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
       customers.push(await t.insert("partners", { companyId, code: `C-D${String(i + 1).padStart(3, "0")}`, name, isCustomer: true, kind: isCo ? "COMPANY" : "INDIVIDUAL", vatNumber: vat, crNumber: isCo ? `10100${between(10000, 99999)}` : null, phone: `05${between(10000000, 99999999)}`, city: pick(["مكة المكرمة", "جدة", "الرياض", "الطائف"]), district: "الحي التجاري", street: "شارع الملك فهد", buildingNo: String(between(1000, 9999)), postalCode: String(between(21000, 24999)), additionalNo: String(between(1000, 9999)), email: isCo ? `info${i + 1}@example.sa` : null, contactPerson: isCo ? "مدير المشتريات" : null, creditLimit: isCo ? 150000 : 0, paymentTerms: isCo ? 30 : 0, isDemo: true }));
     const suppliers: any[] = [];
     for (const [i, [name, vat, city]] of SUPPLIERS.entries())
-      suppliers.push(await t.insert("partners", { companyId, code: `S-D${String(i + 1).padStart(3, "0")}`, name, isSupplier: true, vatNumber: vat, city, country: vat ? "SA" : "AE", paymentTerms: 30, isDemo: true }));
+      suppliers.push(await t.insert("partners", { companyId, code: `S-D${String(i + 1).padStart(3, "0")}`, name, isSupplier: true, kind: "COMPANY", vatNumber: vat, crNumber: vat ? `40300${between(10000, 99999)}` : null, city, country: vat ? "SA" : "AE",
+        phone: vat ? `05${between(10000000, 99999999)}` : "0097142000000", email: `sales${i + 1}@example.${vat ? "sa" : "ae"}`, contactPerson: "مدير المبيعات",
+        ...(vat ? { district: "حي الصناعية", street: "طريق الملك عبدالعزيز", buildingNo: String(between(1000, 9999)), postalCode: String(between(11000, 34999)), additionalNo: String(between(1000, 9999)) } : { street: "Sheikh Zayed Road" }), paymentTerms: 30, isDemo: true }));
     const cats: any[] = [];
     for (const [name, color] of CATS) cats.push(await t.insert("product_categories", { companyId, name, color, isDemo: true }));
     const products: any[] = [];
@@ -108,11 +111,19 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     await createAsset(t, companyId, userName, { name: "سيارة توصيل - تويوتا هايس", category: "سيارات", acquisitionDate: start, cost: 95000, vatAmount: 14250, salvageValue: 15000, usefulLifeMonths: 60, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120103'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120202'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أجهزة نقاط البيع والحاسب", category: "حاسب آلي", acquisitionDate: start, cost: 18000, vatAmount: 2700, salvageValue: 0, usefulLifeMonths: 36, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120106'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120205'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أثاث ورفوف المعرض", category: "أثاث", acquisitionDate: start, cost: 24000, vatAmount: 3600, salvageValue: 2000, usefulLifeMonths: 84, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120104'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120203'`, [companyId])).id });
-    const usdSupplier = await t.insert("partners", { companyId, code: "S-D090", name: "Shenzhen Electronics Trading Co.", isSupplier: true, kind: "COMPANY", city: "Shenzhen", country: "CN", currency: "USD", paymentTerms: 30, isDemo: true });
+    const usdSupplier = await t.insert("partners", { companyId, code: "S-D090", name: "Shenzhen Electronics Trading Co.", isSupplier: true, kind: "COMPANY", city: "Shenzhen", country: "CN", phone: "008675500000000", email: "export@example.cn", street: "Futian District", currency: "USD", paymentTerms: 30, isDemo: true });
     // wholesale price list (8% off) linked to two company customers
     const pl = await savePriceList(t, companyId, { name: "عملاء الجملة", kind: "DISCOUNT", discountPct: 8, isDemo: true });
     await t.exec(`UPDATE partners SET price_list_id=$2 WHERE id = ANY($1)`, [customers.filter((x) => x.kind === "COMPANY").slice(0, 2).map((x) => x.id), pl.id]);
-    return { wh: wh.id, wh2: wh2.id, jBranch: jBranch.id, jedProducts, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier, uoms };
+    // cost centres and projects: two centres, and two projects each tied to a customer with a contract value and a cost budget
+    const cc = async (b: any) => { const r = await saveCentre(t, companyId, b); await t.exec(`UPDATE cost_centers SET is_demo=true WHERE id=$1`, [r.id]); return r; };
+    const ccAdmin = await cc({ name: "الإدارة العامة", kind: "CENTER", code: "CC-D01" });
+    const ccJed = await cc({ name: "فرع جدة", kind: "CENTER", code: "CC-D02" });
+    const projects = [
+      { ...(await cc({ name: "توريد وتجهيز برج الواحة", kind: "PROJECT", code: "PRJ-D01", partnerId: customers[0].id, contractValue: 180000, budget: 110000, startDate: start, manager: "م. خالد", notes: "عقد توريد وخدمات على ست دفعات شهرية" })), partnerId: customers[0].id, monthly: 30000, cost: 16500 },
+      { ...(await cc({ name: "تجهيز مدارس المستقبل", kind: "PROJECT", code: "PRJ-D02", partnerId: customers[7].id, contractValue: 96000, budget: 70000, startDate: start, manager: "أ. فهد" })), partnerId: customers[7].id, monthly: 16000, cost: 12400 },
+    ];
+    return { wh: wh.id, wh2: wh2.id, jBranch: jBranch.id, jedProducts, customers, suppliers, products, cash: cash.id, bank: bank.id, posCash: posCash.id, usdSupplier, uoms, ccAdmin: ccAdmin.id, ccJed: ccJed.id, projects };
   });
 
   const stock = ids.products.filter((p) => p.type === "STOCK");
@@ -209,6 +220,15 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         await t.exec(`UPDATE pos_sessions SET closed_at=$2::date + interval '21 hours' WHERE id=$1`, [session.id, date]);
         await t.exec(`UPDATE journal_entries SET date=$2 WHERE source_type='POS_SESSION' AND source_id=$1`, [session.id, date]);
       }
+      // ── projects: a monthly progress invoice to the project's customer and the month's site costs, both tagged with the project ──
+      for (const [pi, prj] of ids.projects.entries()) {
+        const date = addDays(mStart, 8 + pi * 5);
+        if (date > end) continue;
+        const sv = services[(mi + pi) % services.length];
+        const d = await saveDraft(t, c, userName, { direction: "SALE", kind: "INVOICE", date, partnerId: prj.partnerId, warehouseId: ids.wh, invoiceType: "STANDARD", costCenterId: prj.id, notes: `دفعة ${mi + 1} — ${prj.name}`, lines: [{ productId: sv.id, description: `${sv.name} — ${prj.name} (دفعة ${mi + 1})`, qty: 1, unitPrice: prj.monthly, taxCode: "S" }], isDemo: true });
+        salesInvoices.push(await postInvoice(t, c, d.id, userName, { overrideCreditLimit: true }));
+        await createExpense(t, companyId, userName, { date: addDays(date, -3), accountId: await expAcc(t, "5208"), payee: "مقاول الباطن", description: `أعمال تركيب وصيانة موقع — ${prj.name}`, amount: prj.cost, taxCode: "S", payAccountId: ids.bank, costCenterId: prj.id, isDemo: true });
+      }
       // ── expenses ──
       // Jeddah branch: monthly restock transfer + its own rent
       {
@@ -216,10 +236,10 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         const tl = ids.jedProducts.map((p: any) => ({ productId: p.id, qty: Math.min(between(45, 70), Math.floor(Number(avail.find((a) => a.productId === p.id)?.qty || 0) - 40)) })).filter((l: any) => l.qty >= 5);
         if (tl.length) try { await t.savepoint(() => stockAdjustment(t, companyId, userName, { date: addDays(mStart, 2), warehouseId: ids.wh, kind: "TRANSFER", toWarehouse: ids.wh2, isDemo: true, notes: "تزويد فرع جدة", lines: tl })); } catch (e: any) { if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "EXPIRED_STOCK") throw e; }
       }
-      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك عقار جدة", description: `إيجار معرض فرع جدة - ${mStart.slice(0, 7)}`, amount: 3200, taxCode: "S", payAccountId: ids.bank, branchId: ids.jBranch, isDemo: true });
-      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 5500, taxCode: "S", payAccountId: ids.bank, isDemo: true });
+      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك عقار جدة", description: `إيجار معرض فرع جدة - ${mStart.slice(0, 7)}`, amount: 3200, costCenterId: ids.ccJed, taxCode: "S", payAccountId: ids.bank, branchId: ids.jBranch, isDemo: true });
+      await createExpense(t, companyId, userName, { date: addDays(mStart, 1), accountId: await expAcc(t, "5204"), payee: "مالك العقار", description: `إيجار المعرض والمستودع - ${mStart.slice(0, 7)}`, amount: 5500, costCenterId: ids.ccAdmin, taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5205"), payee: "الشركة السعودية للكهرباء", description: "فاتورة كهرباء", amount: r2(1800 + rand() * 900), taxCode: "S", payAccountId: ids.bank, isDemo: true });
-      await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5206"), payee: "STC", description: "اتصالات وإنترنت", amount: 650, taxCode: "S", payAccountId: ids.bank, isDemo: true });
+      await createExpense(t, companyId, userName, { date: addDays(mStart, between(5, 20)), accountId: await expAcc(t, "5206"), payee: "STC", description: "اتصالات وإنترنت", amount: 650, allocations: [{ costCenterId: ids.ccAdmin, amount: 300 }, { costCenterId: ids.ccJed, amount: 200 }], taxCode: "S", payAccountId: ids.bank, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, between(2, 25)), accountId: await expAcc(t, "5213"), payee: "متفرقات", description: "مصروفات نثرية", amount: r2(200 + rand() * 400), taxCode: "S", payAccountId: ids.cash, isDemo: true });
       if (mi % 2 === 0) await createExpense(t, companyId, userName, { date: addDays(mStart, 12), accountId: await expAcc(t, "5301"), payee: "وكالة إعلانات", partnerId: ids.suppliers[3].id, description: "حملة إعلانية على وسائل التواصل", amount: 3500, taxCode: "S", payAccountId: null, isDemo: true });
       await createExpense(t, companyId, userName, { date: addDays(mStart, 3), accountId: await expAcc(t, "5211"), payee: "البنك", description: "رسوم بنكية", amount: 120, taxCode: "E", payAccountId: ids.bank, isDemo: true });
@@ -393,6 +413,8 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM stock_balances WHERE company_id=$1 AND product_id = ANY($2)`, [companyId, demoProducts]);
     await t.exec(`DELETE FROM journal_entries WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM products WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`UPDATE employees SET cost_center_id=NULL WHERE company_id=$1 AND cost_center_id IN (SELECT id FROM cost_centers WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM cost_centers WHERE company_id=$1 AND is_demo AND NOT EXISTS (SELECT 1 FROM journal_lines l WHERE l.cost_center_id=cost_centers.id) AND NOT EXISTS (SELECT 1 FROM expenses x WHERE x.cost_center_id=cost_centers.id)`, [companyId]);
     // demo branches / warehouses (anything real still pointing at them moves to the main branch / default warehouse)
     const mainBr = await t.maybe(`SELECT id FROM branches WHERE company_id=$1 AND is_main`, [companyId]);
     const defWh = await t.maybe(`SELECT id FROM warehouses WHERE company_id=$1 AND NOT is_demo ORDER BY is_default DESC, code LIMIT 1`, [companyId]);
