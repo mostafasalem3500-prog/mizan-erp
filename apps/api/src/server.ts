@@ -1,3 +1,5 @@
+import nodeFs from "fs";
+import nodePath from "path";
 import { r20 } from "./routes/round20";
 import { r22 } from "./routes/round22";
 import { r23 } from "./routes/round23";
@@ -60,10 +62,12 @@ app.use(["/api/attachments", "/api/ai/chat", "/api/archive/upload"], express.jso
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });
+/** The release number shown in the sidebar (apps/api/web/VERSION), so /api/health tells which build is running. */
+const APP_VERSION = (() => { for (const f of [nodePath.join(process.cwd(), "web/VERSION"), nodePath.join(__dirname, "../web/VERSION"), nodePath.join(__dirname, "../../web/VERSION")]) { try { return nodeFs.readFileSync(f, "utf8").trim(); } catch { /* next */ } } return process.env.APP_VERSION || "unknown"; })();
 app.get("/api/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
-    res.json({ ok: true, version: "2.0.0", country: COUNTRY, time: new Date() });
+    res.json({ ok: true, version: APP_VERSION, country: COUNTRY, time: new Date() });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
