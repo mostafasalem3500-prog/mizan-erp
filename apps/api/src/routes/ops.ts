@@ -3,7 +3,7 @@ import { IS_EG } from "../lib/country";
 import { autoSubmit } from "../eta/eta";
 import { Router } from "express";
 import { db, tx } from "../db/pool";
-import { h, bad, conflict, req as need, num, paging, today, isDate } from "../lib/core";
+import { h, bad, conflict, req as need, num, paging, today, isDate, r2, sum } from "../lib/core";
 import { authenticate, perm, cid, actor, p } from "../lib/auth";
 import { audit } from "./master";
 import * as inv from "../services/invoices";
@@ -72,6 +72,19 @@ ops.get("/invoices/:id", perm("sales.read"), h(async (req) => {
 
 ops.post("/invoices", dyn(true), h(async (req) => { const d = await tx((t) => inv.saveDraft(t, req.company, actor(req), req.body)); await audit(req, "CREATE", "invoice", d.id, { kind: d.kind, number: d.number }); return inv.getInvoice(db, cid(req), d.id); }));
 ops.put("/invoices/:id", dyn(true), h(async (req) => { await tx((t) => inv.saveDraft(t, req.company, actor(req), req.body, p(req).id)); return inv.getInvoice(db, cid(req), p(req).id); }));
+/** The entry posting would create, without posting: the invoice is posted inside a transaction that is always rolled back. */
+class Preview extends Error { constructor(public data: any) { super("preview"); } }
+ops.post("/invoices/:id/preview-entry", dyn(true), h(async (req) => {
+  try {
+    await tx(async (t) => {
+      const doc = await inv.postInvoice(t, req.company, p(req).id, actor(req), { overrideCreditLimit: true });
+      const lines = doc.journalId ? await t.rows(`SELECT l.debit, l.credit, l.description, a.code, a.name_ar, c.name AS cost_center FROM journal_lines l JOIN accounts a ON a.id=l.account_id LEFT JOIN cost_centers c ON c.id=l.cost_center_id WHERE l.entry_id=$1 ORDER BY l.sort`, [doc.journalId]) : [];
+      throw new Preview({ lines, debit: r2(sum(lines, (l: any) => l.debit)), credit: r2(sum(lines, (l: any) => l.credit)), costTotal: Number(doc.costTotal || 0), total: Number(doc.total) });
+    });
+  } catch (e: any) { if (e instanceof Preview) return e.data; throw e; }
+  return { lines: [] };
+}));
+
 ops.post("/invoices/:id/post", dyn(true), h(async (req) => {
   const override = !!req.body?.overrideCreditLimit && (["OWNER", "ADMIN"].includes(req.auth.role || "") || req.auth.superAdmin);
   const doc = await tx((t) => inv.postInvoice(t, req.company, p(req).id, actor(req), { tenders: req.body?.tenders, overrideCreditLimit: override }));

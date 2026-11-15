@@ -444,4 +444,4 @@ master.get("/audit", perm("settings.read"), h(async (req) => {
 }));
 
 master.get("/fiscal-years", perm("accounting.read"), h(async (req) => ({ years: await db.rows(`SELECT * FROM fiscal_years WHERE company_id=$1 ORDER BY start_date DESC`, [cid(req)]), periods: await db.rows(`SELECT * FROM periods WHERE company_id=$1 ORDER BY start_date`, [cid(req)]) })));
-master.put("/periods/:id", perm("accounting.write"), h(async (req) => { const status = req.body.status === "LOCKED" ? "LOCKED" : "OPEN"; await db.exec(`UPDATE periods SET status=$3 WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req), status]); await audit(req, status === "LOCKED" ? "LOCK_PERIOD" : "UNLOCK_PERIOD", "period", p(req).id); return { ok: true }; }));
+master.put("/periods/:id", perm("accounting.write"), h(async (req) => { if (!["LOCKED", "OPEN"].includes(req.body?.status)) throw bad("حالة الفترة: LOCKED أو OPEN"); const status = req.body.status; await db.exec(`UPDATE periods SET status=$3 WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req), status]); await audit(req, status === "LOCKED" ? "LOCK_PERIOD" : "UNLOCK_PERIOD", "period", p(req).id); return { ok: true }; }));

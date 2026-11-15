@@ -24,6 +24,9 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
   const isCust = role === "CUSTOMER";
   const label = isCust ? "العملاء" : "الموردون";
   const cities = useMemo(() => [...new Set((data || []).map((p: any) => (p.city || "").trim()).filter(Boolean))].sort(), [data]);
+  // tax data the authority requires is incomplete (Saudi edition): company customers, and every supplier
+  const incomplete = (p: any) => CFG.country === "SA" && p.taxReady === false && (isCust ? p.kind === "COMPANY" : true);
+  const missingCount = (data || []).filter((p: any) => p.isActive && incomplete(p)).length;
   const filtered = useMemo(() => (data || []).filter((p: any) => {
     const b = Number(p.balance);
     if (status === "active" && !p.isActive) return false;
@@ -33,6 +36,7 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
     if (bal === "zero" && Math.abs(b) > 0.004) return false;
     if (bal === "overdue" && !(Number(p.overdue) > 0)) return false;
     if (bal === "limit" && !(Number(p.creditLimit) > 0 && b > Number(p.creditLimit))) return false;
+    if (bal === "missing" && !incomplete(p)) return false;
     if (city && (p.city || "").trim() !== city) return false;
     if (kind && p.kind !== kind) return false;
     return true;
@@ -47,7 +51,8 @@ export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
       <div className="card-b">
         <div className="toolbar">
           <SearchBox value={search} onChange={setSearch} placeholder="بحث بالاسم / الكود / الجوال / الرقم الضريبي" width={280} />
-          <Select value={bal} onChange={(e) => setBal(e.target.value)}><option value="">كل الأرصدة</option><option value="due">{isCust ? "عليهم رصيد" : "لهم رصيد مستحق"}</option><option value="overdue">متأخر السداد</option>{isCust && <option value="limit">تجاوزوا حد الائتمان</option>}<option value="credit">رصيد دائن (مقدّم)</option><option value="zero">رصيد صفري</option></Select>
+          <Select value={bal} onChange={(e) => setBal(e.target.value)}><option value="">كل الأرصدة</option><option value="due">{isCust ? "عليهم رصيد" : "لهم رصيد مستحق"}</option><option value="overdue">متأخر السداد</option>{isCust && <option value="limit">تجاوزوا حد الائتمان</option>}<option value="credit">رصيد دائن (مقدّم)</option><option value="zero">رصيد صفري</option>{missingCount > 0 && <option value="missing">بيانات ضريبية ناقصة ({missingCount})</option>}</Select>
+          {missingCount > 0 && bal !== "missing" && <button className="btn sm" data-missing onClick={() => setBal("missing")}>⚠ {missingCount} بيانات ناقصة</button>}
           <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">النشطون</option><option value="inactive">الموقوفون</option><option value="all">الكل</option></Select>
           <Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="">منشأة وفرد</option><option value="COMPANY">منشآت</option><option value="INDIVIDUAL">أفراد</option></Select>
           {cities.length > 1 && <Select value={city} onChange={(e) => setCity(e.target.value)}><option value="">كل المدن</option>{cities.map((c: any) => <option key={c} value={c}>{c}</option>)}</Select>}

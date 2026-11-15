@@ -201,9 +201,16 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
     toast(`تم تعديل الفاتورة (تعديل رقم ${r.revision})${r.cogsAdjustment ? ` — فرق سعر الكميات المباعة ${money(r.cogsAdjustment)} حُمّل على تكلفة المبيعات` : ""}`, "ok");
     onClose(true);
   });
-  const save = (post: boolean) => run(async () => {
+  const [savedId, setSavedId] = useState<string | undefined>(id);
+  const [prevE, setPrevE] = useState<any>(null);
+  const storeDraft = async () => {
     if (!partner) throw new Error(isSale ? "اختر العميل" : "اختر المورد");
-    const d = id ? await api(`/invoices/${id}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
+    const d = savedId ? await api(`/invoices/${savedId}`, { method: "PUT", body: body() }) : await api("/invoices", { body: body() });
+    setSavedId(d.id); return d;
+  };
+  const preview = () => run(async () => { const d = await storeDraft(); setPrevE(await api(`/invoices/${d.id}/preview-entry`, { body: {} })); });
+  const save = (post: boolean) => run(async () => {
+    const d = await storeDraft();
     if (post) {
       if (!confirmDlg(`ترحيل ${KIND_TITLE[direction][kind]} بإجمالي ${money(totals.total)} ${CUR()}؟ لا يمكن تعديل المستند بعد الترحيل.`)) { onClose(true); return; }
       await postWithCreditCheck(d.id, me.role === "OWNER" || me.role === "ADMIN" || me.superAdmin);
@@ -227,9 +234,11 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
       <button className="btn" onClick={() => onClose()}>إلغاء</button>
       {revise ? <button className="btn primary" disabled={busy} onClick={saveRevision}>حفظ التعديل وإعادة الترحيل ✓</button> : <>
       <button className="btn" disabled={busy} onClick={() => save(false)}>حفظ مسودة</button>
+      {(kind === "INVOICE" || isNote) && <button className="btn" disabled={busy} onClick={preview} title="يحفظ المسودة ثم يعرض القيد الذي سيُسجَّل، دون ترحيل">معاينة القيد</button>}
       {(kind === "INVOICE" || isNote) && <button className="btn primary" disabled={busy} onClick={() => save(true)}>حفظ وترحيل ✓</button>}
       {(kind === "QUOTATION" || kind === "ORDER") && <button className="btn primary" disabled={busy} onClick={() => save(false)}>حفظ</button>}</>}
     </>}>
+      {prevE && <Modal wide title="معاينة القيد قبل الترحيل" onClose={() => setPrevE(null)} footer={<><div className="grow" /><button className="btn" onClick={() => setPrevE(null)}>رجوع للتعديل</button></>}><div className="small muted mb">حُفظت الفاتورة مسودة.</div><EntryPreview prev={prevE} /></Modal>}
       {revise && <div className="alert info small mb">تعديل فاتورة مشتريات مرحّلة: يُعكس القيد الأصلي ويُعاد الترحيل <b>بنفس رقم الفاتورة</b>، وتُعكس كميات المخزون وتُستلم من جديد. فرق السعر على الكميات المباعة يُحمّل على تكلفة المبيعات. يُحفظ التعديل في سجل المراجعة مع سببه وصورة قبل/بعد.{revise.amountPaid > 0 && <> المسدد على الفاتورة {money(revise.amountPaid)} {CUR()} يبقى مخصصاً لها — لا يمكن تغيير المورد أو تخفيض الإجمالي عنه.</>}</div>}
       {revise && <Field label="سبب التعديل (إلزامي — سجل المراجعة)"><Input autoFocus value={revReason} onChange={(e) => setRevReason(e.target.value)} placeholder="مثال: خطأ في سعر الوحدة مقارنة بفاتورة المورد رقم ..." /></Field>}
       <div className="form-grid">
@@ -279,12 +288,23 @@ import { QuickPartner } from "./PartnerEditor";
 import { combinePct } from "../shared/promoEngine";
 
 // ─── view / print ──────────────────────────────────────────────────────────
+/** The entry posting would create (from /invoices/:id/preview-entry). */
+export function EntryPreview({ prev }: { prev: any }) {
+  return <>
+    <div className="alert info small mb">هذا ما سيُسجَّل عند الترحيل. لم يُرحَّل شيء بعد، ولم يتغير المخزون ولا الأرصدة.</div>
+    <div className="table-wrap"><table className="tbl compact" data-preview><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{prev.lines.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}{l.costCenter && <span className="badge gray" style={{ marginInlineStart: 6 }}>🏷 {l.costCenter}</span>}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody>
+      <tfoot><tr><th>الإجمالي {Math.abs(prev.debit - prev.credit) < 0.005 ? "— متوازن ✓" : ""}</th><th className="n"><Money v={prev.debit} /></th><th className="n"><Money v={prev.credit} /></th></tr></tfoot></table></div>
+    {prev.costTotal > 0 && <div className="small muted mt">تكلفة البضاعة في هذه الفاتورة: <Money v={prev.costTotal} /> (بمتوسط التكلفة الحالي).</div>}
+  </>;
+}
+
 export function DocumentView() {
   const { id } = useParams();
   const nav = useNavigate(); const base = useBase();
   const toast = useToast();
   const { can } = useCompanyContext();
   const { data: d, loading, reload } = useFetch(id ? `/invoices/${id}` : null);
+  const [prev, setPrev] = useState<any>(null);
   const [qr, setQr] = useState("");
   const [layout, setLayout] = useState<string>(""); // "" = the establishment's default template
   const [cn, setCn] = useState<any>(null);
@@ -326,6 +346,7 @@ export function DocumentView() {
         {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" disabled={busy} onClick={() => copy()}>⧉ نسخ</button>}
         {d.kind === "QUOTATION" && d.status === "DRAFT" && can(isSale ? "sales.write" : "purchases.write") && <button className="btn primary sm" disabled={busy} onClick={() => convert("INVOICE")}>تحويل لفاتورة ←</button>}
         {d.status === "DRAFT" && (d.kind === "QUOTATION" || d.kind === "ORDER") && can(isSale ? "sales.write" : "purchases.write") && <><button className="btn primary sm" onClick={() => convert(d.kind === "QUOTATION" ? "ORDER" : "INVOICE")}>تحويل إلى {d.kind === "QUOTATION" ? "أمر" : "فاتورة"} →</button>{d.kind === "QUOTATION" && <button className="btn sm" onClick={() => convert("INVOICE")}>تحويل إلى فاتورة مباشرة</button>}</>}
+        {d.status === "DRAFT" && d.kind !== "QUOTATION" && d.kind !== "ORDER" && <button className="btn sm" disabled={busy} onClick={() => run(async () => setPrev(await api(`/invoices/${d.id}/preview-entry`, { body: {} })))}>معاينة القيد</button>}
         {d.status === "DRAFT" && d.kind !== "QUOTATION" && d.kind !== "ORDER" && <button className="btn primary sm" disabled={busy} onClick={post}>ترحيل ✓</button>}
         {d.status === "DRAFT" && <button className="btn danger sm" onClick={del}>حذف</button>}
         {d.status === "POSTED" && d.kind === "INVOICE" && remaining > 0.001 && can("payments.write") && <button className="btn accent sm" onClick={() => setPay(true)}>{isSale ? "تسجيل تحصيل" : "تسجيل سداد"}</button>}
@@ -356,6 +377,9 @@ export function DocumentView() {
           <tbody>{extras.data.moves.map((m: any) => <tr key={m.id}><td>{m.name}<div className="small muted num">{m.sku}</div></td><td className="small">{m.warehouse}</td><td className={"n " + (Number(m.qty) < 0 ? "neg-val" : "pos-val")}>{Number(m.qty) > 0 ? "+" : ""}{Number(m.qty)}</td><td className="n"><Money v={Math.abs(Number(m.value))} /></td><td className="n">{Number(m.balanceQty)}</td></tr>)}</tbody></table></div></div>}
       </div>
       <div className="grid c2 no-print">
+        {prev && <Modal wide title="معاينة القيد قبل الترحيل" onClose={() => setPrev(null)} footer={<><div className="grow" /><button className="btn" onClick={() => setPrev(null)}>إغلاق</button><button className="btn primary" disabled={busy} onClick={() => { setPrev(null); post(); }}>ترحيل ✓</button></>}>
+          <EntryPreview prev={prev} />
+        </Modal>}
         {d.journal?.length > 0 && <div className="card"><div className="card-h"><h3>القيد المحاسبي</h3></div><div className="table-wrap"><table className="tbl compact"><thead><tr><th>الحساب</th><th className="n">مدين</th><th className="n">دائن</th></tr></thead><tbody>{d.journal.map((l: any, i: number) => <tr key={i}><td>{l.code} {l.nameAr}<div className="small muted">{l.description}</div></td><td className="n"><Money v={l.debit} blankZero /></td><td className="n"><Money v={l.credit} blankZero /></td></tr>)}</tbody></table></div></div>}
         <div className="grid">
           {d.payments?.length > 0 && <div className="card"><div className="card-h"><h3>السدادات المرتبطة</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{d.payments.map((p: any) => <tr key={p.id}><td>{p.number}</td><td className="dt">{fmtDate(p.date)}</td><td>{METHOD_AR[p.method]}</td><td className="n"><Money v={p.allocated} />{p.fcAllocated && <div className="small muted">{money(p.fcAllocated)} {p.currency} @ {Number(p.exchangeRate)}{Number(p.fxDiff) ? ` · فرق صرف ${money(p.fxDiff)}` : ""}</div>}</td></tr>)}</tbody></table></div></div>}
