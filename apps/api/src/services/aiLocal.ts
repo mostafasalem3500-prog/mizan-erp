@@ -30,6 +30,7 @@ const canon = (n: string) => n
   .replace(/(^| )(دلوقتي|الحين|هالحين|حاليا|هسه)(?= |$|؟)/g, "$1الان").replace(/(^| )(ابغى|ابغي|ابي|ودي|عايز|عاوز|محتاج|اريد|ارغب|ممكن|لو سمحت|من فضلك|فضلا|رجاء)( ان)?( تعطيني| تعرض لي| تقول لي| توريني| اعرف| اشوف)?(?= )/g, "$1")
   .replace(/(^| )(ليه|علشان ايه|عشان ايش)(?= )/g, "$1لماذا").replace(/(^| )(فلوس|مصاري)(?= |$|؟)/g, "$1نقد").replace(/(^| )(النهارده|انهارده)(?= |$|؟)/g, "$1اليوم").replace(/(^| )(امبارح|مبارح)(?= |$|؟)/g, "$1امس")
   .replace(/(^| )اللي فات(?= |$|؟)/g, "$1الماضي").replace(/(^| )(الجاي|الجايه)(?= |$|؟)/g, "$1القادم").replace(/\s+/g, " ").trim();
+const addDay = (d: string, k: number) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
 const money = (v: number) => v.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const MONTHS: Record<string, number> = { يناير: 1, فبراير: 2, مارس: 3, ابريل: 4, مايو: 5, يونيو: 6, يوليو: 7, اغسطس: 8, سبتمبر: 9, اكتوبر: 10, نوفمبر: 11, ديسمبر: 12 };
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -407,6 +408,29 @@ function vatAnswer(r: any, cur: string, label: string | undefined, eg: boolean):
   if (r.error) return r.error;
   return `**${eg ? "ضريبة القيمة المضافة" : "موقف ضريبة القيمة المضافة"} — ${label || "الفترة"}** (${r.period.from} إلى ${r.period.to})\n- ضريبة المخرجات (على المبيعات): ${money(r.outputVat)}\n- ضريبة المدخلات (على المشتريات والمصروفات): ${money(r.inputVat)}\n- ${r.net >= 0 ? `**المستحق سداده للهيئة: ${money(r.net)} ${cur}**` : `**رصيد دائن لصالحك: ${money(-r.net)} ${cur}** (يُرحَّل للفترة التالية أو يُسترد)`}\n${r.reconciled ? "✓ الإقرار يطابق حسابات الضريبة في الأستاذ العام." : "⚠ الإقرار لا يطابق حسابات الضريبة في الأستاذ: يوجد قيد يدوي على حساب الضريبة بلا مستند. اكتب «افحص الدفاتر»."}\nالأرقام من المستندات المرحّلة فقط؛ المسودات لا تدخل.\n[الإقرار الضريبي](/vat)`;
 }
+function briefAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const L: string[] = [`**${r.isToday ? "ملخص اليوم" : "ملخص يوم"} ${r.date}**`];
+  const row = (t: string, x: any, extra = "") => { if (x.count) L.push(`- ${t}: **${money(x.total)}** ${cur} (${x.count})${extra}`); };
+  row("المبيعات", r.sales, r.posSales.count ? ` — منها نقطة البيع ${money(r.posSales.total)}` : ""); row("مرتجعات المبيعات", r.salesReturns); row("المشتريات", r.purchases); row("المصروفات", r.expenses); row("المقبوض من العملاء", r.receipts); row("المدفوع للموردين", r.payments);
+  if (L.length === 1) L.push("- لا حركة مرحّلة في هذا اليوم.");
+  if (r.sales.count) L.push(`- مجمل الربح من مبيعات اليوم: **${money(r.grossProfit)}** ${cur}`);
+  if (r.cash.length) L.push(`\n**النقدية والبنوك** — دخل ${money(r.cashTotal.in)}، خرج ${money(r.cashTotal.out)}، الرصيد آخر اليوم **${money(r.cashTotal.closing)}** ${cur}`);
+  if (r.topItems?.length) L.push(`\n**الأكثر مبيعاً اليوم:** ${r.topItems.slice(0, 3).map((x: any) => `${x.name} (${money(x.net)})`).join("، ")}`);
+  if (r.isToday) L.push(r.todo?.length ? `\n**يحتاج متابعتك الآن:**\n${r.todo.map((x: any) => `- ${x.level === "high" ? "🔴" : "🟡"} [${x.text}](${x.to}): **${x.count}**${x.amount ? ` بقيمة ${money(x.amount)} ${cur}` : ""}`).join("\n")}` : "\n✓ لا شيء معلّق يحتاج متابعة الآن.");
+  return L.join("\n");
+}
+function projectAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const rows: any[] = r.rows || [];
+  if (!rows.length) return "لا توجد مراكز تكلفة أو مشاريع بعد. أنشئها من [مراكز التكلفة والمشاريع](/projects)، ثم اختر المشروع عند تسجيل المصروف أو الفاتورة.";
+  const one = (x: any) => { const m = x.revenue ? Math.round((x.profit / x.revenue) * 1000) / 10 : null; const over = x.budget > 0 && x.cost > x.budget;
+    return `- **${x.name}** (${x.kind === "PROJECT" ? "مشروع" : "مركز تكلفة"}${x.customer ? ` — ${x.customer}` : ""}): الإيراد ${money(x.revenue)}، التكلفة ${money(x.cost)}، ${x.profit >= 0 ? "الربح" : "الخسارة"} **${money(Math.abs(x.profit))}** ${cur}${m !== null ? ` (هامش ${m}%)` : ""}${x.contractValue ? ` — المفوتر ${Math.round((x.revenue / x.contractValue) * 100)}% من العقد` : ""}${x.budget ? ` — المصروف ${Math.round((x.cost / x.budget) * 100)}% من الموازنة${over ? " ⚠ تجاوز الموازنة" : ""}` : ""}`; };
+  const head = `**${r.query && !r.notFound ? "نتيجة البحث" : "المشاريع ومراكز التكلفة"}** — من ${r.from} إلى ${r.to}${r.notFound ? `\nلم أجد مشروعاً أو مركزاً باسم «${r.query}»؛ هذه كل المراكز:` : ""}`;
+  const T = rows.reduce((a, x) => ({ rev: a.rev + x.revenue, cost: a.cost + x.cost }), { rev: 0, cost: 0 });
+  const over = rows.filter((x) => x.budget > 0 && x.cost > x.budget).map((x) => x.name);
+  return `${head}\n${rows.slice(0, 12).map(one).join("\n")}${rows.length > 1 ? `\n\nالإجمالي: إيراد ${money(T.rev)}، تكلفة ${money(T.cost)}، صافي **${money(T.rev - T.cost)}** ${cur}.` : ""}${over.length ? `\n⚠ تجاوزت موازنتها: ${over.join("، ")}.` : ""}\n[التفاصيل في شاشة المشاريع](/projects)`;
+}
 function hrAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const ST: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", PAID: "مدفوع" };
@@ -439,6 +463,7 @@ const NEXT: Record<string, string[]> = {
   purchases: ["كم علينا للموردين؟", "ماذا أطلب من المخزون؟"], top_products: ["ماذا أطلب من المخزون؟", "كم صافي الربح؟"], top_customers: ["من لم يسدد؟", "كم المبيعات هذه السنة؟"], top_suppliers: ["كم علينا للموردين؟"],
   receivables: ["كم السيولة المتوفرة؟", "حلّل الوضع المالي"], payables: ["كم السيولة المتوفرة؟", "من لم يسدد؟"], cash: ["من لم يسدد؟", "كم علينا للموردين؟", "حلّل الوضع المالي"], stock: ["ما الأكثر مبيعاً؟", "كم قيمة المشتريات هذا الشهر؟"],
   summary: ["اكتب تقريراً للإدارة", "حلّل الوضع المالي", "افحص الدفاتر"], analysis: ["اكتب تقريراً للإدارة", "من لم يسدد؟", "ماذا أطلب من المخزون؟"], compare: ["حلّل الوضع المالي", "أين تذهب المصروفات؟"],
+  brief: ["من لم يسدد؟", "كم السيولة المتوفرة؟", "ملخص هذا الشهر"], project: ["أين تذهب المصروفات؟", "كم صافي الربح؟", "ملخص اليوم"],
   report: ["افحص الدفاتر", "قارن هذا الشهر بالشهر الماضي"], vat: ["افحص الدفاتر", "كم المبيعات هذا الربع؟"], hr: ["كم المصروفات هذا الشهر؟"], check: ["حلّل الوضع المالي", "ملخص هذا الشهر"], product: ["ماذا أطلب من المخزون؟", "ما الأكثر مبيعاً؟"],
 };
 /** The last figures question in the conversation, so «والشهر الماضي؟» and «والمصروفات؟» continue it. */
@@ -478,6 +503,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "product_info") return say(productAnswer(res, ctx.currency, prev.input.label), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `مبيعات ومخزون صنف ${x}`) : NEXT.product);
     if (prev.name === "vat_position") return say(vatAnswer(res, ctx.currency, prev.input.label, ctx.vatRate === 14), NEXT.vat);
     if (prev.name === "hr_summary") return say(hrAnswer(res, ctx.currency), NEXT.hr);
+    if (prev.name === "daily_brief") return say(briefAnswer(res, ctx.currency), NEXT.brief);
+    if (prev.name === "project_report") return say(projectAnswer(res, ctx.currency), NEXT.project);
     if (prev.name === "management_report") return say(reportAnswer(res, ctx.currency), NEXT.report);
     if (prev.name === "account_balance") return say(res.error ? res.error : `رصيد **${res.account}** حتى ${res.to}: **${money(Math.abs(res.balance))}** ${ctx.currency} (${res.side}).`);
     if (prev.name === "propose") {
@@ -542,6 +569,15 @@ ${pr.text}
         const q0 = Math.floor((+ctx.today.slice(5, 7) - 1) / 3) * 3 + 1;
         return call("vat_position", per.explicit ? { from: per.from, to: per.to, label: per.label } : eg ? { from: per.from, to: per.to, label: "هذا الشهر" } : { from: iso(+ctx.today.slice(0, 4), q0, 1), to: ctx.today, label: "هذا الربع" });
       }
+      // the day at a glance / what to do now
+      if (/(ملخص|تقرير|حركه|موجز|اخبار) (ال)?(يوم|امس)|ماذا (حدث|صار|حصل|تم) (ال)?(يوم|امس)|^(ماذا|ما الذي|وش|ايش) (افعل|اعمل|اسوي|علي|يجب علي|المطلوب)( مني)?( (اليوم|الان))? ?[؟?]?$|مهام(ي)? (ال)?يوم|اولويات|ما (الذي )?يحتاج (متابع|انتباه)|(يوميه|التقرير اليومي)( |$)/.test(n) && !/الشهر|السنه|الربع|الاسبوع/.test(n))
+        return call("daily_brief", /امس/.test(n) ? { date: per.explicit ? per.to : addDay(ctx.today, -1) } : {});
+      // projects and cost centres
+      { const pj = n.match(/(?:مشروع|المشروع|مركز تكلفه|مركز التكلفه|مركز) (.+?)(?=\s*(?:؟|\?|$| هذا | خلال | في شهر | الشهر| هذه السنه| السنه| منذ ))/);
+        if (/(ربح|ارباح|ربحيه|خساره|تكلفه|تكاليف|مصروفات|مصاريف|ايراد|ايرادات|موازنه|اداء|وضع|ملخص|تقرير|تحليل|كم صرفنا|تجاوز).*(مشروع|مشاريع|المشاريع|مركز تكلفه|مراكز التكلفه|مركز التكلفه)|(مشاريع|المشاريع|مراكز التكلفه) ?(؟|$)|المشاريع (المتجاوزه|الخاسره|الرابحه)/.test(n)) {
+          const name = pj && !/^(ال)?(تكلفه|مشاريع)$/.test(pj[1].trim()) ? pj[1].replace(/^(تكلفه|التكلفه) /, "").trim() : "";
+          return call("project_report", { ...(name && name.length > 1 ? { query: name } : {}), ...(per.explicit ? { from: per.from, to: per.to } : {}) });
+        } }
       // payroll
       if (/(كم|اجمالي|مجموع|تكلفه|ملخص|قيمه) (ال)?(رواتب|اجور)|(رواتب|اجور) (هذا |ه)?الشهر كم|عدد (ال)?موظفين|كم (عدد )?(ال)?موظف|(كم|اجمالي|رصيد|مجموع) (ال)?سلف|السلف القائمه/.test(n) && !a.kind) return call("hr_summary", {});
       // a short follow-up continues the last figures question: «والشهر الماضي؟» · «والمصروفات؟»

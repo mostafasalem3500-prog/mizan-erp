@@ -15,6 +15,7 @@ import * as pos from "../services/pos";
 import { settle as settleOrder } from "../services/restaurant";
 import * as misc from "../services/misc";
 import * as rep from "../services/reports";
+import * as daily from "../services/daily";
 import { reverse } from "../accounting/engine";
 import { loadDemo, purgeDemo } from "../services/demo";
 import { ensureZatcaConfig, submitInvoice } from "../zatca/stamp";
@@ -87,6 +88,18 @@ async function previewEntry(make: (t: any) => Promise<any>, extra: (doc: any) =>
 ops.post("/invoices/:id/preview-entry", dyn(true), h(async (req) => previewEntry((t) => inv.postInvoice(t, req.company, p(req).id, actor(req), { overrideCreditLimit: true }), (doc) => ({ costTotal: Number(doc.costTotal || 0), total: Number(doc.total), direction: doc.direction }))));
 ops.post("/expenses/preview-entry", perm("expenses.write"), h(async (req) => previewEntry((t) => createExpense(t, cid(req), actor(req), req.body))));
 ops.post("/payments/preview-entry", perm("payments.write"), h(async (req) => previewEntry((t) => createPayment(t, cid(req), actor(req), req.body))));
+
+// ── the day at a glance, what needs attention, and plain-language money movements ──
+ops.get("/reports/daily", perm("reports.read"), h(async (req) => daily.dailyReport(db, cid(req), String(req.query.date || ""))));
+ops.get("/brief", perm("dashboard.read"), h(async (req) => daily.brief(db, cid(req))));
+ops.get("/quick-entry/kinds", perm("dashboard.read"), h(async () => Object.entries(daily.QUICK_KINDS).map(([kind, k]) => ({ kind, ar: k.ar, dir: k.dir, why: k.why }))));
+ops.post("/quick-entry/preview", perm("payments.write"), h(async (req) => previewEntry(async (t) => { const e: any = await misc.manualJournal(t, cid(req), actor(req), await daily.quickLines(t, cid(req), req.body || {})); return { journalId: e.id }; })));
+ops.post("/quick-entry", perm("payments.write"), h(async (req) => {
+  if (req.company.accounting?.journalApproval && !req.auth.superAdmin && !["OWNER", "ADMIN"].includes(req.auth.role || "")) throw conflict("اعتماد القيود مفعّل: هذه العملية يسجّلها المالك أو المدير، أو تُدخل قيداً يُرسل للاعتماد");
+  const e: any = await tx(async (t) => misc.manualJournal(t, cid(req), actor(req), await daily.quickLines(t, cid(req), req.body || {})));
+  await audit(req, "CREATE", "journal", e.id, { number: e.number, quick: req.body?.kind });
+  return e;
+}));
 
 ops.post("/invoices/:id/post", dyn(true), h(async (req) => {
   const override = !!req.body?.overrideCreditLimit && (["OWNER", "ADMIN"].includes(req.auth.role || "") || req.auth.superAdmin);

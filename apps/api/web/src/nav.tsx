@@ -13,6 +13,8 @@ export type NavGroup = { key: string; ic: string; label: string; to?: string; pe
 
 export const NAV_TREE: NavGroup[] = [
   { key: "home", ic: "▦", label: "لوحة المؤشرات", to: "/", perm: "dashboard.read" },
+  { key: "quick", ic: "⚡", label: "سجّل عملية", to: "/quick", perm: "dashboard.read" },
+  { key: "daily", ic: "🗓", label: "التقرير اليومي", to: "/daily", perm: "reports.read" },
   { key: "insights", ic: "📈", label: "لوحة الإدارة والتحليل", to: "/insights", perm: "reports.read" },
   { key: "ai", ic: "✨", label: "المساعد الذكي", to: "/ai", perm: "dashboard.read" },
   { key: "pos", ic: "🛒", label: "نقطة البيع", to: "/pos", perm: "pos.use" },

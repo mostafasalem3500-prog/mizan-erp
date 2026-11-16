@@ -19,6 +19,8 @@ import { integrity } from "./reports";
 import { VAT_RATE, BASE_CURRENCY, CFG } from "../lib/country";
 import { callGemini, isGeminiKey, geminiModelOf, verifyGeminiKey } from "./aiGemini";
 import { financialAnalysis, comparePeriods, productInfo, vatPosition, hrSummary } from "./aiAnalyst";
+import { dailyReport, todoList } from "./daily";
+import { listCentres } from "./projects";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = () => process.env.AI_MODEL || "claude-sonnet-5-5";
@@ -160,6 +162,20 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
       check: { total: ck.checksTotal, passed: ck.checksPassed, failed: ck.failed.length, issues: ck.issues.length, danger: ck.issues.filter((i) => i.level === "danger").length } };
   }
   if (name === "product_info") { if (!perms(auth, "products.read")) return { error: "صلاحيتك لا تسمح بعرض الأصناف" }; return productInfo(t, C, input); }
+  if (name === "daily_brief") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const d = isDate(input.date) ? input.date : today();
+    return { ...(await dailyReport(t, C, d)), todo: d === today() ? await todoList(t, C) : [], isToday: d === today() };
+  }
+  if (name === "project_report") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const to = isDate(input.to) ? input.to : today(); const from = isDate(input.from) ? input.from : to.slice(0, 4) + "-01-01";
+    const all: any = await listCentres(t, C, { from, to }); const rows: any[] = all.rows || all;
+    const q = String(input.query || "").trim(); const nq = (x: string) => x.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").toLowerCase();
+    const hit = q ? rows.filter((r) => nq(r.name).includes(nq(q)) || nq(r.code || "").includes(nq(q))) : rows;
+    const pickF = (r: any) => ({ code: r.code, name: r.name, kind: r.kind, status: r.status, customer: r.partnerName || null, revenue: Number(r.revenue || 0), cost: Number(r.cost || 0), profit: Number(r.profit || 0), contractValue: Number(r.contractValue || 0), budget: Number(r.budget || 0) });
+    return { from, to, query: q || null, notFound: !!q && !hit.length, rows: (hit.length ? hit : rows).map(pickF) };
+  }
   if (name === "hr_summary") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض الرواتب" }; return hrSummary(t, C); }
   if (name === "partner_balance") {
     if (!perms(auth, "partners.read")) return { error: "صلاحيتك لا تسمح بعرض العملاء والموردين" };

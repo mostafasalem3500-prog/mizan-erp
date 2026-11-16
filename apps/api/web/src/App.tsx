@@ -57,6 +57,8 @@ const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
 const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
 const ProjectsPage = lz(() => import("./pages/Projects"), "ProjectsPage");
+const QuickPage = lz(() => import("./pages/Quick"), "QuickPage");
+const DailyPage = lz(() => import("./pages/Quick"), "DailyPage");
 const ProjectDetailPage = lz(() => import("./pages/Projects"), "ProjectDetailPage");
 const KitchenPage = lz(() => import("./pages/Restaurant"), "KitchenPage");
 const PosSetupPage = lz(() => import("./pages/Restaurant"), "PosSetupPage");
@@ -164,6 +166,7 @@ export function App() {
               <TasksBadge />
               <ThemeToggle />
               <CompanySwitcher me={me} onSwitched={reload} />
+              <NavLink to="/quick" className="btn sm quick-btn" title="سجّل عملية بكلماتك دون معرفة المدين والدائن">⚡ سجّل عملية</NavLink>
               <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
             </div>
             <NetBar /><OfflineNote />
@@ -234,6 +237,8 @@ export function App() {
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/templates" element={<PrintTemplatesPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/quick" element={<QuickPage />} />
+                <Route path="/daily" element={<DailyPage />} />
                 <Route path="/projects/:id" element={<ProjectDetailPage />} />
                 <Route path="/pos/kitchen" element={<KitchenPage />} />
                 <Route path="/pos/setup" element={<PosSetupPage />} />

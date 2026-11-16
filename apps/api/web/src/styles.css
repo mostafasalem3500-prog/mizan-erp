@@ -783,3 +783,15 @@ html[data-theme="dark"] .tbl-card .tf { color: #2bb3a3; } html[data-theme="dark"
 @media (max-width: 900px) { .tables { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 
 .cc-box { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 12px; display: grid; gap: 8px; background: var(--surface-2); }
+
+/* «سجّل عملية»: plain-language tiles */
+.quick-sec { margin-bottom: 18px; } .quick-sec h4 { margin: 0 0 8px; font-size: 1rem; }
+.quick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.quick-tile { display: flex; align-items: center; gap: 12px; text-align: start; padding: 12px 14px; min-height: 64px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.quick-tile:hover:not(:disabled), .quick-tile:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); outline: none; }
+.quick-tile:disabled { opacity: .5; cursor: not-allowed; }
+.quick-ic { font-size: 1.5rem; width: 36px; text-align: center; flex: none; }
+.quick-tx { display: grid; gap: 2px; min-width: 0; }
+.todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; } .todo-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 700px) { .quick-btn { display: none; } .quick-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .quick-tile { transition: none; } }
