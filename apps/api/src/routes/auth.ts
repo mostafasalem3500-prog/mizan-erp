@@ -17,6 +17,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { db, tx } from "../db/pool";
 import { h, bad, req as need, AppError, conflict, today, addMonths } from "../lib/core";
+import { newSecret, verifyTotp, otpUri, hashCode, newRecoveryCodes } from "../lib/totp";
 import { authenticate, signToken, subscriptionState, ROLES, superAdmin, AuthCtx } from "../lib/auth";
 import { seedCurrencies } from "../services/currency";
 import { seedChartOfAccounts, ensureFiscalYear } from "../accounting/engine";
@@ -42,6 +43,10 @@ export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?:
   return company;
 }
 
+/** The public showcase account is shared by every visitor: its password and sign-in settings cannot be changed from inside. */
+const isShowcase = (u: any) => !!process.env.DEMO_EMAIL && String(u.email).toLowerCase() === process.env.DEMO_EMAIL.trim().toLowerCase();
+function notShowcase(u: any) { if (isShowcase(u)) throw new AppError(403, "هذا حساب العرض التجريبي المشترك — لا تُغيَّر كلمة مروره ولا إعدادات دخوله", "SHOWCASE"); }
+const audit2 = (req: any, action: string) => (req.auth.companyId ? db.insert("audit_logs", { companyId: req.auth.companyId, userId: req.auth.userId, userName: req.auth.userName, action, entity: "user", entityId: req.auth.userId, details: JSON.stringify({}) }).catch(() => undefined) : Promise.resolve());
 function publicUser(u: any) {
   return { id: u.id, email: u.email, fullName: u.fullName, phone: u.phone, isSuperAdmin: u.isSuperAdmin };
 }
@@ -91,15 +96,23 @@ auth.post(
       throw new AppError(429, `تم إيقاف محاولات الدخول مؤقتاً بعد محاولات فاشلة متكررة — حاول بعد ${mins} دقيقة`, "LOCKED");
     }
     const u = await db.maybe(`SELECT * FROM users WHERE email=$1`, [email]);
-    if (!u || !(await bcrypt.compare(password, u.passwordHash))) {
-      await db.exec(
+    const failed = () => db.exec(
         `INSERT INTO login_attempts(key, failures, locked_until) VALUES ($1, 1, NULL)
          ON CONFLICT (key) DO UPDATE SET failures = CASE WHEN login_attempts.updated_at < now() - interval '15 minutes' THEN 1 ELSE login_attempts.failures + 1 END,
            locked_until = CASE WHEN (CASE WHEN login_attempts.updated_at < now() - interval '15 minutes' THEN 1 ELSE login_attempts.failures + 1 END) >= 5 THEN now() + interval '15 minutes' ELSE NULL END,
            updated_at = now()`,
         [email],
       );
-      throw new AppError(401, "بيانات الدخول غير صحيحة", "BAD_CREDENTIALS");
+    if (!u || !(await bcrypt.compare(password, u.passwordHash))) { await failed(); throw new AppError(401, "بيانات الدخول غير صحيحة", "BAD_CREDENTIALS"); }
+    // second step: the 6-digit code of the authenticator app, or a one-time recovery code
+    if (u.totpEnabled && u.totpSecret) {
+      const otp = String(req.body.otp || "").trim();
+      if (!otp) throw new AppError(401, "أدخل رمز التحقق من تطبيق المصادقة", "OTP_REQUIRED");
+      const rec: string[] = Array.isArray(u.totpRecovery) ? u.totpRecovery : [];
+      const hc = hashCode(otp);
+      if (verifyTotp(u.totpSecret, otp)) { /* ok */ }
+      else if (rec.includes(hc)) await db.exec(`UPDATE users SET totp_recovery=$2::jsonb WHERE id=$1`, [u.id, JSON.stringify(rec.filter((x) => x !== hc))]);
+      else { await failed(); throw new AppError(401, "رمز التحقق غير صحيح", "BAD_OTP"); }
     }
     await db.exec(`DELETE FROM login_attempts WHERE key=$1`, [email]);
     if (!u.isActive) throw new AppError(403, "الحساب موقوف", "INACTIVE");
@@ -203,11 +216,41 @@ auth.post(
   h(async (req) => {
     const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]);
     if (!(await bcrypt.compare(String(req.body.current || ""), u.passwordHash))) throw bad("كلمة المرور الحالية غير صحيحة");
-    if (String(req.body.next || "").length < 8) throw bad("كلمة المرور الجديدة قصيرة");
-    await db.exec(`UPDATE users SET password_hash=$2 WHERE id=$1`, [u.id, await bcrypt.hash(String(req.body.next), 10)]);
+    notShowcase(u);
+    const next = String(req.body.next || "");
+    if (next.length < 8) throw bad("كلمة المرور الجديدة قصيرة: 8 أحرف على الأقل");
+    if (!/[A-Za-z\u0600-\u06FF]/.test(next) || !/\d/.test(next)) throw bad("كلمة المرور يجب أن تجمع حروفاً وأرقاماً");
+    if (next === String(req.body.current)) throw bad("كلمة المرور الجديدة مطابقة للحالية");
+    await db.exec(`UPDATE users SET password_hash=$2, password_changed_at=now() WHERE id=$1`, [u.id, await bcrypt.hash(next, 10)]);
+    await audit2(req, "CHANGE_PASSWORD");
     return { ok: true };
   }),
 );
+
+// ── two-step sign-in ──
+auth.get("/security", h(async (req) => { const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); return { email: u.email, fullName: u.fullName, twoFactor: !!u.totpEnabled, recoveryLeft: u.totpEnabled && Array.isArray(u.totpRecovery) ? u.totpRecovery.length : 0, passwordChangedAt: u.passwordChangedAt || null, lastLoginAt: u.lastLoginAt || null, showcase: isShowcase(u) }; }));
+auth.post("/2fa/setup", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); notShowcase(u);
+  if (u.totpEnabled) throw bad("التحقق بخطوتين مفعّل — عطّله أولاً لإعادة الإعداد");
+  const secret = newSecret(); await db.exec(`UPDATE users SET totp_secret=$2 WHERE id=$1`, [u.id, secret]);
+  return { secret, uri: otpUri(secret, u.email, CFG.appName || "Mizan ERP") };
+}));
+auth.post("/2fa/enable", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); notShowcase(u);
+  if (u.totpEnabled) throw bad("التحقق بخطوتين مفعّل بالفعل");
+  if (!u.totpSecret || !verifyTotp(u.totpSecret, req.body?.code)) throw bad("الرمز غير صحيح — تأكد من ساعة الجوال وأدخل الرمز الظاهر الآن في التطبيق");
+  const codes = newRecoveryCodes();
+  await db.exec(`UPDATE users SET totp_enabled=true, totp_recovery=$2::jsonb WHERE id=$1`, [u.id, JSON.stringify(codes.map(hashCode))]);
+  await audit2(req, "ENABLE_2FA");
+  return { ok: true, recoveryCodes: codes };
+}));
+auth.post("/2fa/disable", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]);
+  if (!(await bcrypt.compare(String(req.body?.password || ""), u.passwordHash))) throw bad("كلمة المرور غير صحيحة");
+  await db.exec(`UPDATE users SET totp_enabled=false, totp_secret=NULL, totp_recovery=NULL WHERE id=$1`, [u.id]);
+  await audit2(req, "DISABLE_2FA");
+  return { ok: true };
+}));
 
 auth.post(
   "/activate-license",

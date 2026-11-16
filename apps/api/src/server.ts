@@ -57,6 +57,28 @@ const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(compression());
+
+/**
+ * Security headers on every response (OWASP secure-headers baseline).
+ * The app loads nothing from other origins: scripts, styles, fonts and API calls are same-origin; images may also be
+ * data:/blob: (uploads, QR codes) or https: (product pictures synced from an online store). Inline style attributes are
+ * what React writes for dynamic layout, hence 'unsafe-inline' for styles only — never for scripts.
+ */
+const CSP = ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: https:", "font-src 'self' data:", "connect-src 'self'", "worker-src 'self' blob:", "frame-src 'self' blob: data:", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'self'", "manifest-src 'self'"].join("; ");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+  if (req.secure) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  if (req.path.startsWith("/api/")) { res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"); if (!res.getHeader("Cache-Control")) res.setHeader("Cache-Control", "no-store"); }
+  else res.setHeader("Content-Security-Policy", CSP);
+  next();
+});
+/** Where to report a vulnerability (RFC 9116). */
+app.get("/.well-known/security.txt", (_req, res) => { const exp = new Date(Date.now() + 300 * 864e5).toISOString(); res.type("text/plain").send(`Contact: mailto:${process.env.SECURITY_CONTACT || process.env.SUPPORT_EMAIL || "security@mizan-erp.sa"}\nExpires: ${exp}\nPreferred-Languages: ar, en\n`); });
 // attachments carry files (base64): their own, larger body limit; parsed bodies are skipped by the general parser
 app.use(["/api/attachments", "/api/ai/chat", "/api/archive/upload"], express.json({ limit: "30mb" }));
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));

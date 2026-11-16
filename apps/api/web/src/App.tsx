@@ -58,6 +58,8 @@ const VatPage = lz(() => import("./pages/Reports"), "VatPage");
 const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
 const ProjectsPage = lz(() => import("./pages/Projects"), "ProjectsPage");
 const QuickPage = lz(() => import("./pages/Quick"), "QuickPage");
+const AccountPage = lz(() => import("./pages/Account"), "AccountPage");
+const LegalPage = lz(() => import("./pages/Account"), "LegalPage");
 const DailyPage = lz(() => import("./pages/Quick"), "DailyPage");
 const ProjectDetailPage = lz(() => import("./pages/Projects"), "ProjectDetailPage");
 const KitchenPage = lz(() => import("./pages/Restaurant"), "KitchenPage");
@@ -128,7 +130,7 @@ export function App() {
   if (loc.pathname.startsWith("/p/")) return <React.Suspense fallback={Wait}><Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
-  if (!me) return <Routes><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes>;
+  if (!me) return <React.Suspense fallback={null}><Routes><Route path="/privacy" element={<LegalPage kind="privacy" />} /><Route path="/terms" element={<LegalPage kind="terms" />} /><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes></React.Suspense>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
@@ -238,6 +240,7 @@ export function App() {
                 <Route path="/settings/templates" element={<PrintTemplatesPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/quick" element={<QuickPage />} />
+                <Route path="/account" element={<AccountPage />} />
                 <Route path="/daily" element={<DailyPage />} />
                 <Route path="/projects/:id" element={<ProjectDetailPage />} />
                 <Route path="/pos/kitchen" element={<KitchenPage />} />
@@ -296,7 +299,8 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
   const loc = useLocation();
   const charity = !!CFG.charity && loc.pathname.startsWith("/charity");
   useEffect(() => { if (!charity) return; document.title = DEFAULT_NAME; const l = document.querySelector<HTMLLinkElement>('link[rel~="icon"]'); const h = l?.href, ty = l?.type; if (l) { l.href = DEFAULT_LOGO; l.type = "image/png"; } return () => { document.title = "ميزان ERP"; if (l && h) { l.href = h; l.type = ty || ""; } }; }, [charity]);
-  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { const r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
+  const [needOtp, setNeedOtp] = useState(false);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { let r: any; try { r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); } catch (err: any) { if (err?.code === "OTP_REQUIRED") { setNeedOtp(true); return; } throw err; } session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
   return (
     <div className={"auth" + (charity ? " ch-auth" : "")}>
       {charity ? <div className="art">
@@ -335,8 +339,10 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
               </>}
               <Field label="البريد الإلكتروني"><Input required type="email" value={f.email} onChange={set("email")} dir="ltr" autoFocus /></Field>
               <Field label="كلمة المرور"><Input required type="password" value={f.password} onChange={set("password")} dir="ltr" /></Field>
+              {needOtp && mode === "login" && <Field label="رمز التحقق من تطبيق المصادقة" hint="6 أرقام — أو أحد رموز الاسترداد"><Input required autoFocus dir="ltr" inputMode="numeric" autoComplete="one-time-code" value={f.otp || ""} onChange={set("otp")} placeholder="000000" /></Field>}
               <button className="btn primary lg" disabled={busy}>{mode === "login" ? "دخول" : "إنشاء الحساب وبدء التجربة المجانية"}</button>
               {demo?.email && mode === "login" && <button type="button" className="btn" onClick={() => setF({ ...f, email: demo.email, password: demo.password })}>تعبئة بيانات الحساب التجريبي</button>}
+              <div className="muted small" style={{ textAlign: "center" }}><a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">شروط الاستخدام</a></div>
               <div className="muted small" style={{ textAlign: "center" }}>
                 {mode === "login" ? <>ليس لديك حساب؟ <a href="/register" onClick={(e) => { e.preventDefault(); nav("/register"); }}>سجّل منشأتك مجاناً</a></> : <>لديك حساب؟ <a href="/login" onClick={(e) => { e.preventDefault(); nav("/login"); }}>سجّل الدخول</a></>}
               </div>

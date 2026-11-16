@@ -1,0 +1,3 @@
+# Mizan ERP is an application, not a content site: nothing here is meant for search engines.
+User-agent: *
+Disallow: /

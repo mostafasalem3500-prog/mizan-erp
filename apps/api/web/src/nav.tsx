@@ -146,6 +146,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/pos/setup", label: "نقطة البيع: النشاط والطاولات", perm: "settings.read", company: true },
     { to: "/pos/kitchen", label: "شاشة المطبخ", perm: "pos.use", company: true },
     { to: "/settings/branches", label: "الفروع والمستودعات", perm: "settings.read", company: true },
+    { to: "/account", label: "حسابي والأمان", perm: "dashboard.read" },
     { to: "/settings/users", label: "المستخدمون والصلاحيات", perm: "settings.read", company: true },
     { to: "/settings/currencies", label: "العملات", perm: "settings.read", company: true },
     { to: "/settings/integrations", label: "التكامل والربط (API)", perm: "settings.read", company: true },
