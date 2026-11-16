@@ -46,7 +46,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 12;
+export const DEMO_VERSION = 13;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -226,8 +226,17 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         if (date > end) continue;
         const sv = services[(mi + pi) % services.length];
         const d = await saveDraft(t, c, userName, { direction: "SALE", kind: "INVOICE", date, partnerId: prj.partnerId, warehouseId: ids.wh, invoiceType: "STANDARD", costCenterId: prj.id, notes: `دفعة ${mi + 1} — ${prj.name}`, lines: [{ productId: sv.id, description: `${sv.name} — ${prj.name} (دفعة ${mi + 1})`, qty: 1, unitPrice: prj.monthly, taxCode: "S" }], isDemo: true });
-        salesInvoices.push(await postInvoice(t, c, d.id, userName, { overrideCreditLimit: true }));
+        const pinv = await postInvoice(t, c, d.id, userName, { overrideCreditLimit: true });
+        // the customer settles each progress invoice a few days later (the latest one stays open)
+        const payDate = addDays(date, 6);
+        if (payDate <= end) await createPayment(t, companyId, userName, { direction: "IN", partnerId: prj.partnerId, date: payDate, amount: Number(pinv.total), method: "TRANSFER", accountId: ids.bank, allocations: [{ invoiceId: pinv.id, amount: Number(pinv.total) }], isDemo: true });
         await createExpense(t, companyId, userName, { date: addDays(date, -3), accountId: await expAcc(t, "5208"), payee: "مقاول الباطن", description: `أعمال تركيب وصيانة موقع — ${prj.name}`, amount: prj.cost, taxCode: "S", payAccountId: ids.bank, costCenterId: prj.id, isDemo: true });
+      }
+      // ── the week's takings are deposited in the bank: the cash box keeps a float, the rest goes to the bank at month end ──
+      {
+        const cb = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=$1 AND e.status='POSTED' AND e.date <= $2`, [ids.cash, mEnd]);
+        const dep = Math.floor((Number(cb.b) - 8000) / 1000) * 1000;
+        if (dep >= 5000) await post(t, companyId, { date: mEnd, type: "MANUAL", memo: `إيداع نقدي في البنك — متحصلات ${mStart.slice(0, 7)}`, isDemo: true, createdBy: userName, lines: [{ account: ids.bank, debit: dep, description: "إيداع نقدي" }, { account: ids.cash, credit: dep, description: "إيداع نقدي في البنك" }] });
       }
       // ── expenses ──
       // Jeddah branch: monthly restock transfer + its own rent
