@@ -38,7 +38,7 @@ def html(qs):
 h1=html('?recipientId='+ids[1]); h0=html('?recipientId='+ids[0])
 ok('الملخص' not in h0 and 'المبيعات' in h1 and 'أصناف تحتاج طلباً' not in h1 and ('المخزون' in h0),'each recipient gets only his sections')
 ok('الأصناف الأكثر مبيعاً' in html('?frequency=MONTHLY') and 'التقرير الشهري' in html('?frequency=MONTHLY'),'full monthly preview')
-open('shots/digest.html','w').write(html('?frequency=MONTHLY'))
+(os.makedirs('shots',exist_ok=True),open('shots/digest.html','w'))[1].write(html('?frequency=MONTHLY'))
 c('/digest/settings',{'enabled':True,'hour':21,'weekday':4},m='PUT'); ok(c('/digest')['settings']['enabled'],'schedule saved')
 try: c('/digest/send',{}); ok(False,'send')
 except E as e: ok('400' in str(e),'send refused cleanly without SMTP')
