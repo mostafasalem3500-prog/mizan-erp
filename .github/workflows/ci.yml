@@ -54,7 +54,11 @@ jobs:
           grep "\[selfcheck\]" server-sa.log server-eg.log
           grep -q "\[selfcheck\] PASS" server-sa.log && grep -q "\[selfcheck\] PASS" server-eg.log
       - name: API regression (Saudi + Egypt)
+        env:
+          TEST_PG: postgresql://postgres:postgres@127.0.0.1:5432
         run: bash tests/api/run_all.sh
       - name: Server logs on failure
         if: failure()
-        run: tail -60 server-sa.log server-eg.log
+        run: |
+          tail -n 60 server-sa.log
+          tail -n 60 server-eg.log

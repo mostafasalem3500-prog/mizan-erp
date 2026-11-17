@@ -4,7 +4,7 @@ import lib
 EG='3200' in B; DBN='mizan_eg' if EG else 'mizan'; MODE=os.environ.get('MODE','open')
 t=register('r317'); c=lambda *a,**k: call(*a,tok=t,**k)
 cid=c('/settings')['id']
-def plan(p): subprocess.run(['psql',f'postgresql://postgres@127.0.0.1:5433/{DBN}','-qc',f"UPDATE companies SET plan='{p}' WHERE id='{cid}'"],check=True)
+def plan(p): subprocess.run(['psql',os.environ.get('TEST_PG','postgresql://postgres@127.0.0.1:5433')+f'/{DBN}','-qc',f"UPDATE companies SET plan='{p}' WHERE id='{cid}'"],check=True)
 for p in ['BASIC','PRO','TRIAL','ENTERPRISE']:
     plan(p); st=c('/ai/status')
     if MODE=='open':
