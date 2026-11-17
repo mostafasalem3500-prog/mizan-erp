@@ -21,6 +21,17 @@ loadConfig().finally(async () => {
   const [{ App }, { ToastProvider }] = await Promise.all([import("./App"), import("./lib")]);
   document.documentElement.dataset.country = CFG.country;
   if (CFG.country !== "SA" && !location.pathname.startsWith("/charity")) document.title = CFG.appName;
+  if (CFG.assoc && CFG.assocBrand) {
+    // associations edition: the association's seal and name everywhere, even when the cached page still carries Mizan's
+    const b = CFG.assocBrand;
+    document.title = b.name;
+    document.documentElement.dataset.edition = "assoc";
+    const set = (sel: string, attr: string, v: string, type?: string) => { const el = document.querySelector<HTMLLinkElement | HTMLMetaElement>(sel); if (el) { el.setAttribute(attr, v); if (type) el.setAttribute("type", type); } };
+    set('link[rel~="icon"]', "href", "/charity/favicon.png", "image/png");
+    set('link[rel="apple-touch-icon"]', "href", b.icon512);
+    set('link[rel="manifest"]', "href", "/assoc.webmanifest");
+    set('meta[name="theme-color"]', "content", "#1c3f8a");
+  }
   startA11y();
   createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

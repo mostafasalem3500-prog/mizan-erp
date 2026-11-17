@@ -1,6 +1,7 @@
 /** Templates center (A4 forms editor with live preview) and association settings. */
 import React, { useEffect, useRef, useState } from "react";
-import { api, Field, Input, Select, useAction, useCompanyContext, fileToDataUrl } from "../lib";
+import { api, Field, Input, Select, NumInput, useAction, useCompanyContext, fileToDataUrl } from "../lib";
+import { CFG } from "../shared/country";
 import { useCharity, CH_NAV } from "./CharityApp";
 import { A4, TEMPLATES, TPL, ROLES, SAMPLE, printA4, Ov, resolveTpl, PrintModal } from "./templates";
 
@@ -73,7 +74,7 @@ export function CharitySettingsPage() {
   const { run, busy } = useAction();
   const [f, setF] = useState<any>({});
   const [logo, setLogo] = useState<string | null | undefined>(undefined);
-  useEffect(() => { if (settings) setF({ associationName: settings.associationName || "", licenseNo: settings.licenseNo || "", authority: settings.authority || "", phone: settings.phone || "", email: settings.email || "", address: settings.address || "", signatories: settings.signatories || {}, defaultUi: !!settings.defaultUi, labels: settings.theme?.labels || {} }); }, [settings]);
+  useEffect(() => { if (settings) setF({ associationName: settings.associationName || "", licenseNo: settings.licenseNo || "", authority: settings.authority || "", phone: settings.phone || "", email: settings.email || "", address: settings.address || "", signatories: settings.signatories || {}, defaultUi: !!settings.defaultUi, labels: settings.theme?.labels || {}, assocType: settings.assocType || "CHARITY", membership: settings.membership || {} }); }, [settings]);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const sig = (r: string, k: string, v: string) => setF({ ...f, signatories: { ...f.signatories, [r]: { ...(f.signatories?.[r] || {}), [k]: v } } });
   const write = can("settings.write");
@@ -95,6 +96,7 @@ export function CharitySettingsPage() {
         <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={!!f.defaultUi} onChange={set("defaultUi")} disabled={!write} />فتح واجهة الجمعية تلقائياً بعد تسجيل الدخول</label>
         <div className="alert info small">رابط واجهة الجمعية المستقل: <b dir="ltr">{location.origin}/charity</b> — يستخدم نفس الحسابات والقيود والمستخدمين، ويمكن الانتقال للبرنامج المحاسبي الأساسي في أي وقت.</div>
       </div></div>
+      <AssocTypeCard f={f} setF={setF} write={write} types={settings?.assocTypes || {}} />
       <div className="card"><div className="card-h"><h3>المعتمدون والتوقيعات</h3></div><div className="card-b">
         <div className="small muted mb">تظهر هذه المسميات والأسماء في خانات التوقيع أسفل كل نموذج A4.</div>
         <table className="tbl compact"><thead><tr><th>الدور</th><th>المسمى على النموذج</th><th>الاسم</th></tr></thead><tbody>
@@ -107,6 +109,32 @@ export function CharitySettingsPage() {
       {write && <div><button className="btn primary lg" disabled={busy} onClick={save}>حفظ الإعدادات</button></div>}
     </div>
   );
+}
+
+/** Association type (non-profit or cooperative) and the membership rules: annual fee, share value, surplus distribution. */
+function AssocTypeCard({ f, setF, write, types }: { f: any; setF: (v: any) => void; write: boolean; types: Record<string, { ar: string; profit: boolean }> }) {
+  const m = f.membership || {};
+  const d = m.dist || {};
+  const setM = (k: string, v: any) => setF({ ...f, membership: { ...m, [k]: v } });
+  const setD = (k: string, v: any) => setF({ ...f, membership: { ...m, dist: { ...d, [k]: v } } });
+  const coop = f.assocType === "COOPERATIVE";
+  const sumPct = ["reserve", "capital", "social", "training"].reduce((a, k) => a + (Number(d[k]) || 0), 0);
+  return <div className="card" style={{ gridColumn: "1 / -1" }}><div className="card-h"><h3>نوع الجمعية والعضوية</h3><span className="small muted">يحدد الشاشات الظاهرة والمعالجة المحاسبية للفائض</span></div><div className="card-b grid c4">
+    <Field label="نوع الجمعية" span2><select className="input" value={f.assocType || "CHARITY"} disabled={!write} onChange={(e) => setF({ ...f, assocType: e.target.value })}>{Object.entries(types).map(([k, v]) => <option key={k} value={k}>{v.ar}</option>)}</select></Field>
+    <Field label={`رسم الاشتراك السنوي للعضو (${CFG.words.one})`}><NumInput value={m.annualFee ?? ""} onChange={(e: any) => setM("annualFee", e.target.value)} disabled={!write} /></Field>
+    {coop ? <Field label={`القيمة الاسمية للسهم (${CFG.words.one})`}><NumInput value={m.shareValue ?? ""} onChange={(e: any) => setM("shareValue", e.target.value)} disabled={!write} /></Field> : <div />}
+    {coop && <>
+      <Field label="الحد الأدنى للأسهم لكل عضو"><NumInput value={m.minShares ?? ""} onChange={(e: any) => setM("minShares", e.target.value)} disabled={!write} /></Field>
+      <Field label="الحد الأعلى لملكية العضو %"><NumInput value={m.maxSharePct ?? 20} onChange={(e: any) => setM("maxSharePct", e.target.value)} disabled={!write} /></Field>
+      <Field label="الاحتياطي النظامي %"><NumInput value={d.reserve ?? 20} onChange={(e: any) => setD("reserve", e.target.value)} disabled={!write} /></Field>
+      <Field label="عائد على رأس المال (الأسهم) %"><NumInput value={d.capital ?? 20} onChange={(e: any) => setD("capital", e.target.value)} disabled={!write} /></Field>
+      <Field label="الخدمات الاجتماعية %"><NumInput value={d.social ?? 5} onChange={(e: any) => setD("social", e.target.value)} disabled={!write} /></Field>
+      <Field label="تدريب وتثقيف الأعضاء %"><NumInput value={d.training ?? 5} onChange={(e: any) => setD("training", e.target.value)} disabled={!write} /></Field>
+      <Field label="توزيع الباقي على الأعضاء" span2><select className="input" value={d.basis || "TRANSACTIONS"} disabled={!write} onChange={(e) => setD("basis", e.target.value)}><option value="TRANSACTIONS">حسب تعاملات العضو مع الجمعية (عائد المعاملات)</option><option value="CAPITAL">حسب عدد الأسهم</option></select></Field>
+      <div className={"alert small " + (sumPct > 100 ? "err" : "info")} style={{ gridColumn: "1 / -1" }}>مجموع النسب {sumPct}% — الباقي {Math.max(0, 100 - sumPct)}% يوزَّع على الأعضاء. القيم الافتراضية مأخوذة من مشروع اللائحة التنفيذية لنظام التعاونيات (20% احتياطي حتى يساوي رأس المال، وما لا يزيد عن 20% عائداً على رأس المال، و5% للخدمات الاجتماعية، و5% للتدريب) — عدّلها بحسب النظام الأساسي لجمعيتك وقرار جمعيتها العمومية.</div>
+    </>}
+    {!coop && <div className="alert info small" style={{ gridColumn: "1 / -1" }}>الجمعية غير الربحية لا توزّع فائضها على أعضائها: يبقى في صافي الأصول ويُصرف على أهدافها. الأعضاء يُسجَّلون للجمعية العمومية واشتراكاتهم السنوية تُقيَّد في «اشتراكات الأعضاء».</div>}
+  </div></div>;
 }
 
 /** All templates in one place, printed empty for manual filling (single, multiple copies, or a selected set). */

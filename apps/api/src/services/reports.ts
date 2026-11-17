@@ -494,6 +494,14 @@ export async function integrity(t: Db, companyId: string) {
     `SELECT (SELECT COUNT(*)::int FROM journal_entries WHERE company_id=$1 AND branch_id IS NULL) unassigned,
        COALESCE((SELECT SUM(l.debit-l.credit) FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='INTER_BRANCH' AND e.status='POSTED'),0) inter`, [companyId]);
   checks.push({ name: "كل القيود موزعة على فروع وجاري الفروع متوازن على مستوى المنشأة", ok: br.unassigned === 0 && Math.abs(Number(br.inter)) < 0.01, a: br.unassigned, b: r2(br.inter), note: "a = قيود بلا فرع، b = رصيد جاري الفروع (يجب أن يكون صفراً)" });
+  // associations: only for companies that use them, so the core program's check count is unchanged elsewhere
+  const assocUse = await t.one(`SELECT EXISTS(SELECT 1 FROM charity_receipts WHERE company_id=$1) OR EXISTS(SELECT 1 FROM charity_disbursements WHERE company_id=$1) OR EXISTS(SELECT 1 FROM assoc_share_txns WHERE company_id=$1) AS used, EXISTS(SELECT 1 FROM assoc_share_txns WHERE company_id=$1) OR EXISTS(SELECT 1 FROM assoc_distributions WHERE company_id=$1) AS coop`, [companyId]);
+  if (assocUse.used) {
+    const { voucherRegister, assocChecks } = require("./assoc") as typeof import("./assoc");
+    const vr = await voucherRegister(t, companyId, { from: "1900-01-01", to: "2999-12-31" });
+    checks.push({ name: "كل سندات البرنامج المحاسبي والجمعية مرحّلة بقيود تطابق مبالغها", ok: vr.mismatches === 0, a: vr.mismatches, b: 0, note: "a = سندات بلا قيد مرحّل أو بقيد يخالف مبلغها" });
+    if (assocUse.coop) for (const c of await assocChecks(t, companyId)) checks.push({ name: c.name, ok: c.ok, a: c.actual, b: c.expected });
+  }
   return { ok: checks.every((c) => c.ok), checks };
 }
 

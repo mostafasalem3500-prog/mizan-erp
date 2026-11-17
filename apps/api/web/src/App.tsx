@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
-import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select } from "./lib";
+import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select, useFetch } from "./lib";
 import { GlobalSearch } from "./pages/Search";
 const CharityApp = React.lazy(() => import("./charity/CharityApp").then((m) => ({ default: m.CharityApp })));
 const charityDefault = async () => (CFG.charity ? (await import("./charity/CharityApp")).charityDefault() : false);
-import { CFG } from "./shared/country";
+import { CFG, BASE_TITLE } from "./shared/country";
 import { SideNav, useNav } from "./nav";
 import { Dashboard } from "./pages/Dashboard"; // the landing screen ships with the shell
 import { setSheetMeta } from "./shared/sheet";
@@ -113,8 +113,16 @@ function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedB
   // the menu entry itself when it is a plain screen; otherwise the open address (a profile, a report…)
   const to = active?.i && !active.i.action && active.s >= 1000 ? active.i.to : active?.g.to && active.s >= 1000 ? active.g.to : null;
   // the browser tab and history carry the screen's name
-  useEffect(() => { if (label) document.title = `${label} — ${CFG.appName || "ميزان ERP"}`; }, [label]);
+  useEffect(() => { if (label) document.title = `${label} — ${BASE_TITLE() || "ميزان ERP"}`; }, [label]);
   return <><h1 className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : label}</h1><FavStar to={to} label={label} /></>;
+}
+
+/** Associations edition: the accounting program carries the association's seal, with the way back to the association system. */
+function AssocBrand() {
+  const st = useFetch<any>("/charity/settings");
+  const b = CFG.assocBrand;
+  const name = st.data?.associationName || b?.name || DEFAULT_NAME;
+  return <div className="brand assoc-brand"><img src={st.data?.logoUrl || b?.logo || DEFAULT_LOGO} alt="" /><span><b>{name}</b><small>النظام المحاسبي</small></span></div>;
 }
 
 export function App() {
@@ -134,7 +142,7 @@ export function App() {
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
-  const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") ? "/charity" : "/login"); };
+  const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") || CFG.assoc ? "/charity" : "/login"); };
   if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return CFG.charity ? <AppCtx.Provider value={{ me, reload, can }}><React.Suspense fallback={<div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>}><CharityApp onLogout={logout} /></React.Suspense></AppCtx.Provider> : <Navigate to="/" replace />;
   const isPos = loc.pathname === "/pos";
   return (
@@ -145,16 +153,16 @@ export function App() {
         <div className="app">
           <a className="skip-link" href="#content">تخطَّ إلى المحتوى</a>
           <aside className={"sidebar" + (menu ? " open" : "")}>
-            <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}{CFG.desktop && <span className="badge" title="قاعدة البيانات على هذا الجهاز" style={{ marginInlineStart: 6, fontSize: 11 }}>💻 محلي</span>}</div>
+            {CFG.assoc ? <AssocBrand /> : <div className="brand"><img src="/favicon.svg" alt="" /> {CFG.appName}{CFG.desktop && <span className="badge" title="قاعدة البيانات على هذا الجهاز" style={{ marginInlineStart: 6, fontSize: 11 }}>💻 محلي</span>}</div>}
             <div className="company"><b>{me.company.nameAr}</b><span>{me.roles?.[me.role] || me.role} · {me.user.fullName}</span>{me.branch && <span title={me.lockedBranch ? "صلاحيتك مقيدة بهذا الفرع" : "الفرع الافتراضي"}>{me.lockedBranch ? "🔒 " : "🏬 "}{me.branch.name}</span>}</div>
             <SideNav can={can} lockedBranch={!!me.lockedBranch} extra={<>
-              {CFG.charity && can("payments.read") && <NavLink to="/charity" className="nav-top" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>واجهة الجمعيات الخيرية</NavLink>}
+              {CFG.charity && can("payments.read") && <NavLink to="/charity" className="nav-top" style={{ marginTop: 10, background: "rgba(183,134,43,.18)", color: "#f3e3bd" }}><span className="ic">💚</span>{CFG.assoc ? "↩ نظام الجمعية" : "واجهة الجمعيات الخيرية"}</NavLink>}
               {me.superAdmin && <NavLink to="/admin" className="nav-top"><span className="ic">🛡</span>إدارة النظام والتراخيص</NavLink>}
             </>} />
             <div className="foot">
               <SubscriptionLine me={me} />
               <div className="small" style={{ opacity: .6 }} title="رقم الإصدار المعروض الآن">الإصدار {(window as any).MIZAN_VERSION}</div>
-              <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={() => { session.token = null; setMe(null); nav("/login"); }}>تسجيل الخروج</button>
+              <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={logout}>تسجيل الخروج</button>
             </div>
           </aside>
           <div className="main">
@@ -297,10 +305,10 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
   useEffect(() => { api("/auth/demo-credentials").then(setDemo).catch(() => undefined); }, []);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   const loc = useLocation();
-  const charity = !!CFG.charity && loc.pathname.startsWith("/charity");
-  useEffect(() => { if (!charity) return; document.title = DEFAULT_NAME; const l = document.querySelector<HTMLLinkElement>('link[rel~="icon"]'); const h = l?.href, ty = l?.type; if (l) { l.href = DEFAULT_LOGO; l.type = "image/png"; } return () => { document.title = "ميزان ERP"; if (l && h) { l.href = h; l.type = ty || ""; } }; }, [charity]);
+  const charity = !!CFG.charity && (loc.pathname.startsWith("/charity") || !!CFG.assoc);
+  useEffect(() => { if (!charity) return; document.title = DEFAULT_NAME; const l = document.querySelector<HTMLLinkElement>('link[rel~="icon"]'); const h = l?.href, ty = l?.type; if (l) { l.href = DEFAULT_LOGO; l.type = "image/png"; } return () => { document.title = BASE_TITLE(); if (l && h) { l.href = h; l.type = ty || ""; } }; }, [charity]);
   const [needOtp, setNeedOtp] = useState(false);
-  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { let r: any; try { r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); } catch (err: any) { if (err?.code === "OTP_REQUIRED") { setNeedOtp(true); return; } throw err; } session.token = r.token; const target = charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
+  const submit = (e: React.FormEvent) => { e.preventDefault(); run(async () => { let r: any; try { r = await api(mode === "login" ? "/auth/login" : "/auth/register", { body: f }); } catch (err: any) { if (err?.code === "OTP_REQUIRED") { setNeedOtp(true); return; } throw err; } session.token = r.token; const target = CFG.assoc ? (loc.pathname.startsWith("/charity") || loc.pathname === "/" || loc.pathname === "/login" ? "/charity" : loc.pathname) : charity ? loc.pathname : (await charityDefault()) ? "/charity" : "/"; onDone(); nav(target); }); };
   return (
     <div className={"auth" + (charity ? " ch-auth" : "")}>
       {charity ? <div className="art">
@@ -311,6 +319,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
           <li>✔ العهد والمشتريات وطلبات الصرف والمسيّرات</li>
           <li>✔ نماذج A4 رسمية بشعار الجمعية — مطبوعة أو فارغة</li>
           <li>✔ قيود محاسبية آلية وقائمة الأنشطة</li>
+          {CFG.assoc && <><li>✔ الأعضاء والاشتراكات، والأسهم وتوزيع الفائض للجمعيات التعاونية</li><li>✔ النظام المحاسبي الكامل بداخله: فواتير ضريبية، نقطة بيع، مخزون، رواتب، قوائم ختامية</li></>}
         </ul>
       </div> : <div className="art">
         <div className="row"><img src="/favicon.svg" width={54} alt="" /><h1>{CFG.appName}</h1></div>
@@ -329,7 +338,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
           <div className="card-b">
             {charity && <div className="ch-auth-m"><img src={DEFAULT_LOGO} alt="" /><b>{DEFAULT_NAME}</b></div>}<h2 className="mb">{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}</h2>
             {CFG.desktop && !charity && <div className="alert info small">💻 <b>الوضع المحلي:</b> قاعدة البيانات على هذا الجهاز — الحسابات هنا مستقلة عن حسابات السحابة. {mode === "login" ? "أول مرة؟ أنشئ حساب منشأتك من «إنشاء حساب جديد»." : ""}</div>}
-            {charity && <div className="alert info small">الدخول إلى منصة {DEFAULT_NAME} — بحساب ميزان ERP نفسه</div>}
+            {charity && <div className="alert info small">{CFG.assoc ? <>الدخول إلى نظام الجمعية والنظام المحاسبي — حساب واحد للاثنين</> : <>الدخول إلى منصة {DEFAULT_NAME} — بحساب ميزان ERP نفسه</>}</div>}
             <div className="grid">
               {mode === "register" && <>
                 <Field label="الاسم الكامل"><Input required value={f.fullName} onChange={set("fullName")} /></Field>

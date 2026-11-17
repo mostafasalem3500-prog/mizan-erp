@@ -6,8 +6,9 @@ import { r23 } from "./routes/round23";
 import { r25 } from "./routes/round25";
 import { r27 } from "./routes/round27";
 import { egr } from "./routes/egypt";
-import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP } from "./lib/country";
+import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP, ASSOC, ASSOC_BRAND } from "./lib/country";
 import { r16 } from "./routes/round16";
+import { assocRoutes } from "./routes/assoc";
 import { r28 } from "./routes/round28";
 import { r31 } from "./routes/round31";
 import { startDigestScheduler } from "./services/digest";
@@ -116,6 +117,7 @@ app.use("/api", r9);
 app.use("/api", r10);
 app.use("/api", r12);
 app.use("/api", r15);
+app.use("/api", assocRoutes);
 app.use("/api", r16);
 app.use("/api", r20);
 app.use("/api", r22);
@@ -147,10 +149,31 @@ if (fs.existsSync(webDir)) {
   // hashed bundles never change → cached for a year; the service worker and manifest are always re-checked
   app.use("/assets", express.static(path.join(webDir, "assets"), { maxAge: "365d", immutable: true, index: false }));
   app.use("/assets", (_req, res) => { res.status(404).type("text/plain").send("not found"); }); // an old tab asking for a replaced chunk must not get index.html
-  app.use(express.static(webDir, { index: false, setHeaders: (res, file) => { res.setHeader("Cache-Control", /(sw\.js|sw-update\.js|registerSW\.js|workbox-[^/]*\.js|\.webmanifest)$/.test(file) ? "no-cache" : "public, max-age=3600"); } }));
+  if (ASSOC) app.get("/index.html", (_req, res) => { res.setHeader("Cache-Control", "no-cache"); res.type("html").send(assocIndex()); }); // the service worker caches this copy
+  app.use(express.static(webDir, { index: false, redirect: false, setHeaders: (res, file) => { res.setHeader("Cache-Control", /(sw\.js|sw-update\.js|registerSW\.js|workbox-[^/]*\.js|\.webmanifest)$/.test(file) ? "no-cache" : "public, max-age=3600"); } }));
+  // associations edition: the site carries the association's name and seal (tab icon, home-screen icon, link previews)
+  const assocManifest = () => JSON.stringify({ name: ASSOC_BRAND.name, short_name: "الجمعية", lang: "ar", dir: "rtl", start_url: "/charity", scope: "/", display: "standalone", background_color: "#ffffff", theme_color: "#1c3f8a",
+    icons: [{ src: ASSOC_BRAND.icon192, sizes: "192x192", type: "image/png" }, { src: ASSOC_BRAND.icon512, sizes: "512x512", type: "image/png" }, { src: ASSOC_BRAND.icon512, sizes: "512x512", type: "image/png", purpose: "maskable" }] });
+  app.get("/assoc.webmanifest", (_req, res) => { res.setHeader("Cache-Control", "no-cache"); res.type("application/manifest+json").send(assocManifest()); });
+  let indexHtml: string | null = null;
+  const assocIndex = () => {
+    if (indexHtml) return indexHtml;
+    const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const n = esc(ASSOC_BRAND.name);
+    indexHtml = fs.readFileSync(path.join(webDir, "index.html"), "utf8")
+      .replace(/<title>[^<]*<\/title>/, `<title>${n}</title>`)
+      .replace(/<link rel="icon"[^>]*>/, `<link rel="icon" href="/charity/favicon.png" type="image/png" />`)
+      .replace(/<link rel="manifest"[^>]*>/, `<link rel="manifest" href="/assoc.webmanifest" />`)
+      .replace(/<link rel="apple-touch-icon"[^>]*>/, `<link rel="apple-touch-icon" href="${ASSOC_BRAND.icon512}" />`)
+      .replace(/<meta name="theme-color"[^>]*>/, `<meta name="theme-color" content="#1c3f8a" />`)
+      .replace(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${n}" />`)
+      .replace(/<meta property="og:image"[^>]*>/, `<meta property="og:image" content="${ASSOC_BRAND.icon512}" />`)
+      .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${n} — نظام الجمعية والنظام المحاسبي: سندات القبض والصرف والتبرعات والأعضاء والقوائم المالية." />`);
+    return indexHtml;
+  };
   app.get(/^(?!\/api).*/, (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
-    res.sendFile(path.join(webDir, "index.html"));
+    if (ASSOC) res.type("html").send(assocIndex()); else res.sendFile(path.join(webDir, "index.html"));
   });
 }
 
