@@ -84,7 +84,7 @@ export async function openOrder(t: Db, company: any, user: string, b: any) {
     if (busy) return full(busy); // the table already has its order: open it instead of a second one
   }
   if (type === "DELIVERY" && !String(b.customerPhone || "").trim()) throw bad("رقم جوال العميل مطلوب لطلب التوصيل");
-  const n = await t.one(`SELECT COALESCE(MAX(number),0)+1 n FROM pos_orders WHERE company_id=$1 AND opened_at::date = CURRENT_DATE`, [C]);
+  const n = await t.one(`SELECT COALESCE(MAX(number),0)+1 n FROM pos_orders WHERE company_id=$1 AND (opened_at AT TIME ZONE 'Asia/Riyadh')::date = (now() AT TIME ZONE 'Asia/Riyadh')::date`, [C]);
   const o = await t.insert("pos_orders", { companyId: C, number: n.n, type: table ? "DINE_IN" : type, tableId: table?.id || null, tableName: table?.name || null, guests: Math.min(99, Math.max(1, Math.round(num(b.guests) || 1))),
     partnerId: UUID.test(b.partnerId || "") ? b.partnerId : null, customerName: b.customerName ? String(b.customerName).slice(0, 80) : null, customerPhone: b.customerPhone ? String(b.customerPhone).slice(0, 20) : null, address: b.address ? String(b.address).slice(0, 200) : null, waiter: user, lines: JSON.stringify([]) });
   return full(o);
@@ -161,7 +161,7 @@ export async function report(t: Db, C: string, from: string, to: string) {
   const byType = await t.rows(`SELECT COALESCE(order_type,'DINE_IN') type, COUNT(*)::int n, COALESCE(SUM(total),0) total ${base} GROUP BY 1 ORDER BY 3 DESC`, [C, from, to]);
   const byTable = await t.rows(`SELECT table_name name, COUNT(*)::int n, COALESCE(SUM(total),0) total ${base} AND table_name IS NOT NULL GROUP BY 1 ORDER BY 3 DESC LIMIT 40`, [C, from, to]);
   const byHour = await t.rows(`SELECT EXTRACT(HOUR FROM (i.issued_at AT TIME ZONE 'Asia/Riyadh'))::int h, COUNT(*)::int n, COALESCE(SUM(total),0) total ${base} GROUP BY 1 ORDER BY 1`, [C, from, to]);
-  const cancelled = await t.one(`SELECT COUNT(*)::int n FROM pos_orders WHERE company_id=$1 AND status='CANCELLED' AND COALESCE(cancel_reason,'') NOT LIKE 'دُمج%' AND opened_at::date BETWEEN $2 AND $3`, [C, from, to]);
+  const cancelled = await t.one(`SELECT COUNT(*)::int n FROM pos_orders WHERE company_id=$1 AND status='CANCELLED' AND COALESCE(cancel_reason,'') NOT LIKE 'دُمج%' AND (opened_at AT TIME ZONE 'Asia/Riyadh')::date BETWEEN $2 AND $3` /* the business day in Saudi time, as the invoice dates are */, [C, from, to]);
   const tot = byType.reduce((a, r) => ({ n: a.n + r.n, total: a.total + Number(r.total) }), { n: 0, total: 0 });
   return { from, to, orders: tot.n, total: r2(tot.total), average: tot.n ? r2(tot.total / tot.n) : 0, cancelled: cancelled.n, byType: byType.map((r) => ({ ...r, total: Number(r.total) })), byTable: byTable.map((r) => ({ ...r, total: Number(r.total) })), byHour: byHour.map((r) => ({ ...r, total: Number(r.total) })) };
 }

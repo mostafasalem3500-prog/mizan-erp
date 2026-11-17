@@ -388,7 +388,7 @@ IMPL["inv.valuation-category"] = async (t, companyId, q) => {
 // ── POS ─────────────────────────────────────────────────────
 IMPL["pos.sessions"] = async (t, companyId, q) => {
   const { from, to } = period(q);
-  const w = new W("s.company_id=?", companyId); w.add("s.opened_at::date >= ?", from).add("s.opened_at::date <= ?", to).uuids("s.warehouse_id", q.warehouseId).in("s.status", q.sessionStatus);
+  const w = new W("s.company_id=?", companyId); w.add("(s.opened_at AT TIME ZONE 'Asia/Riyadh')::date >= ?", from).add("(s.opened_at AT TIME ZONE 'Asia/Riyadh')::date <= ?", to).uuids("s.warehouse_id", q.warehouseId).in("s.status", q.sessionStatus);
   if (q.user) w.add("s.user_name=?", q.user);
   if (q.branchId && UUID.test(q.branchId)) w.add("s.warehouse_id IN (SELECT id FROM warehouses WHERE branch_id=?::uuid)", q.branchId);
   const g = q.groupBy || "none";
