@@ -38,6 +38,7 @@ import { runAccountingSelfCheck } from "./services/selfcheck";
 import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 import { startDesktopLicenseCheck } from "./services/desktopLicenseCheck";
+import { startDesktopGuard } from "./services/desktopGuard";
 
 /** Ops aid: ZATCA_SELFTEST=1 runs the developer-portal self-test once at boot for the showcase (or first) company and logs it. */
 async function zatcaBootSelfTest() {
@@ -170,6 +171,7 @@ migrate()
     if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
     startDigestScheduler();
+    startDesktopGuard().catch((e) => console.error("[guard]", e));
     startDesktopLicenseCheck();
   })
   .catch((e) => {

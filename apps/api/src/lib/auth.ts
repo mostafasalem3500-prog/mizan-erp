@@ -4,7 +4,7 @@ import { AppError, forbidden } from "./core";
 import { db } from "../db/pool";
 import { reqCtx } from "./context";
 import { applyBranchScope } from "./branchScope";
-import { currentDeviceId, deviceMatches } from "./desktopLicense";
+import { currentDeviceId, deviceMatches, isDesktopLocal } from "./desktopLicense";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "mizan-dev-secret-change-me";
 
@@ -76,6 +76,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       if (!row && !payload.superAdmin) throw new AppError(401, "لم تعد عضواً في هذه المنشأة", "UNAUTHENTICATED");
       if (row) {
         req.company = row;
+        if (isDesktopLocal()) row._entitlement = await desktopEntitlement(row.id);
         req.auth.role = row.memberRole;
         req.auth.branchId = row.memberBranchId || null;
         req.auth.lockedBranchId = row.memberRestrict && row.memberBranchId && !["OWNER", "ADMIN"].includes(row.memberRole) ? row.memberBranchId : null;
@@ -93,14 +94,27 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   }
 }
 
+import { trustedNow, DESKTOP_TRIAL_DAYS, desktopEntitlement } from "../services/desktopGuard";
 export function subscriptionState(company: any): { active: boolean; readOnly: boolean; daysLeft: number | null; reason?: string } {
   if (!company) return { active: false, readOnly: true, daysLeft: null, reason: "NO_COMPANY" };
   if (company.status === "SUSPENDED") return { active: false, readOnly: true, daysLeft: 0, reason: "SUSPENDED" };
   // desktop: a licence bound to another PC (e.g. the data folder was copied) does not run here
   const dev = currentDeviceId();
   if (dev && company.licensedDevice && !deviceMatches(company.licensedDevice, dev)) return { active: false, readOnly: true, daysLeft: 0, reason: "DEVICE" };
-  if (!company.subscriptionEndsAt) return { active: true, readOnly: false, daysLeft: null };
-  const days = Math.ceil((new Date(company.subscriptionEndsAt).getTime() - Date.now()) / 86400000);
+  // desktop: the end date is what the signed keys pay for (not whatever the local database says), and time never runs backwards
+  let endsAt: Date | null = company.subscriptionEndsAt ? new Date(company.subscriptionEndsAt) : null;
+  if (dev) {
+    const ent = company._entitlement as { keys: number; maxEnd: Date | null } | undefined;
+    if (company.plan === "TRIAL" || !company.plan) {
+      const cap = new Date((company.createdAt ? new Date(company.createdAt).getTime() : trustedNow()) + (DESKTOP_TRIAL_DAYS() + 1) * 86400000);
+      endsAt = !endsAt || endsAt > cap ? cap : endsAt;
+    } else if (ent) {
+      if (!ent.keys || !ent.maxEnd) return { active: false, readOnly: true, daysLeft: 0, reason: "LICENSE" };
+      endsAt = !endsAt || endsAt > ent.maxEnd ? ent.maxEnd : endsAt;
+    }
+  }
+  if (!endsAt) return { active: true, readOnly: false, daysLeft: null };
+  const days = Math.ceil((endsAt.getTime() - trustedNow()) / 86400000);
   if (days < 0) return { active: false, readOnly: true, daysLeft: days, reason: "EXPIRED" };
   return { active: true, readOnly: false, daysLeft: days };
 }
@@ -113,7 +127,7 @@ export function perm(p: string) {
     if (!p.endsWith(".read")) {
       const s = subscriptionState(req.company);
       if (s.readOnly)
-        return next(new AppError(402, s.reason === "SUSPENDED" ? "الحساب موقوف، تواصل مع الإدارة" : s.reason === "DEVICE" ? "الترخيص مسجَّل لجهاز آخر — النظام في وضع القراءة فقط. اطلب مفتاحاً لهذا الجهاز من مزود النظام" : "انتهى الاشتراك — النظام في وضع القراءة فقط. فعّل مفتاح ترخيص للاستمرار", "SUBSCRIPTION"));
+        return next(new AppError(402, s.reason === "SUSPENDED" ? "الحساب موقوف، تواصل مع الإدارة" : s.reason === "LICENSE" ? "لا يوجد مفتاح ترخيص صالح لهذه المنشأة على هذا الجهاز — فعّل مفتاح الترخيص من الإعدادات. النظام في وضع القراءة فقط" : s.reason === "DEVICE" ? "الترخيص مسجَّل لجهاز آخر — النظام في وضع القراءة فقط. اطلب مفتاحاً لهذا الجهاز من مزود النظام" : "انتهى الاشتراك — النظام في وضع القراءة فقط. فعّل مفتاح ترخيص للاستمرار", "SUBSCRIPTION"));
     }
     next();
   };

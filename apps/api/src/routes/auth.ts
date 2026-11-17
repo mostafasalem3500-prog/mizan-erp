@@ -18,6 +18,7 @@ import { randomBytes } from "crypto";
 import { db, tx } from "../db/pool";
 import { h, bad, req as need, AppError, conflict, today, addMonths } from "../lib/core";
 import { newSecret, verifyTotp, otpUri, hashCode, newRecoveryCodes } from "../lib/totp";
+import { trustedNow, desktopTrialEnd, forgetEntitlement, ACTIVATION_GRACE_DAYS } from "../services/desktopGuard";
 import { authenticate, signToken, subscriptionState, ROLES, superAdmin, AuthCtx } from "../lib/auth";
 import { seedCurrencies } from "../services/currency";
 import { seedChartOfAccounts, ensureFiscalYear } from "../accounting/engine";
@@ -25,12 +26,13 @@ import { ensureZatcaConfig } from "../zatca/stamp";
 
 export const auth = Router();
 
-const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 14);
+const TRIAL_DAYS = Math.max(1, Math.min(90, Number(process.env.TRIAL_DAYS || 14)));
 
 export async function bootstrapCompany(t: any, input: { nameAr: string; nameEn?: string; vatNumber?: string; crNumber?: string; city?: string; phone?: string; email?: string }, ownerUserId: string, plan = "TRIAL") {
   const company = await t.insert("companies", {
     nameAr: input.nameAr.trim(), nameEn: input.nameEn || null, vatNumber: input.vatNumber || null, crNumber: input.crNumber || null, city: input.city || null, phone: input.phone || null, email: input.email || null,
-    plan, subscriptionEndsAt: plan === "TRIAL" ? new Date(Date.now() + TRIAL_DAYS * 86400000) : null,
+    // desktop: one trial per installation — a second company (or a new account) does not start a new trial
+    plan, subscriptionEndsAt: plan === "TRIAL" ? (isDesktopLocal() ? desktopTrialEnd() : new Date(Date.now() + TRIAL_DAYS * 86400000)) : null,
     country: CFG.code, currency: CFG.currency, ...(IS_EG ? { vatPeriod: "MONTHLY" } : {}),
   });
   await t.insert("memberships", { companyId: company.id, userId: ownerUserId, role: "OWNER" });
@@ -266,6 +268,8 @@ auth.post(
     const device = currentDeviceId();
     if (offline?.deviceId && !deviceMatches(offline.deviceId, device)) throw bad(`هذا المفتاح صادر لجهاز آخر (${offline.deviceId}). معرّف هذا الجهاز: ${device || "غير معروف"} — أرسله لمزود النظام لإصدار مفتاح له`);
     if (offline?.type === "rebind") return applyRebind(req, offline);
+    // a desktop key works on the one PC it was issued for; a key with no PC in it could be typed into any number of installations
+    if (offline && !offline.deviceId) throw bad(`هذا المفتاح غير مربوط بجهاز. أرسل معرّف هذا الجهاز (${device || "من قائمة المساعدة"}) لمزود النظام ليصدر مفتاحاً له`);
     const key = offline ? rawKey : rawKey.toUpperCase();
     return tx(async (t) => {
       if (offline && !(await t.maybe(`SELECT id FROM license_keys WHERE key=$1`, [key])))
@@ -274,13 +278,25 @@ auth.post(
       if (!lic) throw bad("مفتاح الترخيص غير صحيح");
       if (lic.activatedAt) throw conflict("هذا المفتاح مستخدم مسبقاً");
       const c = await t.one(`SELECT * FROM companies WHERE id=$1 FOR UPDATE`, [req.company.id]);
-      const base = c.subscriptionEndsAt && new Date(c.subscriptionEndsAt) > new Date() && c.plan !== "TRIAL" ? new Date(c.subscriptionEndsAt) : new Date();
-      const ends = new Date(base);
+      const nowT = new Date(trustedNow());
+      const base = c.subscriptionEndsAt && new Date(c.subscriptionEndsAt) > nowT && c.plan !== "TRIAL" ? new Date(c.subscriptionEndsAt) : nowT;
+      let ends = new Date(base);
       ends.setMonth(ends.getMonth() + lic.months);
+      if (offline) {
+        // the months count from the key's signed issue date (plus an allowance for late activation): typing an old key
+        // into a fresh installation does not start its period again
+        if (new Date(offline.issuedAt).getTime() > nowT.getTime() + 2 * 86400000) throw bad("تاريخ هذا الجهاز أقدم من تاريخ إصدار المفتاح — اضبط تاريخ ووقت الجهاز ثم أعد المحاولة");
+        const prior = await t.rows(`SELECT key FROM license_keys WHERE company_id=$1 AND desktop AND activated_at IS NOT NULL`, [c.id]);
+        const months = prior.map((r: any) => verifyDesktopLicense(r.key)).filter((x: any) => x && x.type !== "rebind").reduce((a: number, x: any) => a + Number(x.months || 0), 0) + Number(offline.months);
+        const cap = new Date(offline.issuedAt); cap.setMonth(cap.getMonth() + months); cap.setDate(cap.getDate() + ACTIVATION_GRACE_DAYS);
+        if (ends > cap) ends = cap;
+        if (ends <= nowT) throw bad("انتهت مدة هذا المفتاح (محسوبة من تاريخ إصداره) — اطلب مفتاح تجديد من مزود النظام");
+      }
       await t.exec(`UPDATE companies SET plan=$2, max_users=$3, subscription_ends_at=$4, status='ACTIVE', updated_at=now() WHERE id=$1`, [c.id, lic.plan, lic.maxUsers, ends]);
       await t.exec(`UPDATE license_keys SET company_id=$2, activated_at=now() WHERE id=$1`, [lic.id, c.id]);
       // bind the company to this PC so a copied data folder runs read-only elsewhere
       if (offline?.deviceId) await t.exec(`UPDATE companies SET licensed_device=$2 WHERE id=$1`, [c.id, offline.deviceId]);
+      forgetEntitlement(c.id);
       await t.insert("audit_logs", { companyId: c.id, userId: req.auth.userId, userName: req.auth.userName, action: "LICENSE_ACTIVATED", entity: "company", entityId: c.id, details: { plan: lic.plan, months: lic.months, ends } });
       return { plan: lic.plan, maxUsers: lic.maxUsers, subscriptionEndsAt: ends };
     });
@@ -354,6 +370,7 @@ admin.post(
     const months = Math.max(1, Math.min(60, Number(req.body.months) || 12));
     const maxUsers = Math.max(1, Math.min(500, Number(req.body.maxUsers) || (plan === "BASIC" ? 3 : plan === "PRO" ? 10 : 100)));
     const deviceId = req.body.desktop && req.body.deviceId ? normalizeDeviceId(req.body.deviceId) : null;
+    if (req.body.desktop && !deviceId) throw bad("مفتاح سطح المكتب يصدر لجهاز محدد: أدخل معرّف جهاز العميل (يظهر له في شاشة الترخيص وقائمة المساعدة)");
     if (deviceId && !validDeviceId(deviceId)) throw bad("معرّف الجهاز غير صحيح — تأكد من نسخه كما يظهر في شاشة الترخيص لدى العميل (XXXX-XXXX-XXXX-XXXX)");
     const count = deviceId ? 1 : Math.max(1, Math.min(50, Number(req.body.count) || 1));
     const out: any[] = [];

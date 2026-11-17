@@ -269,7 +269,10 @@ async function startLocal(cfg) {
   process.env.DATABASE_URL = `postgresql://mizan:${cfg.local.dbPassword}@127.0.0.1:${dbPort}/mizan`;
   process.env.PORT = String(appPort);
   process.env.JWT_SECRET = cfg.local.jwtSecret;
-  process.env.TRIAL_DAYS = process.env.TRIAL_DAYS || "30";
+  // fixed here: values the user may have put in the system environment must not reach the licence logic
+  process.env.TRIAL_DAYS = "30";
+  process.env.NODE_ENV = "production";
+  for (const k of ["LICENSE_SIGNING_KEY", "DEMO_EMAIL", "DEMO_PASSWORD", "AI_OPEN", "SUPER_ADMIN_EMAIL", "SUPERADMIN_EMAIL"]) delete process.env[k];
   process.env.MIZAN_EDITION = "desktop-local";
   process.env.MIZAN_DEVICE_ID = deviceId();
   // local only by default; "share on the local network" lets the office PCs connect to this one
