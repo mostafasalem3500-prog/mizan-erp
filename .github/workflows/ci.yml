@@ -40,6 +40,8 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: English interface — every screen text has English
+        run: node tools/i18n/check.cjs
       - name: Start both editions
         working-directory: apps/api
         run: |

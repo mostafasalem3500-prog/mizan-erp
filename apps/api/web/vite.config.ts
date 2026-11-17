@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // one version number for web and desktop
 // the hosting build only sees apps/api, so the number is kept in apps/api/web/VERSION (same as apps/desktop/package.json)
@@ -10,7 +11,7 @@ const VERSION = (() => { for (const f of ["./VERSION", "../../desktop/package.js
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [
-    react(),
+    react({ jsxImportSource: "@mz" }), // the app's JSX factory translates interface text in English mode (src/i18n)
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: false, // registered in main.tsx, which also reloads the page when a new version takes over
@@ -45,6 +46,7 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: { alias: { "@mz/jsx-runtime": fileURLToPath(new URL("./src/i18n/jsx-runtime.ts", import.meta.url)), "@mz/jsx-dev-runtime": fileURLToPath(new URL("./src/i18n/jsx-dev-runtime.ts", import.meta.url)) } },
   server: { port: 5173, proxy: { "/api": "http://localhost:3100" } },
   build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 1500 },
 });

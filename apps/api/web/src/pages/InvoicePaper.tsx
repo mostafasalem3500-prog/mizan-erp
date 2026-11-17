@@ -1,3 +1,6 @@
+/** @jsxImportSource react */
+// Printed documents keep the language of their print template (Arabic, with English beside it when the template asks),
+// whatever the interface language: a tax invoice must carry Arabic. So this file uses React's own JSX factory.
 /** One invoice drawn with a print template: a sheet (A4 / A5) or a roll receipt (80mm / 58mm). */
 import React from "react";
 import { CUR, CFG } from "../shared/country";

@@ -3,8 +3,9 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZATCA_AR, useCompanyContext, useLocalState } from "../lib";
 
+import { isEn, tr } from "../i18n";
 const M_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-const mLabel = (m: string) => M_AR[Number(m.slice(5, 7)) - 1].slice(0, 5);
+const mLabel = (m: string) => { const n = M_AR[Number(m.slice(5, 7)) - 1]; return isEn() ? tr(n).slice(0, 3) : n.slice(0, 5); };
 
 /** Month-to-date performance per branch — only when the company runs more than one branch. */
 function BranchesMonth() {

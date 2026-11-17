@@ -5,7 +5,8 @@ import { useFetch, Money, money, Loading, Empty, BarChart, PeriodFilter, PrintBt
 
 const yStart = () => today().slice(0, 4) + "-01-01";
 const ST: Record<string, { c: string; t: string }> = { good: { c: "#16a34a", t: "جيد" }, ok: { c: "#d97706", t: "مقبول" }, bad: { c: "#dc2626", t: "ضعيف" }, na: { c: "#94a3b8", t: "—" } };
-const mLabel = (m: string) => ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"][Number(m.slice(5, 7)) - 1]?.slice(0, 3) + " " + m.slice(2, 4);
+import { tr } from "../i18n";
+const mLabel = (m: string) => tr(["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"][Number(m.slice(5, 7)) - 1] || "")?.slice(0, 3) + " " + m.slice(2, 4);
 
 export function fmtVal(v: number | null, unit: string) {
   if (v === null || v === undefined) return "—";

@@ -7,12 +7,13 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, q, useFetch, useAction, useToast, useCompanyContext, useLocalState, useNewParam, Modal, Field, Input, Select, NumInput, Empty, Loading, today, fmtDate, money, normalizeAr, confirmDlg } from "../lib";
 import { LESSONS, SECTIONS, Lesson } from "../help/lessons";
 import { CFG } from "../shared/country";
+import { isEn, tr } from "../i18n";
 
 const visible = (l: Lesson) => !(l.sa && CFG.country !== "SA") && !(l.eg && CFG.country !== "EG");
 const ALL = LESSONS.filter(visible);
 
 /** **bold** → <b> */
-function Rich({ t }: { t: string }) { return <>{t.split("**").map((s, i) => (i % 2 ? <b key={i}>{s}</b> : <React.Fragment key={i}>{s}</React.Fragment>))}</>; }
+function Rich({ t }: { t: string }) { return <>{tr(t).split("**").map((s, i) => (i % 2 ? <b key={i}>{s}</b> : <React.Fragment key={i}>{s}</React.Fragment>))}</>; }
 
 /** The lesson that explains the open screen: its exact tab (?tab= / ?m=) first, then the screen, then the nearest parent screen. */
 export function lessonFor(pathname: string, search = ""): Lesson | null {
@@ -57,7 +58,7 @@ export function HelpButton() {
   useEffect(() => { if (!open) return; const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [open]);
   return (
     <>
-      <button className="btn sm help-btn" title="شرح هذه الشاشة" onClick={() => setOpen(true)}>؟<span className="help-t"> شرح</span></button>
+      <button className="btn sm help-btn" title="شرح هذه الشاشة" onClick={() => setOpen(true)}>؟<span className="help-t">{isEn() ? " Help" : " شرح"}</span></button>
       {open && createPortal(<div className="drawer-bg no-print" onClick={() => setOpen(false)}>
         <aside className="drawer" role="dialog" aria-label="شرح الشاشة" onClick={(e) => e.stopPropagation()}>
           <div className="drawer-h"><b>{l ? l.title : "شرح الشاشة"}</b><button className="btn sm ghost" onClick={() => setOpen(false)} aria-label="إغلاق">✕</button></div>

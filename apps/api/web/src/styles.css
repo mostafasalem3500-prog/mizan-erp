@@ -823,3 +823,17 @@ html[data-edition="assoc"] .sidebar .group { color: #8fb0e0; }
 .todo-strip .chip:hover, .todo-strip .chip:focus-visible { background: var(--surface-2); outline: 2px solid var(--primary); outline-offset: 1px; }
 
 .tbl tr.group th { background: var(--surface-2); text-align: start; font-weight: 700; }
+
+/* ── English interface (dir=ltr): the few rules written for the right-to-left layout only ── */
+[dir=ltr] .fin-stmt td.num, [dir=ltr] .fin-stmt th.num { text-align: right; }
+/* the chevron character itself is turned round (‹ → ›) by the text step, so an open group turns it down the other way */
+[dir=ltr] .sidebar .nav-group.open > .nav-top .chev, [dir=ltr] .learn-item.open .learn-item-h .chev { transform: rotate(90deg); }
+@media (max-width: 960px) { [dir=ltr] .sidebar:not(.open) { transform: translateX(-100%); } }
+[dir=ltr] .fa-bar > span { transform: translateX(-50%); }
+@keyframes drawer-in-ltr { from { transform: translateX(24px); opacity: 0; } }
+[dir=ltr] .drawer { animation-name: drawer-in-ltr; }
+.lang-toggle { font-weight: 600; }
+.lang-toggle .lt-short { display: none; }
+@media (max-width: 700px) { .topbar .lang-toggle .lt-long { display: none; } .topbar .lang-toggle .lt-short { display: inline; } }
+/* a phone keeps the 🛒 icon only and a narrower establishment list, so the top bar fits beside the language button */
+@media (max-width: 480px) { .topbar .pos-t { display: none; } .topbar select.input { max-width: 92px; } .topbar { padding-inline: 10px; } }

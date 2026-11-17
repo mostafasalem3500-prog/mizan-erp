@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { CUR } from "../shared/country";
 import { api, session, useFetch, money, Loading, Field, Input, useToast, useCompanyContext, fmtDT, confirmDlg } from "../lib";
+import { isEn } from "../i18n";
 
 const SUGGEST = (): [string, string, string[]][] => [
   ["📝", "سجّل عملية", [`فاتورة مياه المكتب بقيمة 200 ${CUR()} شامل الضريبة من المورد شركة المياه الوطنية، دُفعت نقداً`, "إيداع نقدي في البنك 10,000"]],
@@ -115,7 +116,7 @@ export function AiAssistantPage() {
     const optimistic = { ...(conv || { view: [] }), view: [...(conv?.view || []), { role: "user", text: t, files: fs.map((f) => ({ name: f.name })) }] };
     setConv(optimistic);
     try {
-      const r = await api("/ai/chat", { body: { conversationId: conv?.id, text: t, engine: adv ? "advanced" : undefined, files: await Promise.all(fs.map(async (f) => ({ name: f.name, mime: f.type, data: await readB64(f), qr: await readZatcaQr(f) }))) } });
+      const r = await api("/ai/chat", { body: { conversationId: conv?.id, text: t, engine: adv ? "advanced" : undefined, lang: isEn() ? "en" : undefined, files: await Promise.all(fs.map(async (f) => ({ name: f.name, mime: f.type, data: await readB64(f), qr: await readZatcaQr(f) }))) } });
       setConv(r); if (!conv?.id) list.reload(); st.reload();
     } catch (e: any) { toast(e.message, "err"); setConv(conv); setText(t); setFiles(fs); if (e.code === "AI_PLAN" || e.code === "AI_NOT_CONFIGURED") st.reload(); } finally { setBusy(false); }
   };
@@ -136,6 +137,7 @@ export function AiAssistantPage() {
     <div className="ai-wrap">
       <aside className="ai-side card">
         <button className="btn primary block" onClick={() => { setConv(null); setText(""); }}>＋ محادثة جديدة</button>
+        {isEn() && <div className="small muted" lang="en">The built-in assistant reads and answers in Arabic. With an advanced-model API key (set on this page) it answers in English.</div>}
         <div className="ai-list">{(list.data || []).map((c) => <div key={c.id} className={"ai-conv" + (conv?.id === c.id ? " on" : "")} onClick={() => open(c.id)}><div className="t">{c.hasPending && "⏳ "}{c.title}</div><div className="small muted">{fmtDT(c.updatedAt)}</div>
           <button className="x" title="حذف" onClick={async (e) => { e.stopPropagation(); if (!confirmDlg("حذف المحادثة؟ (المستندات المرحّلة لا تتأثر)")) return; await api(`/ai/conversations/${c.id}`, { method: "DELETE" }); if (conv?.id === c.id) setConv(null); list.reload(); }}>✕</button></div>)}</div>
         <div className="ai-eng small">

@@ -1,4 +1,5 @@
 import { CFG } from "./shared/country";
+import { locale, tr } from "./i18n";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { writeSheet } from "./shared/sheet";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -61,7 +62,7 @@ export const Money = ({ v, blankZero, sign }: { v: any; blankZero?: boolean; sig
 };
 export const today = () => { const d = new Date(Date.now() + 3 * 3600 * 1000); return d.toISOString().slice(0, 10); };
 export const fmtDate = (d: any) => (d ? String(d).slice(0, 10) : "");
-export const fmtDT = (d: any) => (d ? new Date(d).toLocaleString("ar-SA-u-nu-latn-ca-gregory", { dateStyle: "medium", timeStyle: "short" }) : "");
+export const fmtDT = (d: any) => (d ? new Date(d).toLocaleString(locale(), { dateStyle: "medium", timeStyle: "short" }) : "");
 export const monthStart = () => today().slice(0, 7) + "-01";
 /** Calendar month shift that clamps to the target month's last day (31 Jan + 1 → 28/29 Feb, never 3 Mar). */
 export const addMonths = (s: string, n: number) => {
@@ -174,7 +175,7 @@ export function Modal({ title, onClose, children, footer, wide, narrow }: { titl
 export function Field({ label, children, span2, span3, hint }: { label?: string; children: React.ReactNode; span2?: boolean; span3?: boolean; hint?: string }) {
   // the label names every control inside the field for screen readers (controls come from many components)
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (!label || !ref.current) return; ref.current.querySelectorAll("input, select, textarea").forEach((el) => { if (!el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby")) el.setAttribute("aria-label", label); }); });
+  useEffect(() => { if (!label || !ref.current) return; ref.current.querySelectorAll("input, select, textarea").forEach((el) => { if (!el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby")) el.setAttribute("aria-label", tr(label)); }); });
   return <div ref={ref} className={"field" + (span2 ? " span2" : "") + (span3 ? " span3" : "")}>{label && <label>{label}</label>}{children}{hint && <span className="hint">{hint}</span>}</div>;
 }
 

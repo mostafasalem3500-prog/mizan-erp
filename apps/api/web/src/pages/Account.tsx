@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { CFG } from "../shared/country";
 import { api, useFetch, Loading, Field, Input, useAction, fmtDT } from "../lib";
+import { LangToggle } from "../i18n/LangToggle";
 
 export function AccountPage() {
   const { data: s, loading, reload } = useFetch<any>("/auth/security");
@@ -80,7 +81,7 @@ export function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
   useEffect(() => { document.title = `${d.title} — ${CFG.appName || "ميزان ERP"}`; }, [kind]);
   return (
     <main className="legal" style={{ maxWidth: 820, margin: "0 auto", padding: "32px 20px", lineHeight: 1.9 }}>
-      <a href="/login">→ العودة إلى الدخول</a>
+      <div className="row" style={{ justifyContent: "space-between" }}><a href="/login">→ العودة إلى الدخول</a><LangToggle className="btn sm" /></div>
       <h1 style={{ marginTop: 12 }}>{d.title}</h1>
       <p className="muted small">{CFG.appName || "ميزان ERP"} — هذا النص وصف عام لطريقة عمل النظام، وعلى مشغّل الخدمة مراجعته واعتماده قانونياً قبل الاعتماد عليه تجارياً.</p>
       {d.body.map(([h, t]) => <section key={h}><h2 style={{ fontSize: "1.1rem", marginBottom: 4 }}>{h}</h2><p style={{ marginTop: 0 }}>{t}</p></section>)}

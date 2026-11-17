@@ -1,5 +1,6 @@
 /** Client-side PDF export (true PDF file download) of any on-screen element — keeps Arabic shaping by rasterising via the browser. */
 import { sheetMeta } from "./sheet";
+import { isEn, tr } from "../i18n";
 const A4W = 210, A4H = 297;
 
 function filter(node: HTMLElement) {
@@ -31,7 +32,7 @@ export async function pagesToPdf(pages: HTMLElement[], filename: string) {
     const h = Math.min(A4H, A4W * ratio), w = h / ratio;
     pdf.addImage(c.toDataURL("image/jpeg", 0.92), "JPEG", (A4W - w) / 2, 0, w, h);
   }
-  pdf.save(safe(filename));
+  pdf.save(safe(tr(filename)));
 }
 
 /** Long content (reports, invoices, statements): rendered once and sliced into A4 pages with margins. */
@@ -73,11 +74,11 @@ export async function elementToPdf(el: HTMLElement, filename: string, opts: { la
     g.drawImage(c, 0, y, c.width, h, 0, 0, c.width, h);
     if (page) pdf.addPage();
     const top = m + (page ? HEAD_MM : 0);
-    if (page) pdf.addImage(band(c.width, HEAD_MM * pxPerMm, [meta.company || "", `تابع: ${docTitle}`, ""], true).toDataURL("image/png"), "PNG", m, m, w, HEAD_MM);
+    if (page) pdf.addImage(band(c.width, HEAD_MM * pxPerMm, [meta.company || "", isEn() ? `Continued: ${tr(docTitle)}` : `تابع: ${docTitle}`, ""], true).toDataURL("image/png"), "PNG", m, m, w, HEAD_MM);
     pdf.addImage(part.toDataURL("image/jpeg", 0.9), "JPEG", m, top, w, h / pxPerMm);
-    pdf.addImage(band(c.width, FOOT_MM * pxPerMm, [meta.company || "ميزان ERP", `صفحة ${page + 1} من ${pages}`, stamp], false).toDataURL("image/png"), "PNG", m, ph - m - FOOT_MM, w, FOOT_MM);
+    pdf.addImage(band(c.width, FOOT_MM * pxPerMm, [meta.company || (isEn() ? "Mizan ERP" : "ميزان ERP"), isEn() ? `Page ${page + 1} of ${pages}` : `صفحة ${page + 1} من ${pages}`, stamp], false).toDataURL("image/png"), "PNG", m, ph - m - FOOT_MM, w, FOOT_MM);
   }
-  pdf.save(safe(filename));
+  pdf.save(safe(tr(filename)));
 }
 
 /** A one-line band drawn by the browser (so Arabic is shaped correctly): right · centre · left, with a hairline. */

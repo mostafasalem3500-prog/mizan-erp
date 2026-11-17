@@ -343,7 +343,7 @@ export async function deleteConversation(companyId: string, userId: string, id: 
 const save = (c: any) => db.exec(`UPDATE ai_conversations SET title=$2, messages=$3::jsonb, view=$4::jsonb, pending=$5::jsonb, user_turns=$6, tokens_in=$7, tokens_out=$8, updated_at=now() WHERE id=$1`,
   [c.id, c.title, JSON.stringify(c.messages), JSON.stringify(c.view), c.pending ? JSON.stringify(c.pending) : null, c.userTurns, c.tokensIn, c.tokensOut]);
 
-export async function chat(company: any, auth: Auth, input: { conversationId?: string; text?: string; engine?: string; files?: { name: string; mime: string; data: string; qr?: any }[] }) {
+export async function chat(company: any, auth: Auth, input: { conversationId?: string; text?: string; engine?: string; lang?: string; files?: { name: string; mime: string; data: string; qr?: any }[] }) {
   const a = aiAccess(company, auth);
   if (!a.entitled) throw new AppError(402, "المساعد الذكي متاح في الباقة الأعلى (المؤسسات) — رقِّ اشتراكك لتفعيله", "AI_PLAN");
   const u = await usage(company.id);
@@ -393,7 +393,9 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
 
   const accounts = await db.rows(`SELECT id, code, name_ar, type, system_key FROM accounts WHERE company_id=$1 AND NOT is_group AND is_active ORDER BY code LIMIT 400`, [company.id]);
   const cash = await db.rows(`SELECT id, code, name_ar, system_key FROM accounts WHERE company_id=$1 AND is_cash_bank AND NOT is_group AND is_active ORDER BY code`, [company.id]);
-  const system = [{ type: "text", text: systemPrompt({ company, accounts, cash, today: today(), userName: auth.userName, role: auth.role || "" }), cache_control: { type: "ephemeral" } }];
+  // the English interface: the advanced model answers in English (the built-in agent answers in Arabic)
+  const english = input.lang === "en" ? "\n\nThe user's interface is in English: write your replies in English. Account names and document numbers may stay as they are in the books." : "";
+  const system = [{ type: "text", text: systemPrompt({ company, accounts, cash, today: today(), userName: auth.userName, role: auth.role || "" }) + english, cache_control: { type: "ephemeral" } }];
 
   const lctx = { accounts, cash, today: today(), vatRate: VAT_RATE, currency: CFG.currencySymbol || BASE_CURRENCY, subscription: { ...subscriptionState(company), plan: company.plan, maxUsers: company.maxUsers, desktop: isDesktopLocal(), device: currentDeviceId() } };
   // who answers: the built-in agent first; the advanced model when asked for, when it already leads this exchange,

@@ -9,6 +9,7 @@ import { SideNav, useNav } from "./nav";
 import { Dashboard } from "./pages/Dashboard"; // the landing screen ships with the shell
 import { setSheetMeta } from "./shared/sheet";
 import { ThemeToggle } from "./pages/Round28";
+import { LangToggle } from "./i18n/LangToggle";
 import { LearnPage, TasksPage, HelpButton, TasksBadge, FavStar, NetBar, OfflineNote, useShortcuts } from "./pages/Learn";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
@@ -116,7 +117,7 @@ function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedB
   const to = active?.i && !active.i.action && active.s >= 1000 ? active.i.to : active?.g.to && active.s >= 1000 ? active.g.to : null;
   // the browser tab and history carry the screen's name
   useEffect(() => { if (label) document.title = `${label} — ${BASE_TITLE() || "ميزان ERP"}`; }, [label]);
-  return <><h1 className="title">{active?.i ? <><span className="crumb">{active.g.label} ‹ </span>{active.i.label}</> : label}</h1><FavStar to={to} label={label} /></>;
+  return <><h1 className="title">{active?.i ? <><span className="crumb">{active.g.label}<span aria-hidden="true"> ‹ </span></span>{active.i.label}</> : label}</h1><FavStar to={to} label={label} /></>;
 }
 
 /** Associations edition: the accounting program carries the association's seal, with the way back to the association system. */
@@ -177,9 +178,10 @@ export function App() {
               <HelpButton />
               <TasksBadge />
               <ThemeToggle />
+              <LangToggle />
               <CompanySwitcher me={me} onSwitched={reload} />
               <NavLink to="/quick" className="btn sm quick-btn" title="سجّل عملية بكلماتك دون معرفة المدين والدائن">⚡ سجّل عملية</NavLink>
-              <NavLink to="/pos" className="btn primary sm">🛒 نقطة البيع</NavLink>
+              <NavLink to="/pos" className="btn primary sm" title="نقطة البيع" aria-label="نقطة البيع">🛒<span className="pos-t"> نقطة البيع</span></NavLink>
             </div>
             <NetBar /><OfflineNote />
             <div className="content" id="content" role="main" tabIndex={-1}>
@@ -355,7 +357,7 @@ function AuthPage({ mode, onDone }: { mode: "login" | "register"; onDone: () => 
               {needOtp && mode === "login" && <Field label="رمز التحقق من تطبيق المصادقة" hint="6 أرقام — أو أحد رموز الاسترداد"><Input required autoFocus dir="ltr" inputMode="numeric" autoComplete="one-time-code" value={f.otp || ""} onChange={set("otp")} placeholder="000000" /></Field>}
               <button className="btn primary lg" disabled={busy}>{mode === "login" ? "دخول" : "إنشاء الحساب وبدء التجربة المجانية"}</button>
               {demo?.email && mode === "login" && <button type="button" className="btn" onClick={() => setF({ ...f, email: demo.email, password: demo.password })}>تعبئة بيانات الحساب التجريبي</button>}
-              <div className="muted small" style={{ textAlign: "center" }}><a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">شروط الاستخدام</a></div>
+              <div className="muted small" style={{ textAlign: "center" }}><a href="/privacy">سياسة الخصوصية</a> · <a href="/terms">شروط الاستخدام</a> <LangToggle className="btn sm" /></div>
               <div className="muted small" style={{ textAlign: "center" }}>
                 {mode === "login" ? <>ليس لديك حساب؟ <a href="/register" onClick={(e) => { e.preventDefault(); nav("/register"); }}>سجّل منشأتك مجاناً</a></> : <>لديك حساب؟ <a href="/login" onClick={(e) => { e.preventDefault(); nav("/login"); }}>سجّل الدخول</a></>}
               </div>

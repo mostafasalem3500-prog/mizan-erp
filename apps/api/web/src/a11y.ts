@@ -3,6 +3,7 @@
  * scrollable table can be reached and scrolled from the keyboard. Screens are built from many components, so the
  * names are derived here from what is already on screen: the field label, the column header, the placeholder.
  */
+import { tr } from "./i18n";
 const TYPE_AR: Record<string, string> = { date: "التاريخ", month: "الشهر", time: "الوقت", number: "رقم", search: "بحث", file: "ملف", email: "البريد الإلكتروني", password: "كلمة المرور", tel: "رقم الجوال", color: "اللون", checkbox: "اختيار", radio: "اختيار" };
 const clean = (s: string | null | undefined) => String(s || "").replace(/\s+/g, " ").replace(/[*:：]+$/, "").trim().slice(0, 60);
 function nameFor(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): string {
@@ -24,12 +25,12 @@ function nameFor(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement)
 function patch(root: ParentNode) {
   root.querySelectorAll<HTMLInputElement>("input:not([type=hidden]), select, textarea").forEach((el) => {
     if (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || el.closest("label") || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))) return;
-    el.setAttribute("aria-label", nameFor(el));
+    el.setAttribute("aria-label", tr(nameFor(el)));
   });
   root.querySelectorAll<HTMLElement>(".table-wrap, .suggest, pre").forEach((el) => {
     if (el.hasAttribute("tabindex")) return;
     el.setAttribute("tabindex", "0");
-    if (el.classList.contains("table-wrap")) { el.setAttribute("role", "region"); if (!el.getAttribute("aria-label")) el.setAttribute("aria-label", clean(el.closest(".card")?.querySelector("h3, h2")?.textContent) || "جدول"); }
+    if (el.classList.contains("table-wrap")) { el.setAttribute("role", "region"); if (!el.getAttribute("aria-label")) el.setAttribute("aria-label", clean(el.closest(".card")?.querySelector("h3, h2")?.textContent) || tr("جدول")); }
   });
 }
 export function startA11y() {

@@ -7,6 +7,8 @@
  * dates become "YYYY-MM-DD", formulas give their cached result, rich text gives plain text.
  */
 
+import { isEn, tr } from "../i18n";
+
 const loadExcel = async () => {
   const m: any = await import("exceljs");
   return (m.default ?? m) as typeof import("exceljs");
@@ -93,7 +95,7 @@ export const sheetMeta = () => META;
 
 const TEXT_COL = /رقم|رمز|كود|حساب|باركود|جوال|هاتف|موبايل|ضريبي|سجل|مرجع|هوية|بريدي|المبنى|آيبان|ايبان|sku|code|iban|^#$|^م$/i;
 const NO_SUM = /سعر|نسبة|نسبه|%|٪|معدل|هامش|متوسط|رصيد|سنة|شهر|يوم|أيام|ايام|عمر|تكلفة الوحدة|العدد المتبقي|الحد/;
-const TOTAL_LABEL = /^(الإجمالي|الاجمالي|المجموع|الإجمالي العام|إجمالي)/;
+const TOTAL_LABEL = /^(الإجمالي|الاجمالي|المجموع|الإجمالي العام|إجمالي|Total|Grand total)/;
 const isNumStr = (v: any) => typeof v === "string" && v.length < 16 && /^-?(0|[1-9]\d*)(\.\d+)?$/.test(v.trim());
 const isDateStr = (v: any) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
@@ -106,15 +108,16 @@ export async function writeSheet(rows: any[], fileName: string, sheet = "Sheet1"
   const ExcelJS = await loadExcel();
   const wb = new ExcelJS.Workbook();
   wb.creator = "Mizan ERP"; wb.created = new Date();
-  const title = opts.title || fileName;
+  const EN = isEn(); // English interface: the sheet reads left to right and its labels are translated
+  const title = tr(opts.title || fileName);
   const keys: string[] = [];
   for (const r of rows) for (const k of Object.keys(r || {})) if (!keys.includes(k)) keys.push(k);
   if (!keys.length) keys.push("لا توجد بيانات");
   const HEAD = 5; // rows 1-3: establishment / title / details, row 4 blank, row 5 column headers
   const ws = wb.addWorksheet(sheet.replace(/[\[\]:*?/\\]/g, " ").slice(0, 31) || "Sheet1", {
-    views: [{ rightToLeft: true, state: "frozen", ySplit: HEAD, showGridLines: false }],
+    views: [{ rightToLeft: !EN, state: "frozen", ySplit: HEAD, showGridLines: false }],
     pageSetup: { paperSize: 9, orientation: keys.length > 6 ? "landscape" : "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: `${HEAD}:${HEAD}`, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.6, header: 0.2, footer: 0.3 } },
-    headerFooter: { oddFooter: `&L&8Mizan ERP&C&8صفحة &P من &N&R&8${title}` },
+    headerFooter: { oddFooter: EN ? `&L&8Mizan ERP&C&8Page &P of &N&R&8${title}` : `&L&8Mizan ERP&C&8صفحة &P من &N&R&8${title}` },
   });
   // value normalisation per column
   const textCol = keys.map((k) => TEXT_COL.test(k));
@@ -126,21 +129,21 @@ export async function writeSheet(rows: any[], fileName: string, sheet = "Sheet1"
     if (typeof v === "object") return String(v);
     return v;
   };
-  const data = rows.map((r) => keys.map((k, c) => val(r?.[k], c)));
+  const data = rows.map((r) => keys.map((k, c) => { const v = val(r?.[k], c); return EN && typeof v === "string" ? tr(v) : v; }));
   const numeric = keys.map((_, c) => !textCol[c] && data.some((r) => typeof r[c] === "number") && data.every((r) => r[c] === null || typeof r[c] === "number"));
   const decimals = keys.map((_, c) => numeric[c] && data.some((r) => typeof r[c] === "number" && !Number.isInteger(r[c])));
   const last = keys.length;
   const span = (n: number) => { if (last > 1) ws.mergeCells(n, 1, n, last); return ws.getCell(n, 1); };
-  const stamp = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16).replace("T", " الساعة "); // an Arabic word between the two numbers keeps their order in right-to-left text
-  let c1 = span(1); c1.value = META.company || "ميزان ERP"; c1.font = { bold: true, size: 14, color: { argb: "FF0F5C55" } };
+  const stamp = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 16).replace("T", EN ? " " : " الساعة "); // an Arabic word between the two numbers keeps their order in right-to-left text
+  let c1 = span(1); c1.value = META.company || (EN ? "Mizan ERP" : "ميزان ERP"); c1.font = { bold: true, size: 14, color: { argb: "FF0F5C55" } };
   c1 = span(2); c1.value = title; c1.font = { bold: true, size: 12 };
-  c1 = span(3); c1.value = [opts.sub, META.taxId ? `${META.taxLabel || "الرقم الضريبي"}: ${META.taxId}` : "", `تاريخ الاستخراج: ${stamp}`, `${rows.length} سجل`].filter(Boolean).join("   ·   "); c1.font = { size: 9, color: { argb: "FF64748B" } };
-  for (const n of [1, 2, 3]) ws.getCell(n, 1).alignment = { horizontal: "right", vertical: "middle", readingOrder: "rtl" };
+  c1 = span(3); c1.value = [opts.sub && tr(opts.sub), META.taxId ? `${tr(META.taxLabel || "الرقم الضريبي")}: ${META.taxId}` : "", EN ? `Exported: ${stamp}` : `تاريخ الاستخراج: ${stamp}`, EN ? `${rows.length} records` : `${rows.length} سجل`].filter(Boolean).join("   ·   "); c1.font = { size: 9, color: { argb: "FF64748B" } };
+  for (const n of [1, 2, 3]) ws.getCell(n, 1).alignment = { horizontal: EN ? "left" : "right", vertical: "middle", readingOrder: EN ? "ltr" : "rtl" };
   ws.getRow(1).height = 22;
   const thin = { style: "thin" as const, color: { argb: "FFD5DEDD" } };
   const border = { top: thin, bottom: thin, left: thin, right: thin };
   const hr = ws.getRow(HEAD); hr.height = 20;
-  keys.forEach((k, c) => { const cell = hr.getCell(c + 1); cell.value = k; cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true, readingOrder: "rtl" }; cell.border = border; });
+  keys.forEach((k, c) => { const cell = hr.getCell(c + 1); cell.value = tr(k); cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true, readingOrder: "rtl" }; cell.border = border; });
   data.forEach((r, i) => {
     const row = ws.getRow(HEAD + 1 + i);
     const totalRow = typeof r[0] === "string" && TOTAL_LABEL.test(r[0]);
@@ -148,7 +151,7 @@ export async function writeSheet(rows: any[], fileName: string, sheet = "Sheet1"
       const cell = row.getCell(c + 1);
       cell.value = v; cell.border = border;
       if (typeof v === "number") { cell.numFmt = decimals[c] ? "#,##0.00;[Red]-#,##0.00" : "#,##0;[Red]-#,##0"; cell.alignment = { horizontal: "left" }; }
-      else cell.alignment = { horizontal: isDateStr(v) ? "center" : "right", vertical: "top", wrapText: typeof v === "string" && v.length > 60, readingOrder: "rtl" };
+      else cell.alignment = { horizontal: isDateStr(v) ? "center" : EN ? "left" : "right", vertical: "top", wrapText: typeof v === "string" && v.length > 60, readingOrder: EN ? "ltr" : "rtl" };
       if (i % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF6FAF9" } };
       if (totalRow) { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6F4F2" } }; }
     });
@@ -162,7 +165,7 @@ export async function writeSheet(rows: any[], fileName: string, sheet = "Sheet1"
     keys.forEach((_, c) => {
       const cell = row.getCell(c + 1); cell.border = { ...border, top: { style: "medium", color: { argb: "FF0F766E" } } }; cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6F4F2" } };
       if (sumCols[c]) { const L = ws.getColumn(c + 1).letter; cell.value = { formula: `SUBTOTAL(109,${L}${HEAD + 1}:${L}${n - 1})`, result: data.reduce((a, r) => a + (typeof r[c] === "number" ? r[c] : 0), 0) } as any; cell.numFmt = decimals[c] ? "#,##0.00;[Red]-#,##0.00" : "#,##0;[Red]-#,##0"; cell.alignment = { horizontal: "left" }; }
-      else if (c === labelCol && !sumCols[c]) { cell.value = "الإجمالي"; cell.alignment = { horizontal: "right", readingOrder: "rtl" }; }
+      else if (c === labelCol && !sumCols[c]) { cell.value = EN ? "Total" : "الإجمالي"; cell.alignment = { horizontal: EN ? "left" : "right", readingOrder: EN ? "ltr" : "rtl" }; }
     });
   }
   if (data.length) ws.autoFilter = { from: { row: HEAD, column: 1 }, to: { row: HEAD + data.length, column: last } };
@@ -171,7 +174,7 @@ export async function writeSheet(rows: any[], fileName: string, sheet = "Sheet1"
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `${fileName.replace(/[\\/:*?"<>|]+/g, "-")}.xlsx`;
+  a.download = `${tr(fileName).replace(/[\\/:*?"<>|]+/g, "-")}.xlsx`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }

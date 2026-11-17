@@ -13,11 +13,14 @@ import "@fontsource/ibm-plex-sans-arabic/latin-700.css";
 import "./styles.css";
 import { loadConfig, CFG } from "./shared/country";
 import { startA11y } from "./a11y";
+import { startI18n, tr } from "./i18n";
 
 // theme before the first paint (no flash): saved choice, else the system setting
 try { const v = localStorage.getItem("mz_theme") || "auto"; document.documentElement.dataset.theme = v === "dark" || (v === "auto" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"; } catch {}
 
 loadConfig().finally(async () => {
+  // English interface: the dictionary loads before the first screen is drawn (not for the associations edition)
+  await startI18n(!CFG.assoc && !location.pathname.startsWith("/charity")).catch(() => undefined);
   const [{ App }, { ToastProvider }] = await Promise.all([import("./App"), import("./lib")]);
   document.documentElement.dataset.country = CFG.country;
   if (CFG.country !== "SA" && !location.pathname.startsWith("/charity")) document.title = CFG.appName;
@@ -55,7 +58,7 @@ if ("serviceWorker" in navigator) {
   const offer = () => {
     if (document.getElementById("mz-update")) return;
     const bar = document.createElement("div"); bar.id = "mz-update"; bar.className = "update-bar no-print";
-    bar.innerHTML = '<span>صدر تحديث جديد للبرنامج.</span><button class="btn primary sm">تحديث الآن</button>';
+    bar.innerHTML = `<span>${tr("صدر تحديث جديد للبرنامج.")}</span><button class="btn primary sm">${tr("تحديث الآن")}</button>`;
     bar.querySelector("button")!.addEventListener("click", () => location.reload());
     document.body.appendChild(bar);
   };
