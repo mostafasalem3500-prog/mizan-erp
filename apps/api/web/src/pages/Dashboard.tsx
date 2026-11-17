@@ -46,10 +46,12 @@ function Readiness() {
 export function Dashboard() {
   const { data, loading } = useFetch("/dashboard");
   const { me } = useCompanyContext();
+  const brief = useFetch<any>("/brief");
   if (loading || !data) return <Loading />;
   const d = data;
   return (
     <div className="grid">
+      {brief.data?.todo?.length > 0 && <div className="todo-strip" data-todo-strip role="status"><b>يحتاج متابعتك:</b>{brief.data.todo.slice(0, 5).map((x: any) => <Link key={x.key} to={x.to} className={"chip " + (x.level === "high" ? "high" : "")} title={x.text}><span className="num">{x.count}</span> {({ overdue: "فواتير عملاء متأخرة", billsDue: "مستحقات موردين", drafts: "مسودات لم تُرحَّل", lowStock: "أصناف عند حد الطلب", posOpen: "وردية مفتوحة", partnerData: "بيانات ضريبية ناقصة", noPrice: "أصناف بلا سعر" } as any)[x.key] || x.text}</Link>)}<Link to="/daily" className="small">التقرير اليومي ←</Link></div>}
       {!me.company.demoLoaded && !d.recent?.length && (
         <div className="alert info">مرحباً بك في ميزان! ابدأ بإضافة الأصناف والعملاء، أو <Link to="/settings/demo">حمّل البيانات التجريبية</Link> لاستكشاف النظام بأرقام كاملة (يمكن حذفها لاحقاً بضغطة واحدة).</div>
       )}

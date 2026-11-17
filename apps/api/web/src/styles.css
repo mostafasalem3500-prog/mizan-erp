@@ -795,3 +795,10 @@ html[data-theme="dark"] .tbl-card .tf { color: #2bb3a3; } html[data-theme="dark"
 .todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; } .todo-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 700px) { .quick-btn { display: none; } .quick-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { .quick-tile { transition: none; } }
+
+/* home: one line of what needs attention */
+.todo-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.todo-strip .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: inherit; text-decoration: none; font-size: .9rem; min-height: 32px; }
+.todo-strip .chip .num { font-weight: 700; }
+.todo-strip .chip.high { border-color: var(--danger-ink, #b91c1c); color: var(--danger-ink, #b91c1c); }
+.todo-strip .chip:hover, .todo-strip .chip:focus-visible { background: var(--surface-2); outline: 2px solid var(--primary); outline-offset: 1px; }

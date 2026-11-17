@@ -22,10 +22,11 @@ r4.post("/employees", perm("accounting.write"), h(async (req) => {
   return row;
 }));
 r4.put("/employees/:id", perm("accounting.write"), h(async (req) => {
+  await db.one(`SELECT id FROM employees WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الموظف غير موجود");
   const b = req.body || {};
   return db.update("employees", { id: p(req).id, companyId: cid(req) }, { code: b.code, name: b.name, jobTitle: b.jobTitle, department: b.department, nationality: b.nationality, hireDate: b.hireDate === "" ? null : b.hireDate, iban: b.iban, bankName: b.bankName, basic: b.basic === undefined ? undefined : num(b.basic), housing: b.housing === undefined ? undefined : num(b.housing), transport: b.transport === undefined ? undefined : num(b.transport), otherAllow: b.otherAllow === undefined ? undefined : num(b.otherAllow), gosi: b.gosi, isActive: b.isActive, costCenterId: b.costCenterId, leaveDaysPerYear: b.leaveDaysPerYear === undefined ? undefined : Math.max(21, Math.round(num(b.leaveDaysPerYear) || 21)), leaveOpening: b.leaveOpening === undefined ? undefined : num(b.leaveOpening), leaveBalanceDate: b.leaveBalanceDate === undefined ? undefined : b.leaveBalanceDate === "" ? null : b.leaveBalanceDate });
 }));
-r4.delete("/employees/:id", perm("accounting.write"), h(async (req) => { await db.exec(`UPDATE employees SET is_active=false WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true }; }));
+r4.delete("/employees/:id", perm("accounting.write"), h(async (req) => { await db.one(`SELECT id FROM employees WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الموظف غير موجود"); await db.exec(`UPDATE employees SET is_active=false WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true }; }));
 
 r4.get("/payroll", perm("accounting.read"), h(async (req) => ({ runs: await db.rows(`SELECT r.*, e.number AS journal_number FROM payroll_runs r LEFT JOIN journal_entries e ON e.id=r.journal_id WHERE r.company_id=$1 ORDER BY r.period DESC`, [cid(req)]), gosi: GOSI })));
 r4.get("/payroll/preview", perm("accounting.read"), h(async (req) => {

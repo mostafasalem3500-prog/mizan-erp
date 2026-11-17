@@ -8,7 +8,7 @@
 import { EXPENSE_KINDS, GUIDES, TOPICS, ABOUT, PROBLEMS, LESSON_KEYS, ExpenseKind } from "./aiKnowledge";
 import { LESSONS } from "../shared/lessons";
 
-export type LocalCtx = { accounts: any[]; cash: any[]; today: string; vatRate: number; currency: string };
+export type LocalCtx = { accounts: any[]; cash: any[]; today: string; vatRate: number; currency: string; subscription?: { active: boolean; readOnly: boolean; daysLeft: number | null; reason?: string; plan?: string; maxUsers?: number; desktop?: boolean; device?: string | null } };
 type Out = { content: any[]; stop_reason: string; usage: { input_tokens: number; output_tokens: number }; escalate?: string; suggest?: string[] };
 
 const usage = { input_tokens: 0, output_tokens: 0 };
@@ -431,6 +431,32 @@ function projectAnswer(r: any, cur: string): string {
   const over = rows.filter((x) => x.budget > 0 && x.cost > x.budget).map((x) => x.name);
   return `${head}\n${rows.slice(0, 12).map(one).join("\n")}${rows.length > 1 ? `\n\nالإجمالي: إيراد ${money(T.rev)}، تكلفة ${money(T.cost)}، صافي **${money(T.rev - T.cost)}** ${cur}.` : ""}${over.length ? `\n⚠ تجاوزت موازنتها: ${over.join("، ")}.` : ""}\n[التفاصيل في شاشة المشاريع](/projects)`;
 }
+function subscriptionAnswer(ctx: LocalCtx): string {
+  const s = ctx.subscription; if (!s) return "معلومات الاشتراك غير متاحة هنا — راجع [الاشتراك والترخيص](/settings/license).";
+  const PLAN: Record<string, string> = { TRIAL: "الفترة التجريبية", BASIC: "الأساسية", PRO: "الاحترافية", ENTERPRISE: "المؤسسات" };
+  const L: string[] = [`**الاشتراك:** ${PLAN[s.plan || ""] || s.plan || "—"}${s.maxUsers ? ` — حتى ${s.maxUsers} مستخدم` : ""}`];
+  if (s.readOnly) L.push(s.reason === "EXPIRED" ? "⚠ انتهت المدة: النظام في وضع القراءة فقط — بياناتك محفوظة وتستطيع عرضها وتصديرها. فعّل مفتاح تجديد ليعود التسجيل." : s.reason === "DEVICE" ? "⚠ الترخيص مسجَّل لجهاز آخر: هذه النسخة للقراءة فقط. لنقله إلى هذا الجهاز استخدم «نقل الترخيص» في شاشة الاشتراك." : s.reason === "LICENSE" ? "⚠ لا يوجد مفتاح ترخيص صالح لهذه المنشأة على هذا الجهاز: فعّل المفتاح من شاشة الاشتراك." : "⚠ الحساب موقوف — تواصل مع مزود النظام.");
+  else L.push(s.daysLeft === null ? "ساري بلا تاريخ انتهاء." : `ساري — باقٍ **${s.daysLeft}** يوماً${s.daysLeft <= 14 ? " (جدّد قبل الانتهاء حتى لا يتحول النظام للقراءة فقط)" : ""}.`);
+  if (s.desktop) L.push(`نسخة سطح المكتب: المفتاح يصدر لهذا الجهاز تحديداً${s.device ? ` — معرّف الجهاز \`${s.device}\`` : ""}. أرسل المعرّف لمزود النظام عند طلب مفتاح أو تجديد.`);
+  L.push("[شاشة الاشتراك والترخيص](/settings/license)");
+  return L.join("\n");
+}
+/** Screens by name: every lesson knows the screen it explains. */
+function screensFor(q: string, eg: boolean): { label: string; to: string }[] {
+  const SING: Record<string, string> = { فواتير: "فاتوره", سندات: "سند", تقارير: "تقرير", عملاء: "عميل", موردون: "مورد", موردين: "مورد", اصناف: "صنف", قيود: "قيد", مصروفات: "مصروف", مصاريف: "مصروف", حسابات: "حساب", مستودعات: "مستودع", موظفون: "موظف", موظفين: "موظف", مشاريع: "مشروع", اصول: "اصل", شيكات: "شيك", رواتب: "راتب", عروض: "عرض", اوامر: "امر", مرتجعات: "مرتجع" };
+  const stem = (w: string) => { const x = w.replace(/^ال/, ""); return SING[x] || x; };
+  const words = norm(q).split(" ").filter((w) => w.length > 1).map(stem);
+  if (!words.length) return [];
+  const seen = new Set<string>(); const out: { label: string; to: string; sc: number }[] = [];
+  for (const l of LESSONS as any[]) {
+    if ((l.sa && eg) || (l.eg && !eg) || !l.go?.to) continue;
+    const hay = norm(`${l.go.label} ${l.title}`).split(" ").map(stem);
+    const sc = words.filter((w) => hay.some((h: string) => h === w || (w.length > 3 && (h.startsWith(w) || w.startsWith(h))))).length / words.length + (norm(l.go.label).replace(/ال/g, "") === norm(q).replace(/ال/g, "") ? 1 : 0);
+    if (sc >= 0.6 && !seen.has(l.go.to)) { seen.add(l.go.to); out.push({ label: l.go.label, to: l.go.to, sc }); }
+  }
+  out.sort((x, y) => y.sc - x.sc);
+  return out[0]?.sc >= 1.5 ? out.slice(0, 1) : out.slice(0, 4);
+}
 function hrAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const ST: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", PAID: "مدفوع" };
@@ -536,6 +562,11 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   if (/(^| )(وزع|توزيع|بنسبه|نسبه وتناسب|عده فواتير|مجموعه فواتير|كل الفواتير)( |$)| ثم /.test(n) && (a.amount || wantsRecord(n))) return giveUp("complex");
   if (/^(مرحبا|السلام|اهلا|هلا|صباح|مساء|هاي|hi|hello)|ماذا تستطيع|ماذا تفعل|ما الذي تستطيع|ساعدني$|^مساعده$|من انت/.test(n) && !a.amount) return say(ABOUT);
 
+  // the subscription or licence of this establishment
+  if (/(اشتراكي|اشتراكنا|اشتراك (ال)?(برنامج|نظام|ميزان)|(متي|متى) ينتهي (ال)?اشتراك|(تجديد|حاله|مده|نوع) (ال)?اشتراك|ترخيصي|ترخيص (ال)?(برنامج|نظام|ميزان)|(مفتاح|نقل|تفعيل|حاله) (ال)?ترخيص|باقتي|خطتي|باقه (ال)?(برنامج|نظام)|(ال)?(نسخه|فتره) (ال)?تجريبيه|التجربه المجانيه|مفتاح التفعيل|السيريال|الرقم التسلسلي|معرف (ال)?جهاز)/.test(n) && !a.amount && !(a.kind && wantsRecord(n))) return say(subscriptionAnswer(ctx));
+  // «افتح … / أين شاشة …»: the screen itself, as a link
+  { const nv = n.match(/^(?:افتح|افتحي|اذهب (?:الي|الى|ل)|انتقل (?:الي|الى|ل)|خذني (?:الي|الى|ل)|وديني (?:ل|علي|على)|اين (?:اجد|شاشه|صفحه)|وين (?:الاقي|شاشه|صفحه)|اريد فتح|ابغي افتح) ?(?:شاشه|صفحه|قائمه)? ?(.+?)\s*[؟?]?$/);
+    if (nv && nv[1].length > 2 && !a.amount) { const hits = screensFor(nv[1], ctx.vatRate === 14); if (hits.length) return say(hits.length === 1 ? `[افتح ${hits[0].label}](${hits[0].to})` : `أقرب الشاشات لما طلبت:\n${hits.map((x) => `- [${x.label}](${x.to})`).join("\n")}`); } }
   // the establishment's own figures, a named partner's balance, and a health check of the books
   if (!wantsRecord(n)) {
     const pm = n.match(/(?:رصيد|مديونيه|مستحقات|كم (?:على|علي|ل|عند)|كشف حساب|حساب) ?(?:ال)?(عميل|مورد) (.+?)(?=\s*(?:؟|\?|$| الان| حاليا| اليوم))/);

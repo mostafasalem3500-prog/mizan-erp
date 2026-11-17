@@ -115,6 +115,7 @@ master.delete(
   "/partners/:id",
   perm("partners.write"),
   h(async (req) => {
+    await db.one(`SELECT id FROM partners WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الطرف غير موجود");
     const used = await db.maybe(`SELECT 1 FROM invoices WHERE partner_id=$1 UNION SELECT 1 FROM payments WHERE partner_id=$1 UNION SELECT 1 FROM journal_lines WHERE partner_id=$1 LIMIT 1`, [p(req).id]);
     if (used) {
       await db.exec(`UPDATE partners SET is_active=false WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]);
@@ -417,6 +418,12 @@ master.put(
     if (m.role === "OWNER" && req.auth.role !== "OWNER") throw bad("لا يمكن تعديل المالك");
     const role = req.body.role ? String(req.body.role).toUpperCase() : undefined;
     if (role && (!ROLES[role] || (role === "OWNER" && req.auth.role !== "OWNER"))) throw bad("الدور غير صحيح");
+    // a person's password and name belong to the person: an establishment may set them only for an account that exists
+    // in this establishment alone (one it created). Otherwise an owner could invite anyone's e-mail and take over the account.
+    if (req.body.password || req.body.fullName) {
+      const tgt = await db.one(`SELECT u.is_super_admin, (SELECT COUNT(*)::int FROM memberships x WHERE x.user_id=u.id AND x.company_id <> $2) others FROM users u WHERE u.id=$1`, [m.userId, cid(req)]);
+      if ((tgt.others > 0 || tgt.isSuperAdmin) && m.userId !== req.auth.userId) throw new AppError(403, "لهذا المستخدم حساب في منشأة أخرى — يغيّر كلمة مروره واسمه بنفسه من «حسابي والأمان»", "FORBIDDEN");
+    }
     if (req.body.password) {
       if (String(req.body.password).length < 8) throw bad("كلمة المرور قصيرة");
       await db.exec(`UPDATE users SET password_hash=$2 WHERE id=$1`, [m.userId, await bcrypt.hash(String(req.body.password), 10)]);

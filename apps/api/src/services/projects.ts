@@ -13,6 +13,7 @@ const STATUS = ["ACTIVE", "ON_HOLD", "DONE"];
 const range = (q: any) => { const to = isDate(q.to) ? String(q.to) : today(); const from = isDate(q.from) && String(q.from) <= to ? String(q.from) : "1900-01-01"; return { from, to }; };
 
 export async function saveCentre(t: Db, C: string, b: any, id?: string) {
+  if (id) await t.one(`SELECT id FROM cost_centers WHERE id=$1 AND company_id=$2`, [id, C], "المركز غير موجود");
   const name = String(b.name || "").trim().slice(0, 120); if (!name) throw bad("الاسم مطلوب");
   const kind = b.kind === "PROJECT" ? "PROJECT" : "CENTER";
   let code = String(b.code || "").trim().slice(0, 20);
@@ -33,6 +34,7 @@ export async function saveCentre(t: Db, C: string, b: any, id?: string) {
   return id ? t.update("cost_centers", { id, companyId: C }, v) : t.insert("cost_centers", { companyId: C, ...v });
 }
 export async function deleteCentre(t: Db, C: string, id: string) {
+  await t.one(`SELECT id FROM cost_centers WHERE id=$1 AND company_id=$2`, [id, C], "المركز غير موجود");
   const used = await t.one(`SELECT (SELECT COUNT(*) FROM journal_lines WHERE cost_center_id=$1)::int j, (SELECT COUNT(*) FROM expenses WHERE cost_center_id=$1)::int x, (SELECT COUNT(*) FROM employees WHERE cost_center_id=$1)::int e, (SELECT COUNT(*) FROM invoices WHERE cost_center_id=$1)::int i, (SELECT COUNT(*) FROM cost_centers WHERE parent_id=$1)::int k`, [id]);
   if (used.j + used.x + used.i) throw conflict("على المركز قيود أو مستندات — غيّر حالته إلى «منتهٍ» بدل الحذف");
   if (used.k) throw conflict("تحته مراكز تابعة — انقلها أولاً");

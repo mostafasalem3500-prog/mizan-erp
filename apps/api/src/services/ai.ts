@@ -12,6 +12,8 @@ import { createPayment } from "./payments";
 import { manualJournal } from "./misc";
 import { nextCode } from "../routes/master";
 import { systemPrompt, TOOLS } from "./aiRules";
+import { subscriptionState } from "../lib/auth";
+import { isDesktopLocal, currentDeviceId } from "../lib/desktopLicense";
 import { mockLlm } from "./aiMock";
 import { localAgent } from "./aiLocal";
 import { executive } from "./insights";
@@ -393,7 +395,7 @@ export async function chat(company: any, auth: Auth, input: { conversationId?: s
   const cash = await db.rows(`SELECT id, code, name_ar, system_key FROM accounts WHERE company_id=$1 AND is_cash_bank AND NOT is_group AND is_active ORDER BY code`, [company.id]);
   const system = [{ type: "text", text: systemPrompt({ company, accounts, cash, today: today(), userName: auth.userName, role: auth.role || "" }), cache_control: { type: "ephemeral" } }];
 
-  const lctx = { accounts, cash, today: today(), vatRate: VAT_RATE, currency: CFG.currencySymbol || BASE_CURRENCY };
+  const lctx = { accounts, cash, today: today(), vatRate: VAT_RATE, currency: CFG.currencySymbol || BASE_CURRENCY, subscription: { ...subscriptionState(company), plan: company.plan, maxUsers: company.maxUsers, desktop: isDesktopLocal(), device: currentDeviceId() } };
   // who answers: the built-in agent first; the advanced model when asked for, when it already leads this exchange,
   // or when the agent says the request is beyond it (and a key exists)
   const lastA = [...c.view].reverse().find((v: any) => v.role !== "user");
