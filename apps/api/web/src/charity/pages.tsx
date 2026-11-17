@@ -8,6 +8,7 @@ import { useCharity } from "./CharityApp";
 import { CaseStudyModal, VerdictBadge } from "./pages4";
 import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData, DEFAULT_LOGO } from "./templates";
 import { AlertsCard, waLink } from "./pages3";
+import { EntryPreview } from "../pages/EntryPreview";
 
 // ─── labels ────────────────────────────────────────────────────────────────
 export const SOURCE: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", REFUND: "استرداد مبلغ", OTHER: "أخرى", GENERAL: "سند قبض عام" };
@@ -196,9 +197,12 @@ function ReceiptModal({ onClose }: { onClose: (saved?: any) => void }) {
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e?.target ? (e.target.type === "checkbox" ? e.target.checked : e.target.value) : e });
   const pickDonor = (d: any) => { setDonor(d); if (d) setF({ ...f, payerName: d.name, payerIdNo: d.idNumber || d.crNumber || "", payerPhone: d.phone || "", payerType: d.donorType || "INDIVIDUAL" }); };
   const proj = projects.find((p: any) => p.id === f.projectId);
-  const save = () => run(async () => { const r = await api("/charity/receipts", { body: { ...f, partnerId: donor?.id, cashAccountId: cash?.id, revenueAccountId: adv ? rev?.id : undefined } }); onClose({ ...r, projectName: proj?.name }); }, "تم حفظ السند وترحيل القيد");
+  const body = () => ({ ...f, partnerId: donor?.id, cashAccountId: cash?.id, revenueAccountId: adv ? rev?.id : undefined });
+  const save = () => run(async () => { const r = await api("/charity/receipts", { body: body() }); onClose({ ...r, projectName: proj?.name }); }, "تم حفظ السند وترحيل القيد");
+  const [prev, setPrev] = useState<any>(null);
   return (
-    <Modal title="سند قبض مالي — تبرع / دعم" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
+    <Modal title="سند قبض مالي — تبرع / دعم" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" disabled={busy} onClick={() => run(async () => setPrev(await api("/charity/receipts/preview-entry", { body: body() })))}>معاينة القيد</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
+      {prev && <Modal title="معاينة القيد" onClose={() => setPrev(null)} footer={<button className="btn" onClick={() => setPrev(null)}>رجوع</button>}><EntryPreview prev={prev} /></Modal>}
       <div className="grid c3">
         <Field label="المتبرع (من سجل المتبرعين)" span2><Picker value={donor} onChange={pickDonor} fetcher={donorFetcher} label={(d: any) => `${d.code} — ${d.name}`} placeholder="ابحث باسم المتبرع أو اتركه فارغاً" onCreate={() => setQuick(true)} /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={set("date")} /></Field>
@@ -317,9 +321,12 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
   const hist = useFetch<any>(benef?.id ? `/charity/beneficiaries/${benef.id}/aid-history` : null);
   const cs = hist.data?.caseStudy;
   const needOverride = f.fund === "ZAKAT" && ["FUQARA", "MASAKIN"].includes(f.zakatCategory) && benef && zmeta.data?.policy?.requireCaseForZakat && (!cs || !cs.zakatEligible || (cs.validUntil && String(cs.validUntil).slice(0, 10) < f.date));
-  const save = () => run(async () => { const r = await api("/charity/disbursements", { body: { ...f, requestId: f.requestId || undefined, partnerId: benef?.id, expenseAccountId: exp?.id, payAccountId: pay?.id } }); const req = reqs.data?.find((x: any) => x.id === f.requestId); onClose({ ...r, projectName: proj?.name, expenseAccountName: exp?.nameAr, payAccountName: pay?.nameAr, requestNumber: req?.number }); }, "تم حفظ سند الصرف وترحيل القيد");
+  const body = () => ({ ...f, requestId: f.requestId || undefined, partnerId: benef?.id, expenseAccountId: exp?.id, payAccountId: pay?.id });
+  const [prev, setPrev] = useState<any>(null);
+  const save = () => run(async () => { const r = await api("/charity/disbursements", { body: body() }); const req = reqs.data?.find((x: any) => x.id === f.requestId); onClose({ ...r, projectName: proj?.name, expenseAccountName: exp?.nameAr, payAccountName: pay?.nameAr, requestNumber: req?.number }); }, "تم حفظ سند الصرف وترحيل القيد");
   return (
-    <Modal title="سند صرف — نقدي / شيك / تحويل بنكي" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
+    <Modal title="سند صرف — نقدي / شيك / تحويل بنكي" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" disabled={busy} onClick={() => run(async () => setPrev(await api("/charity/disbursements/preview-entry", { body: body() })))}>معاينة القيد</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
+      {prev && <Modal title="معاينة القيد" onClose={() => setPrev(null)} footer={<button className="btn" onClick={() => setPrev(null)}>رجوع</button>}><EntryPreview prev={prev} /></Modal>}
       <div className="grid c3">
         <Field label="نوع الصرف"><div className="row" style={{ gap: 6 }}>{Object.entries(KIND).map(([k, v]) => <button key={k} type="button" className={"btn sm" + (f.kind === k ? " primary" : "")} onClick={() => setF({ ...f, kind: k })}>{v}</button>)}</div></Field>
         <Field label="طلب صرف معتمد (اختياري)"><Select value={f.requestId} onChange={(e) => applyReq(e.target.value)}><option value="">— بدون طلب —</option>{(reqs.data || []).map((r: any) => <option key={r.id} value={r.id}>{r.number} — {r.beneficiaryName} — {money(r.amount)}</option>)}</Select></Field>

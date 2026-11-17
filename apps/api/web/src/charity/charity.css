@@ -170,14 +170,7 @@
 .ch-hero .ch-hero-id { display: flex; align-items: center; gap: 14px; }
 .ch-hero .ch-hero-id img { width: 68px; height: 68px; border-radius: 50%; background: #fff; padding: 2px; object-fit: contain; flex: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
 @media (max-width: 600px) { .ch-hero .ch-hero-id img { width: 52px; height: 52px; } .ch-hero h2 { font-size: 17px; } }
-.auth.ch-auth .art { background: linear-gradient(150deg, #1f4594, #13285a 65%, #0c1838); }
-.auth.ch-auth .ch-auth-id { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; margin-bottom: 18px; }
-.auth.ch-auth .ch-auth-id img { width: 150px; height: 150px; border-radius: 50%; background: #fff; padding: 4px; object-fit: contain; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
-.auth.ch-auth .ch-auth-id h1 { font-size: 24px; line-height: 1.5; }
 .ch-print-logo { width: 64px; height: 64px; object-fit: contain; flex: none; }
 .a4 .a4-org { max-width: 66%; }
 .a4 .a4-org b { font-size: 1.2em; text-wrap: balance; }
 .a4 .a4-title { min-width: 0; }
-.auth.ch-auth { --primary: #1f4594; --primary-2: #173670; --primary-soft: #e8eef9; }
-.auth.ch-auth .ch-auth-m { display: none; }
-@media (max-width: 860px) { .auth.ch-auth .ch-auth-m { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; margin-bottom: 14px; color: var(--primary); } .auth.ch-auth .ch-auth-m img { width: 96px; height: 96px; object-fit: contain; } }

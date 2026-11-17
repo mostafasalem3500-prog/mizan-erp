@@ -32,10 +32,14 @@ export const BASE_CURRENCY = CFG.currency;
 /** The desktop app's embedded server (data on this PC). */
 export const IS_DESKTOP = process.env.MIZAN_EDITION === "desktop-local";
 /** The charity-association interface (/charity) is a separate product: off unless the server opts in (never in the desktop or Egypt editions). */
-export const CHARITY = process.env.MIZAN_CHARITY === "1" && !IS_EG && !IS_DESKTOP;
+/** The associations edition (MIZAN_ASSOC=1): a Saudi server whose front is the association system, with the full
+ *  accounting program inside it. Same code and branch as the Saudi and Egyptian servers, so every change reaches all three. */
+export const ASSOC = process.env.MIZAN_ASSOC === "1" && !IS_EG && !IS_DESKTOP;
+export const CHARITY = (process.env.MIZAN_CHARITY === "1" || ASSOC) && !IS_EG && !IS_DESKTOP;
+export const ASSOC_BRAND = { name: process.env.ASSOC_NAME || "جمعية ريادة العطاء لخدمة الإنسان بالعسيلة", logo: "/charity/logo.png", icon512: "/charity/logo-512.png", icon192: "/charity/logo-192.png" };
 
 /** Public, non-secret configuration the web app loads before rendering. */
-export const publicConfig = () => ({ charity: CHARITY, desktop: IS_DESKTOP, country: CFG.code, countryAr: CFG.nameAr, appName: CFG.appName, vatRate: CFG.vatRate, currency: CFG.currency, currencyAr: CFG.currencyAr, currencySymbol: CFG.currencySymbol, words: CFG.words, taxAuthority: CFG.taxAuthority, taxIdLabel: CFG.taxIdLabel, taxIdPattern: CFG.taxIdPattern, taxIdHint: CFG.taxIdHint, modules: CFG.modules });
+export const publicConfig = () => ({ charity: CHARITY, assoc: ASSOC, assocBrand: ASSOC ? ASSOC_BRAND : null, desktop: IS_DESKTOP, country: CFG.code, countryAr: CFG.nameAr, appName: CFG.appName, vatRate: CFG.vatRate, currency: CFG.currency, currencyAr: CFG.currencyAr, currencySymbol: CFG.currencySymbol, words: CFG.words, taxAuthority: CFG.taxAuthority, taxIdLabel: CFG.taxIdLabel, taxIdPattern: CFG.taxIdPattern, taxIdHint: CFG.taxIdHint, modules: CFG.modules });
 
 /** Company / supplier tax ID check for the edition (SA: 15 digits 3…3; EG: 9-digit tax registration number). */
 export const validTaxId = (s: any) => new RegExp(CFG.taxIdPattern).test(String(s || ""));

@@ -10,6 +10,7 @@ import { Db } from "../db/pool";
 import { bad, conflict, notFound, r2, D, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
 import { checkZakatDisbursement, ZAKAT_CATEGORIES, zakatFund } from "./charity4";
+import { cleanAssocSettings, membershipConfig, ASSOC_TYPES } from "./assoc";
 
 // ─── chart of accounts additions (idempotent; created on first use) ─────────
 const CHARITY_ACCOUNTS: [string, string, string, "REVENUE" | "EXPENSE" | "ASSET", string, string | null][] = [
@@ -97,7 +98,7 @@ export async function getSettings(t: Db, companyId: string) {
   await ensureCharity(t, companyId);
   const s = await t.one(`SELECT * FROM charity_settings WHERE company_id=$1`, [companyId]);
   const c = await t.one(`SELECT name_ar, name_en, logo, vat_number, cr_number, phone, email, city, district, street FROM companies WHERE id=$1`, [companyId]);
-  return { ...s, logoUrl: s.logo || DEFAULT_ASSOCIATION.logo, logoIsDefault: !s.logo, company: c };
+  return { ...s, membership: membershipConfig(s.membership), assocTypes: ASSOC_TYPES, isProfit: !!ASSOC_TYPES[s.assocType]?.profit, logoUrl: s.logo || DEFAULT_ASSOCIATION.logo, logoIsDefault: !s.logo, company: c };
 }
 
 export async function saveSettings(t: Db, companyId: string, b: any) {
@@ -110,6 +111,7 @@ export async function saveSettings(t: Db, companyId: string, b: any) {
   if (b.templates !== undefined) { const s = JSON.stringify(obj(b.templates)); if (s.length > 200_000) throw bad("إعدادات القوالب كبيرة جداً"); upd.templates = s; }
   if (b.theme !== undefined) upd.theme = JSON.stringify(obj(b.theme));
   if (b.defaultUi !== undefined) upd.defaultUi = !!b.defaultUi;
+  Object.assign(upd, cleanAssocSettings(b));
   upd.updatedAt = new Date();
   await t.update("charity_settings", { companyId }, upd);
   if (b.logo !== undefined) {
@@ -154,7 +156,7 @@ export async function saveProject(t: Db, companyId: string, b: any, id?: string)
 }
 
 // ─── donors & beneficiaries ────────────────────────────────────────────────
-async function nextPartnerCode(t: Db, companyId: string, prefix: string) {
+export async function nextPartnerCode(t: Db, companyId: string, prefix: string) {
   for (;;) {
     const r = await t.one(`INSERT INTO sequences(company_id, key, next) VALUES ($1,$2,2) ON CONFLICT (company_id, key) DO UPDATE SET next=sequences.next+1 RETURNING next-1 AS n`, [companyId, `CODE-${prefix}`]);
     const code = `${prefix}-${String(r.n).padStart(4, "0")}`;
@@ -250,6 +252,7 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
     cashAccountId: cash.id, revenueAccountId: rev.id, bankName: b.bankName || null, refNo: b.refNo || null, depositDate: isDate(b.depositDate) ? b.depositDate : null,
     notes: b.notes || null, isDemo: !!b.isDemo, createdBy: user,
     sponsorshipId: b.sponsorshipId || null, periodsCount: b.periodsCount || null, periodLabel: b.periodLabel || null,
+    feeYear: source === "MEMBERSHIP" && b.feeYear ? Math.floor(num(b.feeYear)) || null : null,
   });
   const je = await post(t, companyId, {
     date: d, type: "DONATION", sourceType: "CHARITY_RECEIPT", sourceId: row.id, reference: number, memo, createdBy: user, isDemo: !!b.isDemo,

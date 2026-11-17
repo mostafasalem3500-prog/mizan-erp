@@ -75,7 +75,7 @@ ops.post("/invoices", dyn(true), h(async (req) => { const d = await tx((t) => in
 ops.put("/invoices/:id", dyn(true), h(async (req) => { await tx((t) => inv.saveDraft(t, req.company, actor(req), req.body, p(req).id)); return inv.getInvoice(db, cid(req), p(req).id); }));
 /** The entry a document would create, without creating it: `make` runs inside a transaction that is always rolled back. */
 class Preview extends Error { constructor(public data: any) { super("preview"); } }
-async function previewEntry(make: (t: any) => Promise<any>, extra: (doc: any) => any = () => ({})) {
+export async function previewEntry(make: (t: any) => Promise<any>, extra: (doc: any) => any = () => ({})) {
   try {
     await tx(async (t) => {
       const doc = await make(t);

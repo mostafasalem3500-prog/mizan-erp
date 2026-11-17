@@ -13,6 +13,8 @@ import { SponsorshipsPage, InkindPage, VolunteersPage } from "./pages3";
 import { TreasuryPage, JournalView } from "../pages/Round20";
 import { ZakatFundPage } from "./pages4";
 import { CharityIndicatorsPage } from "../pages/Round25";
+import { MembersPage, SharesPage, VouchersPage } from "./pages5";
+import { CFG, BASE_TITLE } from "../shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
 
@@ -31,19 +33,22 @@ export const CH_NAV: any[] = [
   { group: "الرئيسية" },
   { to: "/charity", ic: "▦", label: "لوحة المؤشرات", perm: "payments.read" },
   { group: "الإيرادات والتبرعات" },
-  { to: "/charity/receipts", ic: "💚", label: "سندات القبض والتبرعات", perm: "payments.read" },
-  { to: "/charity/donors", ic: "🤝", label: "العملاء المتبرعون", perm: "partners.read" },
+  { to: "/charity/receipts", ic: "💚", label: "سندات القبض والتبرعات", coopLabel: "سندات القبض", perm: "payments.read" },
+  { to: "/charity/donors", ic: "🤝", label: "العملاء المتبرعون", coopLabel: "المتبرعون والداعمون", perm: "partners.read" },
   { to: "/charity/collections", ic: "📞", label: "التحصيل", perm: "sales.read" },
-  { to: "/charity/sponsorships", ic: "🤲", label: "الكفالات", perm: "payments.read" },
-  { to: "/charity/inkind", ic: "📦", label: "التبرعات العينية", perm: "payments.read" },
+  { to: "/charity/sponsorships", ic: "🤲", label: "الكفالات", perm: "payments.read", nonProfit: true },
+  { to: "/charity/inkind", ic: "📦", label: "التبرعات العينية", perm: "payments.read", nonProfit: true },
   { to: "/charity/daily", ic: "📥", label: "تحصيل دخول الأموال اليومية", perm: "payments.read" },
   { to: "/charity/quotations", ic: "📝", label: "عروض الأسعار", perm: "sales.read" },
+  { group: "الأعضاء والجمعية العمومية" },
+  { to: "/charity/members", ic: "👥", label: "الأعضاء والاشتراكات", coopLabel: "الأعضاء والمساهمون", perm: "partners.read" },
+  { to: "/charity/shares", ic: "📈", label: "الأسهم وتوزيع الفائض", perm: "payments.read", coopOnly: true },
   { group: "المصروفات" },
   { to: "/charity/expenses", ic: "💸", label: "المصروفات (سندات الصرف)", perm: "payments.read" },
   { to: "/charity/requests", ic: "📋", label: "طلبات الصرف", perm: "payments.read" },
   { to: "/charity/batches", ic: "🧾", label: "مسير المصروفات", perm: "payments.read" },
   { to: "/charity/beneficiaries", ic: "👪", label: "المستفيدون", perm: "partners.read" },
-  { to: "/charity/zakat", ic: "🕌", label: "صندوق الزكاة ومصارفها", perm: "reports.read" },
+  { to: "/charity/zakat", ic: "🕌", label: "صندوق الزكاة ومصارفها", perm: "reports.read", nonProfit: true },
   { to: "/charity/indicators", ic: "📊", label: "مؤشرات الأداء والحوكمة", perm: "reports.read" },
   { to: "/charity/final-accounts", ic: "📚", label: "القوائم المالية الختامية", perm: "reports.read" },
   { to: "/charity/volunteers", ic: "🙋", label: "المتطوعون وساعات التطوع", perm: "payments.read" },
@@ -54,6 +59,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/refunds", ic: "↩", label: "طلبات الاسترداد", perm: "payments.read" },
   { group: "التخطيط والرقابة" },
   { to: "/charity/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
+  { to: "/charity/vouchers", ic: "🔗", label: "سجل السندات الموحّد", perm: "payments.read" },
   { to: "/charity/projects", ic: "🎯", label: "المشاريع والبرامج", perm: "payments.read" },
   { to: "/charity/budget", ic: "📊", label: "الموازنة التقديرية", perm: "reports.read", companyOnly: true },
   { to: "/charity/reports", ic: "📈", label: "قائمة الأنشطة والتقارير", perm: "reports.read" },
@@ -72,11 +78,12 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
   const st = useFetch("/charity/settings");
   const pr = useFetch<any[]>("/charity/projects");
   useEffect(() => setMenu(false), [loc.pathname]);
-  useEffect(() => { document.title = st.data?.associationName || DEFAULT_NAME; return () => { document.title = "ميزان ERP"; }; }, [st.data?.associationName]);
+  useEffect(() => { document.title = st.data?.associationName || DEFAULT_NAME; return () => { document.title = BASE_TITLE(); }; }, [st.data?.associationName]);
   useEffect(() => swapFavicon(st.data?.logoUrl || DEFAULT_LOGO), [st.data?.logoUrl]);
   const s = st.data;
   const labels: Record<string, string> = s?.theme?.labels || {};
-  const items = CH_NAV.filter((n) => n.group || (can(n.perm) && !(me.lockedBranch && n.companyOnly)));
+  const coop = s?.assocType === "COOPERATIVE";
+  const items = CH_NAV.filter((n) => n.group || (can(n.perm) && !(me.lockedBranch && n.companyOnly) && !(coop && n.nonProfit) && !(!coop && n.coopOnly))).map((n) => (coop && n.coopLabel ? { ...n, label: n.coopLabel } : n));
   const cur = items.find((n) => n.to === loc.pathname) || items.find((n) => n.to && n.to !== "/charity" && loc.pathname.startsWith(n.to + "/"));
   return (
     <BaseCtx.Provider value="/charity">
@@ -86,14 +93,14 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
             <div className="brand">
               <div className="ch-logo"><img src={s?.logoUrl || DEFAULT_LOGO} alt={s?.associationName || DEFAULT_NAME} /></div>
               <span className="ch-name">{s?.associationName || DEFAULT_NAME}</span>
-              <small>{`ترخيص رقم ${s?.licenseNo || DEFAULT_LICENSE}`}</small>
+              <small>{`ترخيص رقم ${s?.licenseNo || DEFAULT_LICENSE}`}{s?.assocTypes?.[s.assocType] ? ` · ${s.assocTypes[s.assocType].ar.replace(/ \(.*\)$/, "")}` : ""}</small>
             </div>
             <nav>
               {items.map((n, i) => n.group ? <div key={i} className="group">{n.group}</div> : <NavLink key={n.to} to={n.to} end={n.to === "/charity"}><span className="ic">{n.ic}</span>{labels[n.to] || n.label}</NavLink>)}
             </nav>
             <div className="foot">
               <div>{me.user.fullName} · {me.roles?.[me.role] || me.role}</div>
-              <a className="ch-switch" href="/" onClick={(e) => { e.preventDefault(); nav("/"); }}>⇄ البرنامج المحاسبي الأساسي</a>
+              <a className="ch-switch" href="/" onClick={(e) => { e.preventDefault(); nav("/"); }}>⇄ {CFG.assoc ? "النظام المحاسبي الكامل" : "البرنامج المحاسبي الأساسي"}</a>
               <button className="btn sm ghost" style={{ color: "#fff" }} onClick={onLogout}>تسجيل الخروج</button>
             </div>
           </aside>
@@ -138,6 +145,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/templates" element={<TemplatesCenter />} />
                   <Route path="/charity/blank-forms" element={<BlankFormsPage />} />
                   <Route path="/charity/settings" element={<CharitySettingsPage />} />
+                  <Route path="/charity/members" element={<MembersPage />} />
+                  <Route path="/charity/shares" element={<SharesPage />} />
+                  <Route path="/charity/vouchers" element={<VouchersPage />} />
                   <Route path="*" element={<Navigate to="/charity" />} />
                 </Routes>
               )}

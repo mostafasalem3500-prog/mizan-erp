@@ -17,6 +17,8 @@ import { createBudget, fillFromActuals, getBudget } from "./budgets";
 import { createLandedCost, postLandedCost } from "./landed";
 import { savePriceList } from "./pricelists";
 import { saveCentre } from "./projects";
+import { CHARITY } from "../lib/country";
+import { seedAssocDemo, purgeAssocDemo } from "./assocDemo";
 
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -361,6 +363,9 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     await t.exec(`UPDATE budgets SET status='APPROVED' WHERE id=$1`, [b.id]);
   });
 
+  // associations edition: the association side gets its own six months (donations, aid, members)
+  if (CHARITY) { await log(companyId, "بيانات الجمعية", 90); await tx((t) => seedAssocDemo(t, companyId, userName, months, end)); }
+
   // quarterly VAT return for the first completed quarter inside the window (if 3 full months elapsed)
   await log(companyId, "إقرار الضريبة وفحص التطابق", 92);
   await tx(async (t) => {
@@ -397,6 +402,7 @@ export async function purgeDemo(companyId: string) {
   if (real.c) throw new Error("توجد مستندات فعلية مرحّلة على أصناف تجريبية — لا يمكن حذف البيانات التجريبية دون التأثير على المخزون. أنشئ أصنافك الخاصة للمستندات الفعلية.");
   await tx(async (t) => {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
+    await purgeAssocDemo(t, companyId);
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM estore_payouts WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM stock_lots WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);

@@ -796,6 +796,25 @@ html[data-theme="dark"] .tbl-card .tf { color: #2bb3a3; } html[data-theme="dark"
 @media (max-width: 700px) { .quick-btn { display: none; } .quick-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { .quick-tile { transition: none; } }
 
+/* association login (kept in the main sheet: the login page renders before the association chunk loads) */
+.auth.ch-auth .art { background: linear-gradient(150deg, #1f4594, #13285a 65%, #0c1838); }
+.auth.ch-auth .ch-auth-id { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; margin-bottom: 18px; }
+.auth.ch-auth .ch-auth-id img { width: 150px; height: 150px; border-radius: 50%; background: #fff; padding: 4px; object-fit: contain; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.auth.ch-auth .ch-auth-id h1 { font-size: 24px; line-height: 1.5; }
+.auth.ch-auth { --primary: #1f4594; --primary-2: #173670; --primary-soft: #e8eef9; }
+.auth.ch-auth .ch-auth-m { display: none; }
+@media (max-width: 860px) { .auth.ch-auth .ch-auth-m { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; margin-bottom: 14px; color: var(--primary); } .auth.ch-auth .ch-auth-m img { width: 96px; height: 96px; object-fit: contain; } }
+/* associations edition: the accounting program under the association's seal */
+.brand.assoc-brand { display: flex; align-items: center; gap: 10px; }
+.brand.assoc-brand img { width: 44px; height: 44px; border-radius: 50%; background: #fff; padding: 2px; object-fit: contain; flex: none; }
+.brand.assoc-brand span { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+.brand.assoc-brand b { font-size: 13px; white-space: normal; }
+.brand.assoc-brand small { font-size: 11px; opacity: .75; font-weight: 500; }
+/* associations edition: the accounting program in the association's colours (light theme; dark keeps its own palette) */
+html[data-edition="assoc"]:not([data-theme="dark"]) { --primary: #1f4594; --primary-2: #173670; --primary-soft: #e8eef9; }
+html[data-edition="assoc"] .sidebar { background: linear-gradient(180deg, #0c1838 0%, #13285a 100%); }
+html[data-edition="assoc"] .sidebar .group { color: #8fb0e0; }
+
 /* home: one line of what needs attention */
 .todo-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .todo-strip .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: inherit; text-decoration: none; font-size: .9rem; min-height: 32px; }
