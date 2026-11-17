@@ -27,6 +27,9 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PGPASSWORD: postgres
+      # the app counts days in Saudi time (UTC+3); the tests' «today» must too, or runs between 21:00 and 24:00 UTC
+      # compare different days
+      TZ: Asia/Riyadh
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
