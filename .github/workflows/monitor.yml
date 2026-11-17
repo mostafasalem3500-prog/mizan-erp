@@ -1,0 +1,27 @@
+name: Uptime
+
+# Checks the live services every 30 minutes. A failed run e-mails the repository owner (GitHub notifications),
+# and the run history is the availability record.
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health of the live services
+        run: |
+          fail=0
+          for u in https://mizan-api-production-7c00.up.railway.app https://mizan-eg-production.up.railway.app; do
+            body=$(curl -sS -m 25 --retry 2 --retry-delay 5 "$u/api/health" || true)
+            ms=$(curl -sS -m 25 -o /dev/null -w '%{time_total}' "$u/" || echo 99)
+            echo "$u → $body (page ${ms}s)"
+            echo "$body" | grep -q '"ok":true' || { echo "::error::$u is not answering correctly"; fail=1; }
+          done
+          exit $fail

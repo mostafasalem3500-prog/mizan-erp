@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { AppError, forbidden } from "./core";
@@ -6,7 +7,11 @@ import { reqCtx } from "./context";
 import { applyBranchScope } from "./branchScope";
 import { currentDeviceId, deviceMatches, isDesktopLocal } from "./desktopLicense";
 
-export const JWT_SECRET = process.env.JWT_SECRET || "mizan-dev-secret-change-me";
+/**
+ * Signs the sign-in tokens. It must be set on every server; when it is missing the server makes a random one for this
+ * run (so tokens can never be forged with a publicly known default) — sessions then end at each restart.
+ */
+export const JWT_SECRET = process.env.JWT_SECRET || (console.warn("[auth] JWT_SECRET is not set: using a random secret for this run — users will be signed out at every restart"), randomBytes(48).toString("hex"));
 
 export interface AuthCtx {
   userId: string;

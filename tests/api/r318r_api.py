@@ -1,0 +1,56 @@
+import sys, os, time; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lib import *
+import lib
+t=register('r318r'); c=lambda *a,**k: call(*a,tok=t,**k)
+c('/demo/load',{})
+for i in range(80):
+    if c('/demo/status').get('demoLoaded'): break
+    time.sleep(3)
+d=time.strftime('%Y-%m-%d')
+def refused(code, fn, name):
+    try: fn(); ok(False,name)
+    except E as e: ok(str(code) in str(e), name+' → '+str(e)[:70])
+ok(c('/pos/restaurant')['settings']['mode']=='RETAIL','a new establishment starts in retail mode')
+s=c('/pos/restaurant/settings',{'mode':'RESTAURANT'},m='PUT'); ov=c('/pos/restaurant')
+ok(s['mode']=='RESTAURANT' and len(ov['floors'])==1 and len(ov['floors'][0]['tables'])==8 and ov['stats']['busy']==0,'restaurant mode: a first hall with 8 free tables is created')
+F=ov['floors'][0]; T=F['tables']
+f2=c('/pos/floors',{'name':'العائلات'}); c('/pos/tables',{'floorId':f2['id'],'count':5,'seats':6,'prefix':'عائلي'}); ov=c('/pos/restaurant')
+ok(len(ov['floors'])==2 and [x['name'] for x in ov['floors'][1]['tables']][:2]==['عائلي 1','عائلي 2'] and ov['floors'][1]['tables'][0]['seats']==6,'a second hall with 5 numbered tables')
+sess=c('/pos/session').get('session') or c('/pos/session/open',{'openingCash':100})
+sid=sess['id']
+P=[p for p in c('/products?limit=200') if p['type']=='STOCK' and float(p.get('qty') or 0)>=10 and p['isActive']][:2]; A,Bp=P
+qa0,qb0=float(A['qty']),float(Bp['qty'])
+L=lambda p,q,note='': {'productId':p['id'],'name':p['name'],'qty':q,'unitPrice':float(p['salePrice']),'discountPct':0,'note':note}
+o=c('/pos/orders',{'tableId':T[0]['id'],'guests':3}); ok(o['number']>=1 and o['tableName']==T[0]['name'] and o['guests']==3 and o['type']=='DINE_IN','order opened on a table')
+ok(c('/pos/orders',{'tableId':T[0]['id'],'guests':9})['id']==o['id'],'opening an occupied table returns its order, not a second one')
+o=c(f"/pos/orders/{o['id']}",{'lines':[L(A,2,'حار'),L(Bp,1)]},m='PUT'); exp=round(2*float(A['salePrice'])+float(Bp['salePrice']),2)
+ok(o['total']==exp and len(o['lines'])==2 and c('/pos/restaurant')['floors'][0]['tables'][0]['order']['pending'],f'lines saved, total {exp}, table shows as not yet sent')
+r=c(f"/pos/orders/{o['id']}/send",{}); tk=r['ticket']; ok(tk and len(tk['items'])==2 and tk['items'][0]['qty']==2 and tk['items'][0]['note']=='حار' and tk['tableName']==T[0]['name'],'kitchen ticket: 2 items with the note')
+ok(c(f"/pos/orders/{o['id']}/send",{})['ticket'] is None,'sending again prints nothing')
+r=c(f"/pos/orders/{o['id']}/send",{'lines':[L(A,3,'حار')]}); it=r['ticket']['items']; ok(len(it)==2 and it[0]['qty']==1 and not it[0].get('cancel') and it[1].get('cancel') and it[1]['qty']==1,'next round: +1 of the first item, and the removed item as a cancellation')
+k=c('/pos/kitchen'); ok(len(k)==1 and k[0]['items'][0]['qty']==3,'kitchen screen lists 3 to prepare'); c(f"/pos/orders/{o['id']}/ready",{}); ok(c('/pos/kitchen')==[],'marked ready → kitchen screen clear')
+o=c(f"/pos/orders/{o['id']}/move",{'tableId':T[1]['id']}); ov=c('/pos/restaurant'); ok(o['tableName']==T[1]['name'] and ov['floors'][0]['tables'][0]['order'] is None and ov['floors'][0]['tables'][1]['order']['id']==o['id'],'moved: first table free, second occupied')
+o2=c('/pos/orders',{'tableId':T[2]['id'],'guests':2}); c(f"/pos/orders/{o2['id']}",{'lines':[L(Bp,2)]},m='PUT')
+refused(409,lambda: c(f"/pos/orders/{o['id']}/move",{'tableId':T[2]['id']}),'moving onto an occupied table')
+o=c(f"/pos/orders/{o2['id']}/merge",{'intoId':o['id']}); ov=c('/pos/restaurant')
+ok(len(o['lines'])==2 and o['guests']==5 and ov['floors'][0]['tables'][2]['order'] is None and ov['stats']['busy']==1,'merged: both orders on one table, the other free, guests added')
+keyA=[l['key'] for l in o['lines'] if l['productId']==A['id']][0]
+sale=lambda lines,extra: c('/pos/sale',{'sessionId':sid,'lines':lines,'tenders':[{'method':'CASH','amount':None}],'orderId':o['id'],**extra})
+i1=sale([{'productId':A['id'],'qty':1,'unitPrice':float(A['salePrice'])}],{'paidLines':[{'key':keyA,'qty':1}]})
+ok(i1['status']=='POSTED' and i1['tableName']==T[1]['name'] and i1['orderNo']==o['number'] and i1['orderClosed'] is False,'split: one item paid, invoice carries the table and order number')
+o=c(f"/pos/orders/{o['id']}"); ok(o['status']=='OPEN' and sorted(l['qty'] for l in o['lines'])==[2,2],'the rest stays on the order (2 + 2)')
+i2=sale([{'productId':l['productId'],'qty':l['qty'],'unitPrice':l['unitPrice']} for l in o['lines']],{})
+o=c(f"/pos/orders/{o['id']}"); ov=c('/pos/restaurant'); ok(i2['orderClosed'] is True and o['status']=='PAID' and ov['stats']['busy']==0,'paying the rest closes the order and frees the table')
+refused(409,lambda: c(f"/pos/orders/{o['id']}",{'lines':[L(A,1)]},m='PUT'),'a paid order cannot be changed')
+pr={p['id']:float(p['qty']) for p in c('/products?limit=200')}; ok(pr[A['id']]==qa0-3 and pr[Bp['id']]==qb0-2,f'stock left by exactly what was sold (−3, −2)')
+ig=c('/reports/integrity'); ok(ig['ok'],'books still tie after restaurant sales (integrity check)')
+tk=c('/pos/orders',{'type':'TAKEAWAY'}); ok(tk['type']=='TAKEAWAY' and tk['tableName'] is None and tk['number']==o2['number']+1,'take-away order numbered next')
+refused(400,lambda: c('/pos/orders',{'type':'DELIVERY'}),'delivery without a phone')
+dl=c('/pos/orders',{'type':'DELIVERY','customerPhone':'0500000000','customerName':'خالد','address':'حي النزهة'}); ok(len(c('/pos/restaurant')['orders'])==2 and dl['address']=='حي النزهة','delivery order with customer details listed with take-away')
+c(f"/pos/orders/{tk['id']}/send",{'lines':[L(A,1)]})
+refused(400,lambda: c(f"/pos/orders/{tk['id']}/cancel",{}),'cancelling an order already in the kitchen without a reason')
+ok(c(f"/pos/orders/{tk['id']}/cancel",{'reason':'العميل غادر'})['status']=='CANCELLED' and c(f"/pos/orders/{dl['id']}/cancel",{})['status']=='CANCELLED','cancel with a reason; an untouched order cancels freely')
+rp=c(f'/pos/restaurant/report?from={d}&to={d}'); ok(rp['orders']==2 and abs(rp['total']-(float(i1['total'])+float(i2['total'])))<0.01 and rp['byTable'][0]['name']==T[1]['name'] and rp['cancelled']==2,f"report: 2 invoices, total {rp['total']}, by table, 2 cancelled (merge not counted)")
+refused(409,lambda: c(f"/pos/floors/{F['id']}",m='DELETE') if c('/pos/orders',{'tableId':T[4]['id']}) else None,'deleting a hall with an open order')
+ok(c('/pos/restaurant/settings',{'mode':'CAFE','quickNotes':['بدون سكر','حليب إضافي']},m='PUT')['quickNotes']==['بدون سكر','حليب إضافي'],'café mode and own quick notes saved')
+print('FAILS',lib.fails); sys.exit(1 if lib.fails else 0)

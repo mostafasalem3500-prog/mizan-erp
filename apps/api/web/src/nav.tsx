@@ -108,6 +108,8 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/final-accounts?tab=bs", label: "قائمة المركز المالي (الميزانية)", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=is", label: "قائمة الدخل", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=eq", label: "التغيرات في حقوق الملكية", perm: "reports.read", company: true },
+    { to: "/notes", label: "إيضاحات القوائم المالية", perm: "reports.read", company: true },
+    { to: "/combined", label: "القوائم المجمّعة لعدة منشآت", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=cf", label: "التدفقات النقدية", perm: "reports.read", company: true },
     { to: "/final-accounts?tab=chk", label: "ترابط القوائم", perm: "reports.read", company: true },
     { to: "/closing", label: "إقفال الشهر (قائمة التحقق)", perm: "accounting.read", company: true },

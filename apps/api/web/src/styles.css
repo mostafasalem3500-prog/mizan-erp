@@ -821,3 +821,5 @@ html[data-edition="assoc"] .sidebar .group { color: #8fb0e0; }
 .todo-strip .chip .num { font-weight: 700; }
 .todo-strip .chip.high { border-color: var(--danger-ink, #b91c1c); color: var(--danger-ink, #b91c1c); }
 .todo-strip .chip:hover, .todo-strip .chip:focus-visible { background: var(--surface-2); outline: 2px solid var(--primary); outline-offset: 1px; }
+
+.tbl tr.group th { background: var(--surface-2); text-align: start; font-weight: 700; }

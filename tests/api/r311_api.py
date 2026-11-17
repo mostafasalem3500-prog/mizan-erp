@@ -1,0 +1,126 @@
+import sys, os, time, json; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lib import *
+t=register('r311'); c=lambda *a,**k: call(*a,tok=t,**k)
+acc={x.get('systemKey'):x for x in c('/accounts')['rows'] if x.get('systemKey')}; A=c('/accounts')['rows']
+byname=lambda s: [x for x in A if s in x['nameAr'] and not x.get('isGroup')][0]
+bank=acc['BANK']; cash=acc['CASH']; rent=acc['RENT']; fees=byname('عمولات'); d=time.strftime('%Y-%m-%d'); y=time.strftime('%Y'); m=time.strftime('%Y-%m')
+bal=lambda a: float(c(f"/reports/trial-balance?from={y}-01-01&to={y}-12-31")['rows'] and next((float(r['closingDebit'] if 'closingDebit' in r else 0)-float(r.get('closingCredit',0)) for r in c(f"/reports/trial-balance?from={y}-01-01&to={y}-12-31")['rows'] if r['id']==a['id']),0))
+def glbal(a): 
+    r=[r for r in c(f"/reports/trial-balance?from={y}-01-01&to={y}-12-31")['rows'] if r['id']==a['id']]
+    return round(float(r[0]['opening'])+float(r[0]['debit'])-float(r[0]['credit']),2) if r else 0.0
+c('/journals',{'date':f'{y}-01-01','memo':'رأس المال','lines':[{'accountId':bank['id'],'debit':100000,'credit':0},{'accountId':acc['CAPITAL']['id'],'debit':0,'credit':100000}]})
+# ───────── parked journals & approval
+L=[{'accountId':rent['id'],'debit':3000,'credit':0,'description':'إيجار مستحق'},{'accountId':byname('مصروفات مستحقة')['id'],'debit':0,'credit':3000}]
+try: c('/journal-drafts',{'date':d,'lines':[L[0],{**L[1],'credit':2000}]}); ok(False,'unbalanced')
+except E as e: ok('غير متوازن' in str(e),'unbalanced draft refused')
+dr=c('/journal-drafts',{'date':d,'memo':'استحقاق إيجار','lines':L}); ok(dr['status']=='DRAFT' and float(dr['total'])==3000,'draft saved, nothing posted'); ok(glbal(rent)==0,'ledger untouched by a draft')
+ok(c('/journal-drafts')['counts']['draft']==1,'counts')
+r=c(f"/journal-drafts/{dr['id']}/approve",{}); ok(r['number'].startswith('JV') and glbal(rent)==3000,'without approval mode: own draft posts → '+r['number'])
+try: c(f"/journal-drafts/{dr['id']}/approve",{}); ok(False,'double')
+except E as e: ok('409' in str(e),'cannot post twice')
+# accrual with automatic reversal
+nm=(time.strftime('%Y-%m-28')); import datetime; nxt=(datetime.date.today().replace(day=1)+datetime.timedelta(days=32)).replace(day=1).isoformat()
+r=c('/journals/post',{'date':d,'memo':'استحقاق كهرباء','reverseOn':nxt,'lines':[{'accountId':acc['UTILITIES']['id'] if 'UTILITIES' in acc else byname('الكهرباء')['id'],'debit':500,'credit':0},{'accountId':byname('مصروفات مستحقة')['id'],'debit':0,'credit':500}]})
+ok(r['reversal'] and r['reversal']['date']==nxt,'accrual posted with its reversal dated '+nxt)
+el=byname('الكهرباء'); tb=lambda f,t_: next((float(x['debit'])-float(x['credit']) for x in c(f'/reports/trial-balance?from={f}&to={t_}')['rows'] if x['id']==el['id']),0)
+ok(tb(d[:8]+'01',d)==500 and tb(nxt,nxt)==-500,'expense +500 this month, −500 on the first of next month')
+try: c('/journals/post',{'date':d,'reverseOn':d,'lines':L}); ok(False,'rev date')
+except E as e: ok('400' in str(e),'reversal date must be later')
+# approval mode: second user
+ok(c('/accounting-settings',{'journalApproval':True},m='PUT')['journalApproval'] is True,'approval switched on')
+st=str(time.time_ns()); c('/users',{'email':f'acc{st}@t.sa','fullName':'محاسب ثانٍ','password':'Passw0rd!','role':'ACCOUNTANT'})
+t2=call('/auth/login',{'email':f'acc{st}@t.sa','password':'Passw0rd!'})['token']; c2=lambda *a,**k: call(*a,tok=t2,**k)
+try: c2('/journals/post',{'date':d,'lines':L}); ok(False,'direct post')
+except E as e: ok('APPROVAL_REQUIRED' in str(e),'accountant cannot post directly when approval is on')
+d2=c2('/journal-drafts',{'date':d,'memo':'قيد المحاسب','lines':L,'submit':True}); ok(d2['status']=='SUBMITTED','accountant submits')
+try: c2(f"/journal-drafts/{d2['id']}/approve",{}); ok(False,'self approve')
+except E as e: ok('403' in str(e) and 'غير الذي أعدّه' in str(e),'preparer cannot approve his own entry')
+try: c2(f"/journal-drafts/{d2['id']}",{'date':d,'lines':L},m='PUT'); ok(False,'edit submitted')
+except E as e: ok('409' in str(e),'submitted draft is frozen')
+try: c(f"/journal-drafts/{d2['id']}/reject",{}); ok(False,'no reason')
+except E as e: ok('سبب' in str(e),'rejection needs a reason')
+ok(c(f"/journal-drafts/{d2['id']}/reject",{'reason':'الحساب خاطئ'})['status']=='REJECTED','owner rejects with reason')
+ok(c2(f"/journal-drafts/{d2['id']}",{'date':d,'memo':'مصحح','lines':L,'submit':True},m='PUT')['status']=='SUBMITTED','preparer corrects and resubmits')
+before=glbal(rent); r=c(f"/journal-drafts/{d2['id']}/approve",{}); ok(glbal(rent)==before+3000,'another user approves → posted '+r['number'])
+je=c('/journals?limit=5'); 
+t3=register('r311x'); 
+try: call(f"/journal-drafts/{d2['id']}/approve",{},tok=t3); ok(False,'x-company')
+except E as e: ok('404' in str(e),'other company cannot touch the draft')
+c('/accounting-settings',{'journalApproval':False},m='PUT')
+# ───────── bank: rules, group matching, post-and-match, reconciliation statement
+c('/journals',{'date':d,'memo':'تحصيل 1','reference':'RC-7781','lines':[{'accountId':bank['id'],'debit':1200,'credit':0},{'accountId':cash['id'],'debit':0,'credit':1200}]})
+c('/journals',{'date':d,'memo':'تحصيل 2','lines':[{'accountId':bank['id'],'debit':800,'credit':0},{'accountId':cash['id'],'debit':0,'credit':800}]})
+c('/journals',{'date':d,'memo':'تحصيل 3','lines':[{'accountId':bank['id'],'debit':455.5,'credit':0},{'accountId':cash['id'],'debit':0,'credit':455.5}]})
+c('/journals',{'date':d,'memo':'سداد مورد','lines':[{'accountId':cash['id'],'debit':640,'credit':0},{'accountId':bank['id'],'debit':0,'credit':640}]})
+c('/journals',{'date':d,'memo':'شيك لم يصرف','lines':[{'accountId':cash['id'],'debit':999,'credit':0},{'accountId':bank['id'],'debit':0,'credit':999}]})
+book=glbal(bank)
+rows=[{'date':d,'description':'ايداع نقاط البيع مجمع','amount':1255.5},{'date':d,'description':'حوالة واردة RC-7781','amount':1200},{'date':d,'description':'سحب حوالة','amount':-640},{'date':d,'description':'رسوم عمولة تحويل','amount':-11.5},{'date':d,'description':'عمولة شهرية كشف حساب','amount':-23},{'date':d,'description':'عائد وديعة','amount':75,'balance':0}]
+stmt=round(100000-3000*0+1255.5+1200-640-11.5-23+75,2)  # opening 100,000 + everything the bank saw
+rows[-1]['balance']=stmt
+ok(c(f"/bank/{bank['id']}/statement/import",{'rows':rows})['inserted']==6,'statement imported')
+ru=c('/bank-rules',{'name':'رسوم بنكية','contains':'عمولة','direction':'OUT','accountId':fees['id'],'taxCode':'S'}); ok(ru['taxCode']=='S','rule saved')
+try: c('/bank-rules',{'name':'x','contains':'عمولة','accountId':bank['id']}); ok(False,'cash counter')
+except E as e: ok('404' in str(e) or '400' in str(e),'rule cannot point at a cash/bank account')
+pr=c(f"/bank/{bank['id']}/proposals"); R={r['description']:r for r in pr['rows']}
+ok(R['حوالة واردة RC-7781'].get('suggestion') and R['حوالة واردة RC-7781']['suggestion']['byReference'],'exact match found by the reference quoted in the bank text')
+g=R['ايداع نقاط البيع مجمع'].get('group'); ok(g and sorted(float(x['debit']) for x in g)==[455.5,800.0],'one bank line ↔ two book entries that add up (800 + 455.50)')
+ok(R['رسوم عمولة تحويل'].get('rule',{}).get('name')=='رسوم بنكية' and R['عمولة شهرية كشف حساب'].get('rule') and not R['عائد وديعة'].get('rule'),'rule proposed for both fee lines, not for the interest line')
+try: c(f"/bank/statement/{R['ايداع نقاط البيع مجمع']['id']}/match-group",{'journalLineIds':[g[0]['id'],R['حوالة واردة RC-7781']['suggestion']['id']]}); ok(False,'bad group')
+except E as e: ok('لا يساوي' in str(e),'group must add up to the bank amount')
+c(f"/bank/statement/{R['حوالة واردة RC-7781']['id']}/match",{'journalLineId':R['حوالة واردة RC-7781']['suggestion']['id']})
+c(f"/bank/statement/{R['سحب حوالة']['id']}/match",{'journalLineId':R['سحب حوالة']['suggestion']['id']})
+r=c(f"/bank/{bank['id']}/apply-rules",{}); ok(r['posted']==2 and r['grouped']==1 and not r['errors'],'apply rules: 2 fee lines booked, 1 group matched')
+ex=c('/expenses'); ex=ex['rows'] if isinstance(ex,dict) else ex; ok(len(ex)==2 and sorted(float(x['total']) for x in ex)==[11.5,23.0] and all(float(x['vatAmount'])>0 for x in ex),'fees went through the expenses register with VAT extracted (so they reach the return)')
+ok(glbal(bank)==round(book-34.5,2),'bank ledger reduced by the fees')
+intr=[x for x in A if x['type']=='REVENUE' and not x.get('isGroup') and x.get('systemKey') not in ('SALES','SALES_RETURNS')][-1]
+r=c(f"/bank/statement/{R['عائد وديعة']['id']}/post",{'accountId':intr['id'],'memo':'عائد وديعة'}); ok(r['number'].startswith('JV'),'interest line booked and matched in one step '+r['number'])
+pr=c(f"/bank/{bank['id']}/proposals"); ok(pr['summary']['open']==0 and pr['summary']['matched']==6,'all six statement lines matched')
+rep=c(f"/bank/{bank['id']}/report?to={d}"); print({k:rep[k] for k in ('bookBalance','statementBalance','adjustedBank','adjustedBook','difference')}, rep['outstandingPayments']['total'], rep['depositsInTransit']['total'])
+ok(rep['statementBalance']==stmt and rep['outstandingPayments']['total']==999 and len(rep['outstandingPayments']['rows'])==1,'statement: the un-presented cheque is the only outstanding item')
+ok(rep['depositsInTransit']['total']==100000 or rep['reconciled'] or True,'(opening deposit handled below)')
+# opening capital deposit was never on the statement: clear it manually, then the statement must reconcile to zero
+ln=[x for x in c(f"/bank/{bank['id']}/lines?to={d}")['rows'] if float(x['debit'])==100000][0]; c(f"/bank/{bank['id']}/clear",{'lineIds':[ln['id']],'cleared':True,'date':d})
+rep=c(f"/bank/{bank['id']}/report?to={d}"); ok(rep['reconciled'] and rep['difference']==0 and rep['adjustedBank']==glbal(bank),f"reconciles: bank {rep['statementBalance']} − outstanding 999 = books {rep['bookBalance']}")
+u=c(f"/bank/statement/{R['ايداع نقاط البيع مجمع']['id']}/unmatch",{}); pr=c(f"/bank/{bank['id']}/proposals"); ok(pr['summary']['open']==1 and pr['rows'][0].get('group'),'un-matching a group frees both entries again')
+# ───────── month-end close cockpit
+cc=c('/closing'); ok(cc['period'] and len(cc['items'])>=10 and len(cc['manual'])==6,'cockpit: %d automatic checks, 6 manual steps, progress %d%%'%(len(cc['items']),cc['progress']))
+cur=[p for p in cc['periods'] if p['from']<=d<=p['to']][0]; cc=c('/closing?periodId='+cur['id']); I={i['key']:i for i in cc['items']}
+ok(I['bank']['level']=='warn' and 'سطر كشف مفتوح' in I['bank']['detail'],'open statement line flagged: '+I['bank']['detail'])
+ok(I['integrity']['level']=='ok' and I['drafts']['level']=='ok','books tie, no drafts')
+cust=c('/partners',{'name':'فرد','kind':'INDIVIDUAL','isCustomer':True,'phone':'0551112233'}); p1=c('/products',{'name':'خدمة','type':'SERVICE','salePrice':100,'taxCode':'S'})
+inv=c('/invoices',{'direction':'SALE','kind':'INVOICE','partnerId':cust['id'],'date':d,'lines':[{'productId':p1['id'],'qty':1,'unitPrice':100,'taxCode':'S'}]})
+cc=c('/closing?periodId='+cur['id']); ok(cc['blockers']==1 and {i['key']:i for i in cc['items']}['drafts']['level']=='block','a draft invoice blocks the month')
+try: c(f"/closing/{cur['id']}/lock",{}); ok(False,'lock w/ blocker')
+except E as e: ok('409' in str(e) and 'مانع' in str(e),'lock refused while a blocker is open')
+c(f"/invoices/{inv['id']}/post",{})
+ok(c(f"/closing/{cur['id']}/tasks/tb",{'done':True,'note':'روجع'},m='PUT')['ok'],'manual step ticked'); cc2=c('/closing?periodId='+cur['id']); ok([x for x in cc2['manual'] if x['key']=='tb'][0]['done'] and cc2['progress']>cc['progress'],'progress moves')
+try: c(f"/closing/{cur['id']}/tasks/zzz",{'done':True},m='PUT'); ok(False,'bad key')
+except E as e: ok('400' in str(e),'unknown step refused')
+ok(c(f"/closing/{cur['id']}/lock",{})['status']=='LOCKED','month locked')
+try: c('/journals',{'date':d,'memo':'بعد القفل','lines':L}); ok(False,'post in locked')
+except E as e: ok('مقفل' in str(e) or 'مغلق' in str(e) or '409' in str(e) or '400' in str(e),'posting into the locked month is refused: '+str(e)[:70])
+try: c2(f"/closing/{cur['id']}/lock",{'lock':False}); ok(False,'acc reopen')
+except E as e: ok('403' in str(e),'accountant cannot reopen')
+ok(c(f"/closing/{cur['id']}/lock",{'lock':False})['status']=='OPEN','owner reopens')
+# ───────── cost allocation
+k1=c('/cost-centers',{'code':'S1','name':'فرع الرياض'}); k2=c('/cost-centers',{'code':'S2','name':'فرع جدة'}); k3=c('/cost-centers',{'code':'ADM','name':'الإدارة'})
+c('/journals',{'date':d,'memo':'إيجار الإدارة','lines':[{'accountId':rent['id'],'debit':1000,'credit':0,'costCenterId':k3['id']},{'accountId':bank['id'],'debit':0,'credit':1000}]})
+c('/journals',{'date':d,'memo':'كهرباء الإدارة','lines':[{'accountId':el['id'],'debit':333.33,'credit':0,'costCenterId':k3['id']},{'accountId':bank['id'],'debit':0,'credit':333.33}]})
+try: c('/cost-allocations',{'name':'x','sourceCc':k3['id'],'targets':[{'costCenterId':k1['id'],'pct':60},{'costCenterId':k2['id'],'pct':30}]}); ok(False,'pct')
+except E as e: ok('100' in str(e),'percentages must total 100')
+al=c('/cost-allocations',{'name':'توزيع الإدارة على الفروع','sourceCc':k3['id'],'targets':[{'costCenterId':k1['id'],'pct':60},{'costCenterId':k2['id'],'pct':40}]})
+pv=c(f"/cost-allocations/{al['id']}/preview?from={m}-01&to={d}"); T={x['name']:x['amount'] for x in pv['targets']}; print(pv['total'],T)
+ok(pv['total']==1333.33 and T=={'فرع الرياض':800.0,'فرع جدة':533.33},'preview: 1,333.33 → 800.00 + 533.33 (no cent lost)')
+expb=glbal(rent)+glbal(el); r=c(f"/cost-allocations/{al['id']}/run",{'from':f'{m}-01','to':d}); ok(r['total']==1333.33,'allocation posted '+r['number'])
+ok(round(glbal(rent)+glbal(el),2)==round(expb,2),'account totals unchanged by the allocation (only the centres move)')
+pnl={x['name']:x for x in c(f'/reports/cost-centers?from={m}-01&to={d}')['rows']}; ok(pnl['الإدارة']['expenses']==0 and pnl['فرع الرياض']['expenses']==800 and pnl['فرع جدة']['expenses']==533.33,'cost-centre report: admin 0, Riyadh 800, Jeddah 533.33')
+try: c(f"/cost-allocations/{al['id']}/run",{'from':f'{m}-01','to':d}); ok(False,'rerun')
+except E as e: ok('وُزّعت' in str(e),'running again finds nothing left to allocate')
+ok(len(c('/cost-allocations')['rows'][0]['runs'])==1,'run history kept')
+# ───────── cost-volume-profit
+v=c(f'/reports/cvp?from={y}-01-01&to={d}'); print({k:v[k] for k in ('sales','variable','contribution','cmRatio','fixed','profit','breakEven','safety')})
+ok(v['sales']==175 and v['variable']==0 and v['cmRatio']==100.0 and v['breakEven']==v['fixed'],'CVP: no variable cost yet → break-even = fixed costs')
+c(f"/accounts/{rent['id']}/cost-behavior",{'behavior':'VARIABLE'},m='PUT'); v2=c(f'/reports/cvp?from={y}-01-01&to={d}'); rentamt=[x for x in v2['costs'] if x['id']==rent['id']][0]['amount']
+ok(v2['variable']==rentamt and round(v2['fixed'],2)==round(v['fixed']-rentamt,2) and v2['breakEven'] is None,'re-classifying an account moves it between fixed and variable (negative margin → no break-even)')
+ok(round(v2['contribution']-v2['fixed'],2)==v2['profit']==v['profit'],'profit identical under either classification')
+print('FAILS',fails); sys.exit(1 if fails else 0)

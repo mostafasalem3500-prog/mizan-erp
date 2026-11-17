@@ -40,6 +40,7 @@ import { startRecurringScheduler } from "./services/recurring";
 import { seedDemoAccount } from "./services/seed-demo-account";
 import { startDesktopLicenseCheck } from "./services/desktopLicenseCheck";
 import { startDesktopGuard } from "./services/desktopGuard";
+import { openapi, apiDocsHtml } from "./services/openapi";
 
 /** Ops aid: ZATCA_SELFTEST=1 runs the developer-portal self-test once at boot for the showcase (or first) company and logs it. */
 async function zatcaBootSelfTest() {
@@ -99,6 +100,10 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/media", media);
 app.use("/api/public", pub);
 app.use("/api/public", portal);
+// public description of the REST API: the OpenAPI file and a readable page (before the API-key check)
+const originOf = (req: express.Request) => `${req.protocol}://${req.get("host")}`;
+app.get("/api/v1/openapi.json", (req, res) => { res.setHeader("Cache-Control", "public, max-age=300"); res.json(openapi(originOf(req))); });
+app.get(["/developers", "/api/docs"], (req, res) => { res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"); res.setHeader("Cache-Control", "public, max-age=300"); res.type("html").send(apiDocsHtml(originOf(req))); });
 app.use("/api/v1", v1);
 app.use("/api/hooks", hooks);
 app.use("/api/auth", auth);

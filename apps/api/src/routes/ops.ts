@@ -16,6 +16,7 @@ import { settle as settleOrder } from "../services/restaurant";
 import * as misc from "../services/misc";
 import * as rep from "../services/reports";
 import * as daily from "../services/daily";
+import * as notes from "../services/notes";
 import { reverse } from "../accounting/engine";
 import { loadDemo, purgeDemo } from "../services/demo";
 import { ensureZatcaConfig, submitInvoice } from "../zatca/stamp";
@@ -90,6 +91,8 @@ ops.post("/expenses/preview-entry", perm("expenses.write"), h(async (req) => pre
 ops.post("/payments/preview-entry", perm("payments.write"), h(async (req) => previewEntry((t) => createPayment(t, cid(req), actor(req), req.body))));
 
 // ── the day at a glance, what needs attention, and plain-language money movements ──
+ops.get("/reports/notes", perm("reports.read"), h(async (req) => notes.financialNotes(db, cid(req), req.query)));
+ops.get("/reports/combined", perm("reports.read"), h(async (req) => notes.combinedStatements(db, req.auth.userId, String(req.query.companies || "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)), req.query)));
 ops.get("/reports/daily", perm("reports.read"), h(async (req) => daily.dailyReport(db, cid(req), String(req.query.date || ""))));
 ops.get("/brief", perm("dashboard.read"), h(async (req) => daily.brief(db, cid(req))));
 ops.get("/quick-entry/kinds", perm("dashboard.read"), h(async () => Object.entries(daily.QUICK_KINDS).map(([kind, k]) => ({ kind, ar: k.ar, dir: k.dir, why: k.why }))));

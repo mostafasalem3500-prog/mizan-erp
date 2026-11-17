@@ -58,6 +58,8 @@ const VatPage = lz(() => import("./pages/Reports"), "VatPage");
 const SettingsPage = lz(() => import("./pages/Settings"), "SettingsPage");
 const ProjectsPage = lz(() => import("./pages/Projects"), "ProjectsPage");
 const QuickPage = lz(() => import("./pages/Quick"), "QuickPage");
+const NotesPage = lz(() => import("./pages/Notes"), "NotesPage");
+const CombinedPage = lz(() => import("./pages/Notes"), "CombinedPage");
 const AccountPage = lz(() => import("./pages/Account"), "AccountPage");
 const LegalPage = lz(() => import("./pages/Account"), "LegalPage");
 const DailyPage = lz(() => import("./pages/Quick"), "DailyPage");
@@ -248,6 +250,8 @@ export function App() {
                 <Route path="/settings/templates" element={<PrintTemplatesPage />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/quick" element={<QuickPage />} />
+                <Route path="/notes" element={<NotesPage />} />
+                <Route path="/combined" element={<CombinedPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/daily" element={<DailyPage />} />
                 <Route path="/projects/:id" element={<ProjectDetailPage />} />
