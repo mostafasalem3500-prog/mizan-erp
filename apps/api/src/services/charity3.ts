@@ -263,5 +263,7 @@ export async function alerts(t: Db, companyId: string) {
   // reviewer: closing reminders (daily / weekly / monthly) and vouchers without supporting documents
   const { closingAlerts } = require("./assoc2") as typeof import("./assoc2");
   for (const x of await closingAlerts(t, companyId)) out.push({ level: x.level, title: x.title, detail: x.detail, link: x.link });
+  const { governanceAlerts } = require("./assoc3") as typeof import("./assoc3");
+  out.push(...(await governanceAlerts(t, companyId)));
   return out;
 }

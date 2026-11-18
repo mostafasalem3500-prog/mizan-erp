@@ -248,6 +248,7 @@ export function ProjectBudgetModal({ project, onClose }: { project: any; onClose
 const SRC_AR: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك", SPONSORSHIP: "كفالة", REFUND: "استرداد", OTHER: "أخرى" };
 export function ProjectFinalModal({ project, onClose }: { project: any; onClose: (changed?: boolean) => void }) {
   const { data, reload } = useFetch<any>(`/charity/projects/${project.id}/final`);
+  const auth = useFetch<any>("/charity/authority");
   const { projects } = useCharity();
   const { me, can } = useCompanyContext() as any;
   const { run, busy } = useAction();
@@ -262,7 +263,8 @@ export function ProjectFinalModal({ project, onClose }: { project: any; onClose:
   const closed = data?.project?.status === "CLOSED";
   const afterFinal = data ? Math.max(0, data.balance - (fd.on ? Number(fd.amount) || 0 : 0)) : 0;
   const close = () => run(async () => {
-    const body: any = { ...rem, force: !!data?.openItems?.length };
+    const overLimit = fd.on && auth.data?.enabled && Number(fd.amount) > Number(auth.data.directLimit || 0);
+    const body: any = { ...rem, force: !!data?.openItems?.length || (owner && overLimit) };
     if (fd.on) body.finalDisbursement = { amount: fd.amount, beneficiaryName: benef?.name || fd.beneficiaryName, partnerId: benef?.id, kind: fd.kind, refNo: fd.refNo, capacity: fd.capacity, reason: fd.reason || undefined, expenseAccountId: exp?.id, payAccountId: pay?.id };
     const r = await api(`/charity/projects/${project.id}/close`, { body });
     if (r.finalVoucher && files.length) { const u = await uploadFiles("ch_disb", r.finalVoucher.id, files); if (u.errs.length) toast(u.errs.join(" — "), "err"); }

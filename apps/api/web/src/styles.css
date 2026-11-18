@@ -114,6 +114,7 @@ textarea.input { min-height: 70px; resize: vertical; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .form-grid .span2 { grid-column: span 2; }
 .form-grid .span3 { grid-column: 1 / -1; }
+@media (max-width: 520px) { .form-grid .span2 { grid-column: 1 / -1; } } /* one column on phones: a 2-column span would add a column and overflow */
 .hint { font-size: 12px; color: var(--muted); }
 
 /* tables */

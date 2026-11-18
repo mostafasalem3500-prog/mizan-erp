@@ -247,6 +247,7 @@ export async function closeProject(t: Db, companyId: string, user: string, id: s
   let finalVoucher: any = null;
   if (b.finalDisbursement && num(b.finalDisbursement.amount) > 0) {
     const fd = b.finalDisbursement;
+    if (!b.force) { const { checkDirectLimit } = require("./assoc3") as typeof import("./assoc3"); await checkDirectLimit(t, companyId, { amount: fd.amount }); }
     if (num(fd.amount) > fin.balance + 0.004 && !b.force) throw conflict(`مبلغ الصرف النهائي ${r2(num(fd.amount))} أكبر من رصيد المشروع ${fin.balance}`);
     finalVoucher = await createDisbursement(t, companyId, user, { ...fd, date: d, projectId: id, reason: fd.reason || `الصرف النهائي لمشروع ${pr.name}` });
     fin = await projectFinal(t, companyId, id);

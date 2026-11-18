@@ -8,6 +8,7 @@ import { previewEntry } from "./ops";
 import * as ch from "../services/charity";
 import * as as from "../services/assoc";
 import * as a2 from "../services/assoc2";
+import * as a3 from "../services/assoc3";
 import { AppError } from "../lib/core";
 
 export const assocRoutes = Router();
@@ -18,9 +19,9 @@ const R = "payments.read", W = "payments.write";
 assocRoutes.post("/charity/receipts/preview-entry", perm(W), h(async (req) => previewEntry((t) => ch.createReceipt(t, cid(req), actor(req), req.body || {}))));
 // a disbursement on a project must fit the project's budget (or carry a recorded override); closed projects take none
 const withBudget = (b: any, check: any) => (check?.override ? { ...b, notes: `${b.notes ? b.notes + " " : ""}[تجاوز ميزانية المشروع: ${b.overBudgetReason}]` } : b);
-assocRoutes.post("/charity/disbursements/preview-entry", perm(W), h(async (req) => previewEntry(async (t) => { const b = req.body || {}; return ch.createDisbursement(t, cid(req), actor(req), withBudget(b, await a2.checkProjectBudget(t, cid(req), b))); })));
+assocRoutes.post("/charity/disbursements/preview-entry", perm(W), h(async (req) => previewEntry(async (t) => { const b = req.body || {}; await a3.checkDirectLimit(t, cid(req), b); return ch.createDisbursement(t, cid(req), actor(req), withBudget(b, await a2.checkProjectBudget(t, cid(req), b))); })));
 assocRoutes.post("/charity/disbursements", perm(W), h(async (req) => {
-  const r = await tx(async (t) => { const b = req.body || {}; const chk = await a2.checkProjectBudget(t, cid(req), b); return { ...(await ch.createDisbursement(t, cid(req), actor(req), withBudget(b, chk))), budget: chk }; });
+  const r = await tx(async (t) => { const b = req.body || {}; await a3.checkDirectLimit(t, cid(req), b); const chk = await a2.checkProjectBudget(t, cid(req), b); return { ...(await ch.createDisbursement(t, cid(req), actor(req), withBudget(b, chk))), budget: chk }; });
   await audit(req, "CREATE", "charity_disbursement", r.id, { number: r.number, amount: r.amount, ...(r.budget?.override ? { overBudget: r.budget.override } : {}) });
   return r;
 }));
@@ -78,3 +79,23 @@ assocRoutes.get("/backups/:id/download", perm("settings.read"), h(async (req, re
   res.setHeader("Content-Disposition", `attachment; filename="${f.name}"`);
   res.send(f.data);
 }));
+
+// ─── authority matrix, governance, grants, non-profit statements ───────────
+assocRoutes.get("/charity/authority", perm(R), h(async (req) => tx((t) => a3.getAuthority(t, cid(req)))));
+assocRoutes.put("/charity/authority", perm("settings.write"), h(async (req) => { if (!owner(req)) throw new AppError(403, "لائحة الصلاحيات يعدّلها المالك أو المدير فقط", "FORBIDDEN"); const r = await tx((t) => a3.saveAuthority(t, cid(req), req.body || {})); await audit(req, "UPDATE", "authority_matrix", cid(req), r); return r; }));
+assocRoutes.post("/charity/requests/:id/approve", perm("accounting.write"), h(async (req) => { const r = await tx((t) => a3.approveRequest(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, r.status === "APPROVED" ? "APPROVE" : "APPROVE_PARTIAL", "charity_request", p(req).id, { level: r.level?.title, approvals: (r.approvals || []).length }); return r; }));
+
+assocRoutes.get("/charity/meetings", perm(R), h(async (req) => a3.listMeetings(db, cid(req))));
+assocRoutes.post("/charity/meetings", perm(W), h(async (req) => { const r = await tx((t) => a3.saveMeeting(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "assoc_meeting", r.id, { number: r.number }); return r; }));
+assocRoutes.put("/charity/meetings/:id", perm(W), h(async (req) => { if (req.body?.reopen && !owner(req)) throw new AppError(403, "إعادة فتح محضر معتمد للمالك أو المدير فقط", "FORBIDDEN"); const r = await tx((t) => a3.saveMeeting(t, cid(req), actor(req), req.body || {}, p(req).id)); await audit(req, req.body?.status === "APPROVED" ? "APPROVE" : "UPDATE", "assoc_meeting", p(req).id); return r; }));
+assocRoutes.delete("/charity/meetings/:id", perm(W), h(async (req) => { const m = await db.one(`SELECT status FROM assoc_meetings WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الاجتماع غير موجود"); if (m.status === "APPROVED") throw new AppError(409, "المحضر معتمد — لا يُحذف", "CONFLICT"); await db.exec(`DELETE FROM assoc_meetings WHERE id=$1`, [p(req).id]); await audit(req, "DELETE", "assoc_meeting", p(req).id); return { ok: true }; }));
+assocRoutes.get("/charity/decisions", perm(R), h(async (req) => a3.listDecisions(db, cid(req), req.query)));
+assocRoutes.post("/charity/decisions", perm(W), h(async (req) => { const r = await tx((t) => a3.saveDecision(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "assoc_decision", r.id, { number: r.number }); return r; }));
+assocRoutes.put("/charity/decisions/:id", perm(W), h(async (req) => { const r = await tx((t) => a3.saveDecision(t, cid(req), actor(req), req.body || {}, p(req).id)); await audit(req, "UPDATE", "assoc_decision", p(req).id, { status: r.status }); return r; }));
+
+assocRoutes.get("/charity/grants", perm(R), h(async (req) => a3.listGrants(db, cid(req))));
+assocRoutes.get("/charity/grants/:id", perm(R), h(async (req) => a3.grantDetail(db, cid(req), p(req).id)));
+assocRoutes.post("/charity/grants", perm(W), h(async (req) => { const r = await tx((t) => a3.saveGrant(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "assoc_grant", r.id, { number: r.number, amount: r.amount }); return r; }));
+assocRoutes.put("/charity/grants/:id", perm(W), h(async (req) => { const r = await tx((t) => a3.saveGrant(t, cid(req), actor(req), req.body || {}, p(req).id)); await audit(req, "UPDATE", "assoc_grant", p(req).id); return r; }));
+
+assocRoutes.get("/charity/npo-statements", perm("reports.read"), h(async (req) => tx((t) => a3.npoStatements(t, cid(req), req.query))));

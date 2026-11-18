@@ -222,7 +222,7 @@ export async function listReceipts(t: Db, companyId: string, q: any) {
   if (q.partnerId) add("r.partner_id = ?", q.partnerId);
   if (q.status) add("r.status = ?", q.status);
   return t.rows(
-    `SELECT r.*, pr.name project_name, ca.name_ar cash_account_name, ra.name_ar revenue_account_name, je.number journal_number,
+    `SELECT r.*, pr.name project_name, ca.name_ar cash_account_name, ra.name_ar revenue_account_name, je.number journal_number, (SELECT number FROM assoc_grants g WHERE g.id=r.grant_id) grant_number,
        (SELECT COUNT(*) FROM attachments x WHERE x.company_id=r.company_id AND x.entity='ch_rcpt' AND x.entity_id=r.id)::int attach_count
      FROM charity_receipts r LEFT JOIN charity_projects pr ON pr.id=r.project_id JOIN accounts ca ON ca.id=r.cash_account_id JOIN accounts ra ON ra.id=r.revenue_account_id
      LEFT JOIN journal_entries je ON je.id=r.journal_id
@@ -239,6 +239,9 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
   const p = await partner(t, companyId, b.partnerId);
   const payerName = String(b.payerName || p?.name || "").trim();
   if (!payerName) throw bad("اسم الدافع / المتبرع مطلوب");
+  const grant = b.grantId ? await t.one(`SELECT * FROM assoc_grants WHERE id=$1 AND company_id=$2`, [b.grantId, companyId], "المنحة غير موجودة") : null;
+  if (grant && grant.status !== "ACTIVE") throw conflict(`المنحة ${grant.number} مُقفلة`);
+  if (grant && !b.projectId && grant.projectId) b = { ...b, projectId: grant.projectId };
   const pr = await project(t, companyId, b.projectId);
   if (pr && pr.status === "CLOSED") throw conflict(`المشروع «${pr.name}» مُقفل بعد الصرف النهائي — لا تُسجَّل عليه حركات جديدة`);
   const cash = await acct(t, companyId, b.cashAccountId, method === "CASH" ? "CASH" : "BANK", "حساب الصندوق / البنك", { cash: true });
@@ -255,6 +258,7 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
     notes: b.notes || null, isDemo: !!b.isDemo, createdBy: user,
     sponsorshipId: b.sponsorshipId || null, periodsCount: b.periodsCount || null, periodLabel: b.periodLabel || null,
     feeYear: source === "MEMBERSHIP" && b.feeYear ? Math.floor(num(b.feeYear)) || null : null,
+    grantId: grant?.id || null,
   });
   const je = await post(t, companyId, {
     date: d, type: "DONATION", sourceType: "CHARITY_RECEIPT", sourceId: row.id, reference: number, memo, createdBy: user, isDemo: !!b.isDemo,

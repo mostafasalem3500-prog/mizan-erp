@@ -17,8 +17,8 @@ export const METHOD: Record<string, string> = { CASH: "نقدي", TRANSFER: "ت�
 export const PAYER: Record<string, string> = { INDIVIDUAL: "فرد", ENTITY: "جهة مانحة", COMPANY: "شركة", OTHER: "أخرى" };
 export const CAPACITY: Record<string, string> = { BENEFICIARY: "مستفيد", VOLUNTEER: "متطوع", EMPLOYEE: "موظف", SUPPLIER: "مورد", OTHER: "أخرى" };
 export const KIND: Record<string, string> = { CASH: "نقدي", CHEQUE: "شيك", TRANSFER: "تحويل بنكي" };
-export const REQ_ST: Record<string, string> = { DRAFT: "مسودة", SUBMITTED: "مقدَّم", REVIEWED: "تمت المراجعة المالية", APPROVED: "معتمد — بانتظار الصرف", REJECTED: "مرفوض", PAID: "تم الصرف" };
-const REQ_COLOR: Record<string, string> = { DRAFT: "gray", SUBMITTED: "amber", REVIEWED: "blue", APPROVED: "teal", REJECTED: "red", PAID: "green" };
+export const REQ_ST: Record<string, string> = { DRAFT: "مسودة", SUBMITTED: "مقدَّم", REVIEWED: "تمت المراجعة المالية", PARTIAL: "اعتماد جزئي", APPROVED: "معتمد — بانتظار الصرف", REJECTED: "مرفوض", PAID: "تم الصرف" };
+const REQ_COLOR: Record<string, string> = { PARTIAL: "amber", DRAFT: "gray", SUBMITTED: "amber", REVIEWED: "blue", APPROVED: "teal", REJECTED: "red", PAID: "green" };
 const DOC_ST: Record<string, string> = { POSTED: "مرحّل", CANCELLED: "ملغى", DRAFT: "مسودة" };
 const PROJ_KIND: Record<string, string> = { PROGRAM: "برنامج", PROJECT: "مشروع", CAMPAIGN: "حملة", ENDOWMENT: "وقف" };
 const ATTACH = ["عرض سعر", "فاتورة", "عقد / اتفاقية", "قرار / محضر اعتماد", "صورة هوية المستفيد", "دراسة حالة", "أخرى"];
@@ -72,6 +72,10 @@ export function CharityDashboard() {
     { to: "/charity/daily", ic: "📥", t: "تحصيل اليوم", s: "إقفال الصندوق اليومي" },
     { to: "/charity/blank-forms", ic: "📄", t: "نماذج فارغة", s: "طباعة للتعبئة اليدوية" },
     { to: "/charity/templates", ic: "🖨", t: "القوالب A4", s: "تخصيص النماذج" },
+    { to: "/charity/closing", ic: "🔒", t: "التقفيل", s: "يومي، أسبوعي، شهري" },
+    { to: "/charity/governance", ic: "🏛", t: "الاجتماعات والقرارات", s: "المحاضر والمتابعة" },
+    { to: "/charity/grants", ic: "🤝", t: "المنح", s: "الدفعات وتقارير المانح" },
+    { to: "/charity/members", ic: "👥", t: "الأعضاء", s: "الاشتراكات السنوية" },
   ];
   return (
     <div>
@@ -189,6 +193,7 @@ export function ReceiptsPage() {
 
 function ReceiptModal({ onClose }: { onClose: (saved?: any) => void }) {
   const { projects } = useCharity();
+  const grants = useFetch<any[]>("/charity/grants");
   const { run, busy } = useAction();
   const [donor, setDonor] = useState<any>(null);
   const [cash, setCash] = useState<any>(null);
@@ -213,6 +218,7 @@ function ReceiptModal({ onClose }: { onClose: (saved?: any) => void }) {
         <Field label="صفة الدافع"><MapSelect map={PAYER} value={f.payerType} onChange={set("payerType")} /></Field>
         <Field label="مصدر المبلغ"><MapSelect map={SOURCE} value={f.source} onChange={set("source")} /></Field>
         <Field label="المشروع / البرنامج"><ProjectSelect value={f.projectId} onChange={set("projectId")} /></Field>
+        <Field label="ضمن منحة / اتفاقية" hint="اختياري — دفعة من منحة جهة مانحة"><select className="input" value={f.grantId || ""} onChange={(e) => { const g = (grants.data || []).find((x: any) => x.id === e.target.value); setF({ ...f, grantId: e.target.value, ...(g && g.projectId && !f.projectId ? { projectId: g.projectId } : {}), ...(g && !f.payerName ? { payerName: g.grantorName, payerType: "ENTITY", source: "SUPPORT" } : {}) }); }}><option value="">—</option>{(grants.data || []).filter((g: any) => g.status === "ACTIVE").map((g: any) => <option key={g.id} value={g.id}>{g.number} — {g.title} (متبقٍ {money(g.remaining)})</option>)}</select></Field>
         <Field label="الجوال"><Input value={f.payerPhone} onChange={set("payerPhone")} dir="ltr" /></Field>
         <Field label="الغرض / وذلك عن" span2><Input value={f.purpose} onChange={set("purpose")} /></Field>
         <Field label=" "><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={f.restricted || !!proj?.restricted} disabled={!!proj?.restricted} onChange={set("restricted")} />تبرع مقيد بغرض محدد</label></Field>
@@ -402,6 +408,7 @@ export function RequestsPage() {
   const s = useSorted(rows);
   const act = (r: any, a: string, note?: string) => run(async () => { await api(`/charity/requests/${r.id}/${a}`, { body: { note } }); reload(); }, a === "approve" ? "تم اعتماد الطلب" : a === "reject" ? "تم رفض الطلب" : "تم");
   const steps = ["SUBMITTED", "REVIEWED", "APPROVED", "PAID"];
+  const [appr, setAppr] = useState<any>(null);
   return (
     <div className="card">
       <div className="card-h">
@@ -427,14 +434,14 @@ export function RequestsPage() {
               <td>{r.requester}<div className="small muted">{r.department}</div></td>
               <td><b>{r.beneficiaryName}</b><div className="small muted">{r.purpose}{r.projectName ? " · " + r.projectName : ""}</div></td>
               <td className="n"><b><Money v={r.amount} /></b><div className="small muted">{METHOD[r.method]}</div></td>
-              <td><div className="ch-steps">{r.status === "REJECTED" ? <span className="no">مرفوض{r.decisionNote ? ": " + r.decisionNote : ""}</span> : r.status === "DRAFT" ? <span>مسودة</span> : steps.map((x, i) => <span key={x} className={steps.indexOf(r.status) >= i ? "on" : ""}>{["مقدَّم", "مراجعة", "معتمد", "مصروف"][i]}</span>)}</div>{r.disbursementNumber && <div className="small muted num">{r.disbursementNumber}</div>}</td>
+              <td><div className="ch-steps">{r.status === "REJECTED" ? <span className="no">مرفوض{r.decisionNote ? ": " + r.decisionNote : ""}</span> : r.status === "DRAFT" ? <span>مسودة</span> : steps.map((x, i) => <span key={x} className={steps.indexOf(r.status === "PARTIAL" ? "REVIEWED" : r.status) >= i ? "on" : ""}>{["مقدَّم", "مراجعة", "معتمد", "مصروف"][i]}</span>)}</div>{r.status === "PARTIAL" && <div className="small" style={{ color: "var(--accent)" }}>اعتماد جزئي: {(r.approvals || []).map((a: any) => a.by).join("، ")}</div>}{r.disbursementNumber && <div className="small muted num">{r.disbursementNumber}</div>}</td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨</button>
                 <AttachIcon entity="ch_req" row={r} onChanged={reload} />
                 {can("payments.write") && ["DRAFT", "SUBMITTED", "REJECTED"].includes(r.status) && <button className="btn sm" onClick={() => setEdit(r)}>تعديل</button>}
                 {can("payments.write") && ["SUBMITTED", "REVIEWED"].includes(r.status) && <button className="btn sm" onClick={() => setReview(r)}>مراجعة مالية</button>}
-                {can("accounting.write") && ["SUBMITTED", "REVIEWED"].includes(r.status) && <button className="btn sm primary" disabled={busy} onClick={() => act(r, "approve", window.prompt("ملاحظات الاعتماد (اختياري)") || undefined)}>اعتماد</button>}
-                {can("accounting.write") && ["SUBMITTED", "REVIEWED", "APPROVED"].includes(r.status) && !r.disbursementId && <button className="btn sm ghost" disabled={busy} onClick={() => { const n = window.prompt("سبب الرفض"); if (n) act(r, "reject", n); }}>رفض</button>}
+                {can("accounting.write") && ["SUBMITTED", "REVIEWED", "PARTIAL"].includes(r.status) && <button className="btn sm primary" disabled={busy} onClick={() => setAppr(r)}>اعتماد{r.approvals?.length ? ` (${r.approvals.length})` : ""}</button>}
+                {can("accounting.write") && ["SUBMITTED", "REVIEWED", "PARTIAL", "APPROVED"].includes(r.status) && !r.disbursementId && <button className="btn sm ghost" disabled={busy} onClick={() => { const n = window.prompt("سبب الرفض"); if (n) act(r, "reject", n); }}>رفض</button>}
                 {can("payments.write") && r.status === "APPROVED" && <button className="btn sm primary" onClick={() => nav(`/charity/expenses?request=${r.id}`)}>صرف ←</button>}
                 {can("payments.write") && ["DRAFT", "SUBMITTED", "REJECTED"].includes(r.status) && <button className="btn sm ghost" disabled={busy} onClick={() => confirmDlg(`حذف الطلب ${r.number}؟`) && run(async () => { await api(`/charity/requests/${r.id}`, { method: "DELETE" }); reload(); })}>حذف</button>}
               </td>
@@ -444,6 +451,7 @@ export function RequestsPage() {
       )}
       {edit && <RequestModal init={edit} onClose={(saved) => { setEdit(null); if (qs.get("new")) nav("/charity/requests", { replace: true }); if (saved) reload(); }} />}
       {review && <ReviewModal r={review} onClose={(ok) => { setReview(null); if (ok) reload(); }} />}
+      {appr && <ApproveModal r={appr} onClose={(ok) => { setAppr(null); if (ok) reload(); }} />}
       {pr && <PrintModal tplKey="request" data={pr.blank ? {} : fromRequest(pr)} settings={settings} onClose={() => setPr(null)} />}
     </div>
   );
@@ -961,4 +969,24 @@ export function ActivitiesPage() {
       </>}
     </div>
   );
+}
+
+/** One approval under the authority matrix: shows the level the amount falls in, who already approved, and the board decision when the level needs one. */
+function ApproveModal({ r, onClose }: { r: any; onClose: (ok?: boolean) => void }) {
+  const auth = useFetch<any>("/charity/authority");
+  const decs = useFetch<any[]>("/charity/decisions");
+  const { run, busy } = useAction();
+  const toast = useToast();
+  const [note, setNote] = useState("");
+  const [dec, setDec] = useState(r.decisionId || "");
+  const c = auth.data;
+  const lv = c?.levels?.find((l: any) => l.upTo === null || Number(r.amount) <= Number(l.upTo) + 0.004);
+  const done = (r.approvals || []).length;
+  return <Modal title={`اعتماد طلب الصرف ${r.number}`} narrow onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !c} onClick={() => run(async () => { const x = await api(`/charity/requests/${r.id}/approve`, { body: { note: note || undefined, decisionId: dec || undefined } }); if (x.status === "PARTIAL") toast(`سُجّل اعتمادك — يبقى: ${x.missing}`); onClose(true); }, undefined)}>اعتماد</button></>}>
+    {!c ? <Loading /> : <>
+      <div className="alert info small mb">المبلغ <b><Money v={r.amount} /></b> — {c.enabled ? <>المستوى: <b>{lv?.title}</b> · يلزم {lv?.approvals} {lv?.approvals > 1 ? "معتمدين مختلفين" : "معتمد"}{lv?.decision ? " + قرار مجلس الإدارة" : ""}{done ? ` · اعتمده حتى الآن: ${(r.approvals || []).map((a: any) => a.by).join("، ")}` : ""}</> : "لائحة الصلاحيات غير مفعّلة: اعتماد واحد يكفي"}</div>
+      {c.enabled && lv?.decision && <Field label="قرار مجلس الإدارة"><select className="input" value={dec} onChange={(e) => setDec(e.target.value)}><option value="">— اختر القرار —</option>{(decs.data || []).filter((d: any) => d.status !== "CANCELLED").map((d: any) => <option key={d.id} value={d.id}>{d.number} — {String(d.text).slice(0, 60)}{d.amount ? ` (${money(d.amount)})` : ""}</option>)}</select></Field>}
+      <Field label="ملاحظات الاعتماد"><Input value={note} onChange={(e: any) => setNote(e.target.value)} /></Field>
+    </>}
+  </Modal>;
 }

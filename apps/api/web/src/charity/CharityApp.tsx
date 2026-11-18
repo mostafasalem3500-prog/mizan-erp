@@ -15,6 +15,7 @@ import { ZakatFundPage } from "./pages4";
 import { CharityIndicatorsPage } from "../pages/Round25";
 import { MembersPage, SharesPage, VouchersPage } from "./pages5";
 import { ClosingPage, ClosingBell, DailyArchivePage, BackupsPage } from "./pages6";
+import { GovernancePage, GrantsPage, NpoStatementsPage } from "./pages7";
 import { CFG, BASE_TITLE } from "../shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
@@ -44,6 +45,8 @@ export const CH_NAV: any[] = [
   { group: "الأعضاء والجمعية العمومية" },
   { to: "/charity/members", ic: "👥", label: "الأعضاء والاشتراكات", coopLabel: "الأعضاء والمساهمون", perm: "partners.read" },
   { to: "/charity/shares", ic: "📈", label: "الأسهم وتوزيع الفائض", perm: "payments.read", coopOnly: true },
+  { to: "/charity/governance", ic: "🏛", label: "الحوكمة: الاجتماعات والقرارات والصلاحيات", perm: "payments.read" },
+  { to: "/charity/grants", ic: "🤝", label: "المنح واتفاقيات الجهات المانحة", perm: "payments.read" },
   { group: "المصروفات" },
   { to: "/charity/expenses", ic: "💸", label: "المصروفات (سندات الصرف)", perm: "payments.read" },
   { to: "/charity/requests", ic: "📋", label: "طلبات الصرف", perm: "payments.read" },
@@ -52,6 +55,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/zakat", ic: "🕌", label: "صندوق الزكاة ومصارفها", perm: "reports.read", nonProfit: true },
   { to: "/charity/indicators", ic: "📊", label: "مؤشرات الأداء والحوكمة", perm: "reports.read" },
   { to: "/charity/final-accounts", ic: "📚", label: "القوائم المالية الختامية", perm: "reports.read" },
+  { to: "/charity/npo-statements", ic: "⚖", label: "قائمة الأنشطة وصافي الأصول (المقيدة وغير المقيدة)", perm: "reports.read", nonProfit: true },
   { to: "/charity/volunteers", ic: "🙋", label: "المتطوعون وساعات التطوع", perm: "payments.read" },
   { to: "/charity/payroll", ic: "👔", label: "الرواتب", perm: "accounting.read", companyOnly: true },
   { group: "المشتريات والعهد" },
@@ -154,6 +158,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/shares" element={<SharesPage />} />
                   <Route path="/charity/vouchers" element={<VouchersPage />} />
                   <Route path="/charity/closing" element={<ClosingPage />} />
+                  <Route path="/charity/governance" element={<GovernancePage />} />
+                  <Route path="/charity/grants" element={<GrantsPage />} />
+                  <Route path="/charity/npo-statements" element={<NpoStatementsPage />} />
                   <Route path="/charity/daily-archive" element={<DailyArchivePage />} />
                   <Route path="/charity/backups" element={<BackupsPage />} />
                   <Route path="*" element={<Navigate to="/charity" />} />
