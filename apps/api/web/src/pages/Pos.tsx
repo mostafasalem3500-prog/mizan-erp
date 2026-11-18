@@ -7,9 +7,12 @@ import { Thermal, QuickPartner } from "./Documents";
 import { RestaurantHome, OrderBar, KitchenTicket, PreBill, MoveModal, SplitModal, NoteModal } from "./Restaurant";
 import { ProductImagesModal } from "./ProductImages";
 import { applyPromotions, combinePct } from "../shared/promoEngine";
+import { ModifierPicker, groupsOf, type Mod } from "./Round338";
 
-type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; note?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null };
-const lineKey = (l: { product: any; uom?: any }) => l.product.id + ":" + (l.uom?.id || "");
+// unitPrice includes the chosen add-ons (modsPrice); the server is sent the price before them and the option ids
+type CartLine = { product: any; qty: number; unitPrice: number; discountPct: number; note?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null } | null; mods?: Mod[]; modsPrice?: number };
+const lineKey = (l: { product: any; uom?: any; mods?: Mod[] }) => l.product.id + ":" + (l.uom?.id || "") + (l.mods?.length ? ":" + l.mods.map((m) => m.optionId).sort().join("+") : "");
+const modsText = (l: CartLine) => (l.mods?.length ? l.mods.map((m) => m.name + (m.price ? ` +${m.price}` : "")).join("، ") : "");
 const EMOJI: Record<string, string> = { "مواد غذائية": "🍚", "مشروبات": "🥤", "منظفات": "🧴", "قرطاسية": "📎", "إلكترونيات": "🔌", "خدمات": "🛠" };
 
 export function PosPage() {
@@ -55,6 +58,10 @@ export function PosPage() {
   const loyF = useFetch<any>("/loyalty/settings");
   const cached = (k: string, v: any) => { if (v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} return v; } try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
   const promos: any[] = cached("mz_pos_promos", promosF.data) || [];
+  const modsF = useFetch<any[]>("/modifiers/live");
+  const modGroups: any[] = cached("mz_pos_mods", modsF.data) || [];
+  const [picking, setPicking] = useState<{ p: any; uom: any } | null>(null);
+  const [waiveSvc, setWaiveSvc] = useState(false);
   const loyalty: any = cached("mz_pos_loyalty", loyF.data);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 60000); return () => clearInterval(iv); }, []);
@@ -78,10 +85,12 @@ export function PosPage() {
     const items = (pl.items || []).filter((i: any) => i.productId === p.id && Number(i.minQty) <= qty).sort((a: any, b: any) => Number(a.minQty) - Number(b.minQty));
     return items.length ? Number(items[items.length - 1].price) : Number(p.salePrice);
   };
-  useEffect(() => { setCart((c) => c.map((l) => ({ ...l, unitPrice: priceFor(l.product, l.qty, priceList, l.uom) }))); }, [priceList]);
-  const add = (p: any, uom: any = null) => setCart((c) => { const k = p.id + ":" + (uom?.id || ""); const i = c.findIndex((l) => lineKey(l) === k); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1, priceList, uom) }; return n; } return [...c, { product: p, uom, qty: 1, unitPrice: priceFor(p, 1, priceList, uom), discountPct: 0 }]; });
-  const setUom = (key: string, uomId: string) => setCart((c) => c.map((l) => { if (lineKey(l) !== key) return l; const u = (l.product.uoms || []).find((x: any) => x.id === uomId) || null; return { ...l, uom: u, unitPrice: priceFor(l.product, l.qty, priceList, u) }; }));
-  const setQty = (key: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => lineKey(l) !== key) : c.map((l) => (lineKey(l) === key ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" && !l.uom ? priceFor(l.product, qty) : l.unitPrice } : l))));
+  useEffect(() => { setCart((c) => c.map((l) => ({ ...l, unitPrice: priceFor(l.product, l.qty, priceList, l.uom) + (l.modsPrice || 0) }))); }, [priceList]);
+  const addLine = (p: any, uom: any = null, mods: Mod[] = []) => setCart((c) => { const mp = Math.round(mods.reduce((a, m) => a + m.price, 0) * 100) / 100; const k = lineKey({ product: p, uom, mods }); const i = c.findIndex((l) => lineKey(l) === k); if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: priceFor(p, n[i].qty + 1, priceList, uom) + mp }; return n; } return [...c, { product: p, uom, qty: 1, unitPrice: priceFor(p, 1, priceList, uom) + mp, discountPct: 0, mods, modsPrice: mp }]; });
+  // a product with add-on groups opens its picker first (size, extras…)
+  const add = (p: any, uom: any = null) => (groupsOf(modGroups, p).length ? setPicking({ p, uom }) : addLine(p, uom));
+  const setUom = (key: string, uomId: string) => setCart((c) => c.map((l) => { if (lineKey(l) !== key) return l; const u = (l.product.uoms || []).find((x: any) => x.id === uomId) || null; return { ...l, uom: u, unitPrice: priceFor(l.product, l.qty, priceList, u) + (l.modsPrice || 0) }; }));
+  const setQty = (key: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => lineKey(l) !== key) : c.map((l) => (lineKey(l) === key ? { ...l, qty, unitPrice: priceList?.kind === "FIXED" && !l.uom ? priceFor(l.product, qty) + (l.modsPrice || 0) : l.unitPrice } : l))));
   const hits = useMemo(() => applyPromotions(promos, cart.map((l) => ({ productId: l.product.id, categoryId: l.product.categoryId, qty: l.qty, unitPrice: l.unitPrice })), new Date(clock), "POS"), [cart, promos, clock]);
   const hitOf = (l: CartLine) => hits[cart.indexOf(l)] || null;
   const lineDisc = (l: CartLine) => combinePct(l.discountPct, hitOf(l)?.pct || 0, ticketDisc);
@@ -96,8 +105,14 @@ export function PosPage() {
       if (incl && rate) { n = gross / (1 + rate / 100); v = gross - n; }
       net += Math.round(n * 100) / 100; vat += Math.round(v * 100) / 100;
     }
-    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0), promo: Math.round(promo * 100) / 100 };
-  }, [cart, ticketDisc, incl, hits]);
+    // service charge of a restaurant order: a % of the net of the goods, taxable (the server adds the same line)
+    let service = 0;
+    const svc = restF.data?.settings?.serviceCharge;
+    if (order && svc && svc.pct > 0 && svc.types.includes(order.type) && (!svc.minGuests || Number(order.guests) >= svc.minGuests) && !waiveSvc && cart.length) {
+      service = Math.round(net * svc.pct) / 100; const sv = Math.round(service * CFG.vatRate) / 100; net += service; vat += sv;
+    }
+    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, count: cart.reduce((a, l) => a + l.qty, 0), promo: Math.round(promo * 100) / 100, service, serviceLabel: svc ? `${svc.label} ${svc.pct}%` : "", serviceOn: !!(order && svc && svc.pct > 0 && svc.types.includes(order.type) && (!svc.minGuests || Number(order.guests) >= svc.minGuests)) };
+  }, [cart, ticketDisc, incl, hits, order, waiveSvc, restF.data]);
 
   // ── offline: queued sales are replayed in order with an idempotent clientRef ──
   const syncQueue = async () => {
@@ -134,7 +149,7 @@ export function PosPage() {
   }, []);
   /** builds a local invoice-like object so the receipt can be shown/printed while offline */
   const localReceipt = (body: any, lines: CartLine[], tenders: any[]) => {
-    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? CFG.vatRate : 0; const disc = lineDisc(l); const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
+    const rows = lines.map((l, i) => { const rate = l.product.taxCode === "S" ? CFG.vatRate : 0; const disc = lineDisc(l); const gross = l.qty * l.unitPrice * (1 - disc / 100); let net = gross, vat = gross * rate / 100; if (incl && rate) { net = gross / 1.15; vat = gross - net; } return { id: String(i), description: l.product.name + (l.uom ? ` — ${l.uom.name}` : "") + (l.mods?.length ? ` (${modsText(l)})` : ""), qty: l.qty, unitPrice: l.unitPrice, netAmount: Math.round(net * 100) / 100, vatAmount: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100, taxRate: rate }; });
     const taxable = rows.reduce((a, r) => a + r.netAmount, 0), vatTotal = rows.reduce((a, r) => a + r.vatAmount, 0);
     return { id: body.clientRef, offline: true, number: `OFFLINE-${body.clientRef.slice(0, 8).toUpperCase()}`, kind: "INVOICE", direction: "SALE", invoiceType: "SIMPLIFIED", issuedAt: body.issuedAt, partnerName: partner?.name || "عميل نقدي", createdBy: me.user.fullName, lines: rows, taxable, vatTotal, total: taxable + vatTotal, discountTotal: 0, tenders: tenders.map((t) => ({ ...t, amount: t.amount ?? Math.max(0, taxable + vatTotal - tenders.reduce((x: number, y: any) => x + (y.amount ?? 0), 0)) })), company: { nameAr: me.company.nameAr, nameEn: me.company.nameEn, vatNumber: me.company.vatNumber, phone: me.company.phone, street: me.company.street, city: me.company.city, logo: me.company.logo, invoiceFooter: me.company.invoiceFooter }, cashChange: 0 };
   };
@@ -159,9 +174,9 @@ export function PosPage() {
   };
   const hold = () => { if (!cart.length) return; setHeld((h) => [...h, { id: Date.now(), at: new Date().toISOString(), cart, partner }]); setCart([]); setPartner(null); toast("تم تعليق الطلب", "ok"); };
   const resume = (h: any) => { if (cart.length && !confirmDlg("استبدال السلة الحالية؟")) return; setCart(h.cart); setPartner(h.partner); setHeld((x) => x.filter((y) => y.id !== h.id)); };
-  const orderLines = (c: CartLine[]) => c.map((l) => ({ key: lineKey(l), productId: l.product.id, name: l.product.name, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null, uomName: l.uom?.name || null, note: l.note || "" }));
+  const orderLines = (c: CartLine[]) => c.map((l) => ({ key: lineKey(l), productId: l.product.id, name: l.product.name, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null, uomName: l.uom?.name || null, note: l.note || "", mods: (l.mods || []).map((m) => ({ optionId: m.optionId, name: m.name, price: m.price })) }));
   const sigOf = (c: CartLine[]) => JSON.stringify(orderLines(c));
-  const cartOf = (o: any): CartLine[] => (o.lines || []).map((l: any) => { const p = (products.data || []).find((x: any) => x.id === l.productId); if (!p) return null; const u = l.uomId ? (p.uoms || []).find((x: any) => x.id === l.uomId) || null : null; return { product: p, uom: u, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct) || 0, note: l.note || "" }; }).filter(Boolean) as CartLine[];
+  const cartOf = (o: any): CartLine[] => (o.lines || []).map((l: any) => { const p = (products.data || []).find((x: any) => x.id === l.productId); if (!p) return null; const u = l.uomId ? (p.uoms || []).find((x: any) => x.id === l.uomId) || null : null; const mods: Mod[] = (l.mods || []).map((m: any) => ({ groupId: "", optionId: m.optionId, name: m.name, price: Number(m.price) })); return { product: p, uom: u, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct) || 0, note: l.note || "", mods, modsPrice: Math.round(mods.reduce((a, m) => a + m.price, 0) * 100) / 100 }; }).filter(Boolean) as CartLine[];
   const openOrder = (o: any) => { const c = cartOf(o); setOrder(o); setCart(c); setSavedSig(sigOf(c)); setPartner(null); setTicketDisc(0); setSplitting(false); };
   const saveOrder = async (c = cart) => { if (!order || splitting) return order; const o = await api(`/pos/orders/${order.id}`, { method: "PUT", body: { lines: orderLines(c), partnerId: partner?.id || null } }); setSavedSig(sigOf(c)); setOrder(o); return o; };
   const leaveOrder = () => run(async () => { if (!splitting) await saveOrder(); setOrder(null); setCart([]); setPartner(null); setSplitting(false); restF.reload(); });
@@ -248,7 +263,7 @@ export function PosPage() {
         <div className="cart-lines">
           {cart.map((l) => (
             <div className="line" key={lineKey(l)}>
-              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>{hitOf(l) && <span className="promo-tag" title="عرض مطبّق تلقائياً">🎁 {hitOf(l)!.name} −{Math.round(hitOf(l)!.pct * 10) / 10}%</span>}{l.note && <div className="line-note">← {l.note}</div>}
+              <div><b>{l.product.name}</b>{l.uom && <span className="badge blue" style={{ marginInlineStart: 6 }}>{l.uom.name} ×{Number(l.uom.factor)}</span>}<div className="small muted num">{money(l.unitPrice)} × {l.qty}{l.discountPct ? ` − ${l.discountPct}%` : ""}</div>{l.mods?.length ? <div className="line-mods" data-line-mods>＋ {modsText(l)}</div> : null}{hitOf(l) && <span className="promo-tag" title="عرض مطبّق تلقائياً">🎁 {hitOf(l)!.name} −{Math.round(hitOf(l)!.pct * 10) / 10}%</span>}{l.note && <div className="line-note">← {l.note}</div>}
                 {l.product.uoms?.length > 0 && <select className="input" style={{ padding: "2px 6px", fontSize: 12, width: "auto", marginTop: 2 }} value={l.uom?.id || ""} onChange={(e) => setUom(lineKey(l), e.target.value)}><option value="">{l.product.unit || "حبة"}</option>{l.product.uoms.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}</select>}</div>
               <div className="row" style={{ gap: 6 }}>
                 <div className="qty"><button onClick={() => setQty(lineKey(l), l.qty - 1)}>−</button><input value={l.qty} onChange={(e) => setQty(lineKey(l), Number(e.target.value) || 0)} /><button onClick={() => setQty(lineKey(l), l.qty + 1)}>＋</button></div>
@@ -263,6 +278,7 @@ export function PosPage() {
           <div className="t"><span>الأصناف</span><span className="num">{totals.count}</span></div>
           <div className="t"><span>قبل الضريبة</span><span className="num">{money(totals.net)}</span></div>
           {totals.promo > 0 && <div className="t" style={{ color: "var(--accent)" }}><span>🎁 خصم العروض</span><span className="num">−{money(totals.promo)}</span></div>}
+          {totals.serviceOn && <div className="t" data-service-line><span>{totals.serviceLabel} <label className="small muted" style={{ cursor: "pointer" }}><input type="checkbox" checked={waiveSvc} onChange={(e) => setWaiveSvc(e.target.checked)} data-waive-svc /> إعفاء</label></span><span className="num">{waiveSvc ? "—" : money(totals.service)}</span></div>}
           <div className="t"><span>الضريبة {CFG.vatRate}%</span><span className="num">{money(totals.vat)}</span></div>
           <div className="t"><span>خصم على الفاتورة %</span><input className="input num" style={{ width: 70, minHeight: 28, padding: "2px 6px" }} value={ticketDisc} onChange={(e) => setTicketDisc(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} /></div>
           <div className="t grand"><span>الإجمالي</span><span className="num">{money(totals.total)}</span></div>
@@ -270,10 +286,10 @@ export function PosPage() {
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
       {payOpen && <PayModal total={totals.total} partner={partner} loyalty={loyalty} online={online} onClose={() => setPayOpen(false)} onPay={(tenders, redeemPoints) => run(async () => {
-        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, uomId: l.uom?.id || null })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString(), ...(order ? { orderId: order.id, paidLines: splitting ? cart.map((l) => ({ key: lineKey(l), qty: l.qty })) : undefined } : {}) };
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: Math.round((l.unitPrice - (l.modsPrice || 0)) * 100) / 100, discountPct: l.discountPct, uomId: l.uom?.id || null, ...(l.mods?.length ? { modifiers: l.mods.map((m) => m.optionId) } : {}) })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString(), ...(order ? { orderId: order.id, waiveServiceCharge: waiveSvc || undefined, paidLines: splitting ? cart.map((l) => ({ key: lineKey(l), qty: l.qty })) : undefined } : {}) };
         const paidOrder = order, wasSplit = splitting;
         const finish = (inv: any) => {
-          setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setDone(paidOrder && !inv.tableName ? { ...inv, tableName: paidOrder.tableName, orderType: paidOrder.type, orderNo: paidOrder.number } : inv);
+          setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setWaiveSvc(false); setDone(paidOrder && !inv.tableName ? { ...inv, tableName: paidOrder.tableName, orderType: paidOrder.type, orderNo: paidOrder.number } : inv);
           if (!paidOrder) return;
           setSplitting(false);
           // a split leaves the rest on the table: open it again; otherwise the table is free
@@ -297,7 +313,8 @@ export function PosPage() {
         </div>
       )}
       {ticket && <KitchenTicket ticket={ticket} onClose={() => setTicket(null)} />}
-      {bill && order && <PreBill order={order} company={me.company} totals={totals} lines={cart.map((l) => ({ name: l.product.name, qty: l.qty, total: l.qty * l.unitPrice * (1 - lineDisc(l) / 100) }))} onClose={() => setBill(false)} />}
+      {picking && <ModifierPicker product={picking.p} groups={groupsOf(modGroups, picking.p)} onClose={() => setPicking(null)} onPick={(mods) => { addLine(picking.p, picking.uom, mods); setPicking(null); }} />}
+      {bill && order && <PreBill order={order} company={me.company} totals={totals} lines={[...cart.map((l) => ({ name: l.product.name + (l.mods?.length ? ` (${modsText(l)})` : ""), qty: l.qty, total: l.qty * l.unitPrice * (1 - lineDisc(l) / 100) })), ...(totals.service ? [{ name: totals.serviceLabel, qty: 1, total: incl ? totals.service * (1 + CFG.vatRate / 100) : totals.service }] : [])]} onClose={() => setBill(false)} />}
       {moveOpen && order && restF.data && <MoveModal order={order} data={restF.data} onClose={() => setMoveOpen(false)} onDone={(o) => { setMoveOpen(false); openOrder(o); restF.reload(); toast(o.tableName ? `الطلب الآن على ${o.tableName}` : "تم", "ok"); }} />}
       {splitOpen && order && <SplitModal guests={order.guests} lines={cart.map((l) => ({ key: lineKey(l), name: l.product.name, qty: l.qty, unit: l.unitPrice * (1 - l.discountPct / 100) }))} onClose={() => setSplitOpen(false)} onPick={(m) => { setSplitOpen(false); setSplitting(true); setCart(cart.filter((l) => m[lineKey(l)] > 0).map((l) => ({ ...l, qty: m[lineKey(l)] }))); }} />}
       {noteFor && <NoteModal name={noteFor.product.name} value={noteFor.note || ""} quick={restF.data?.settings?.quickNotes || []} onClose={() => setNoteFor(null)} onSave={(v) => { const k = lineKey(noteFor); setCart((c) => c.map((x) => (lineKey(x) === k ? { ...x, note: v } : x))); setNoteFor(null); }} />}

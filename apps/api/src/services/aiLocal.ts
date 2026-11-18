@@ -338,6 +338,26 @@ function checkAnswer(r: any): string {
   if (r.failed.length) out.push("[تقرير فحص التطابق الكامل](/reports/integrity)");
   return out.join("\n\n");
 }
+const SEV_AR: Record<string, string> = { high: "⛔", medium: "⚠", low: "ℹ", info: "ℹ" };
+function auditAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  if (!r.findings.length) return `**المدقق الذكي: لا ملاحظات** في الفترة ${r.from} — ${r.to} (المؤشر ${r.score}/100).\n[فتح المدقق الذكي](/auditor)`;
+  const out = [`**المدقق الذكي (${r.from} — ${r.to}):** مؤشر سلامة القيود **${r.score}/100** — ${r.counts.high} عالية، ${r.counts.medium} متوسطة، ${r.counts.low} منخفضة.`];
+  for (const f of r.findings) out.push(`${SEV_AR[f.severity] || "•"} **${f.title}** — ${f.detail}${f.to ? ` [فتح](${f.to})` : ""}`);
+  out.push("الملاحظة ليست خطأً بالضرورة؛ راجعها، وما تأكدت منه علّمه «مبرَّرة» في [المدقق الذكي](/auditor).");
+  return out.join("\n\n");
+}
+function forecastAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const m = (v: number) => `${money(v)} ${cur}`;
+  const out = [`**توقع التدفق النقدي (${r.weeks.length} أسبوعاً):** الرصيد اليوم ${m(r.opening)}، يدخل ${m(r.totals.inflow)} ويخرج ${m(r.totals.outflow)}، فيصل آخر الفترة إلى **${m(r.closing)}**.`,
+    `أدنى رصيد متوقع ${m(r.lowest.closing)} في الأسبوع ${r.lowest.week} (يبدأ ${r.lowest.from}).`];
+  if (r.firstNegative) out.push(`⛔ يصبح الرصيد سالباً في الأسبوع ${r.firstNegative.week} (${r.firstNegative.from}) — رتّب تحصيلاً أو تمويلاً قبله.`);
+  for (const w of r.warnings.slice(r.firstNegative ? 1 : 0)) out.push(`⚠ ${w}`);
+  out.push("| الأسبوع | داخل | خارج | آخر الأسبوع |\n|---|---|---|---|\n" + r.weeks.slice(0, 8).map((w: any) => `| ${w.week} (${w.from}) | ${money(w.inflow)} | ${money(w.outflow)} | ${money(w.closing)} |`).join("\n"));
+  out.push("[التفاصيل أسبوعاً بأسبوع](/cash-forecast)");
+  return out.join("\n\n");
+}
 function partnerAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   if (!r.found) return "لم أجد عميلاً أو مورداً بهذا الاسم. اكتب الاسم كما هو مسجل، أو جزءاً منه.";
@@ -523,6 +543,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     let res: any = {}; try { res = JSON.parse(tr.content); } catch { /* keep {} */ }
     if (prev.name === "get_entry") return say(explainEntry(res));
     if (prev.name === "books_check") return say(checkAnswer(res), NEXT.check);
+    if (prev.name === "journal_audit") return say(auditAnswer(res, ctx.currency), ["افحص الدفاتر", "توقع السيولة للأسابيع القادمة"]);
+    if (prev.name === "cash_forecast") return say(forecastAnswer(res, ctx.currency), ["من لم يسدد؟", "كم علينا للموردين؟", "دقق القيود"]);
     if (prev.name === "business_query") return say(dataAnswer(res, ctx.currency), NEXT[res.metric] || NEXT.summary);
     if (prev.name === "partner_balance") return say(partnerAnswer(res, ctx.currency), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `رصيد ${prev.input.role === "SUPPLIER" ? "المورد" : "العميل"} ${x}`) : undefined);
     if (prev.name === "financial_analysis") return say(analysisAnswer(res, ctx.currency, prev.input.label), NEXT.analysis);
@@ -572,6 +594,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   if (!wantsRecord(n)) {
     const pm = n.match(/(?:رصيد|مديونيه|مستحقات|كم (?:على|علي|ل|عند)|كشف حساب|حساب) ?(?:ال)?(عميل|مورد) (.+?)(?=\s*(?:؟|\?|$| الان| حاليا| اليوم))/);
     if (pm && pm[2].trim().length > 1) return call("partner_balance", { query: pm[2].trim(), role: pm[1] === "عميل" ? "CUSTOMER" : "SUPPLIER" });
+    if (/(قيود|فواتير|مصروفات|سندات|مستندات|مدفوعات) ?(ال)?(مكرره|مشبوهه|غريبه|غير معتاده|غير عاديه)|مكرره|المدقق|مدقق|بنفورد|(دقق|تدقيق|راجع) (ال)?قيود|قيود (يدويه|العطله)/.test(n) && !a.amount) return call("journal_audit", {});
+    if (/(توقع|تنبؤ|توقعات) (ال)?(سيوله|تدفق|نقد|نقديه|كاش)|التدفق النقدي (القادم|المتوقع)|(هل|متي) (يكفي|سيكفي|ينقص|ينفد|يخلص) (ال)?(نقد|كاش|رصيد|سيوله)|(السيوله|النقد|الرصيد) (في )?(الاسابيع|الشهور|الاشهر) (القادمه|الجايه)/.test(n) && !a.amount) return call("cash_forecast", {});
     if (/(^| )(افحص|فحص|دقق|تدقيق)( |$)|راجع (دفاتري|حساباتي|القيود|الدفاتر|الحسابات)|هل (دفاتري|حساباتي|القيود|الدفاتر|الحسابات).*(سليم|صحيح|مضبوط|متوازن)|(هل )?(يوجد|توجد|هناك|في) (مشاكل|اخطاء|مشكله|خطا)|غير متوازن|لا يتطابق|لا تتطابق|عدم تطابق|غير متطابق|(يوجد|هناك|في|لماذا) (ال)?فرق|(صندوق|بنك|مخزون|رصيد).*سالب|سالب.*(صندوق|بنك|مخزون)|صحه (الدفاتر|الحسابات)/.test(n) && !a.amount) {
       const pr = PROBLEMS.find((x) => hit(x.keys, a.raw, n));
       if (pr && isQuestion(n) && /(^| )(لماذا|ليش|كيف|ما سبب|ماسبب)/.test(n) && !/دفاتري|حساباتي|عندي|لدي/.test(n)) return say(`**${pr.title}**

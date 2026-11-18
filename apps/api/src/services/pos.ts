@@ -7,6 +7,7 @@ import { promotionHits } from "./promotions";
 import { combinePct } from "./promoEngine";
 import { checkRedemption, recordRedemption } from "./loyalty";
 import { calcLine } from "../lib/core";
+import { listGroups, resolveChoice, choicePrice, choiceText, serviceSettings, serviceApplies } from "./modifiers";
 
 export async function openSession(t: Db, companyId: string, user: { id: string; name: string }, openingCash: number, warehouseId?: string) {
   const open = await t.maybe(`SELECT id, number FROM pos_sessions WHERE company_id=$1 AND user_id=$2 AND status='OPEN'`, [companyId, user.id]);
@@ -22,7 +23,7 @@ export async function currentSession(t: Db, companyId: string, userId: string) {
 export interface PosSaleInput {
   sessionId: string;
   partnerId?: string | null;
-  lines: { productId: string; qty: number; unitPrice?: number; discountPct?: number; uomId?: string | null }[];
+  lines: { productId: string; qty: number; unitPrice?: number; discountPct?: number; uomId?: string | null; modifiers?: string[] }[]; // unitPrice = before add-ons; modifiers = chosen option ids
   tenders: { method: "CASH" | "CARD" | "BANK" | "CREDIT"; amount: number | null }[]; // amount null → the remainder
   discountPct?: number; // whole-ticket discount
   notes?: string;
@@ -32,6 +33,8 @@ export interface PosSaleInput {
   issuedAt?: string; // ISO time the sale actually happened (offline)
   applyPromotions?: boolean; // default true: active offers are applied by the server (same engine as the POS screen)
   redeemPoints?: number; // loyalty points the customer uses on this ticket
+  orderId?: string; // restaurant order being paid (service charge comes from its type)
+  waiveServiceCharge?: boolean;
 }
 
 async function walkInCustomer(t: Db, companyId: string) {
@@ -55,18 +58,36 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   const products = await t.rows(`SELECT * FROM products WHERE company_id=$1 AND id = ANY($2) AND is_active`, [companyId, ids]);
   const pm = new Map(products.map((p) => [p.id, p]));
   const ticketDisc = num(s.discountPct);
+  const groups = s.lines.some((l) => Array.isArray(l.modifiers) && l.modifiers.length) || (await t.maybe(`SELECT 1 FROM modifier_groups WHERE company_id=$1 AND is_active AND min_select>0 LIMIT 1`, [companyId])) ? await listGroups(t, companyId, true) : [];
   const base = s.lines.map((l) => {
     const p = pm.get(l.productId);
     if (!p) throw bad("صنف غير موجود أو موقوف");
-    const unit = l.unitPrice !== undefined && l.unitPrice !== null ? num(l.unitPrice) : Number(p.salePrice);
-    return { p, l, unit };
+    // add-ons: checked against the product's groups, priced by the server, added to the unit price
+    const mods = groups.length ? resolveChoice(groups, p, l.modifiers) : [];
+    const unit = r2((l.unitPrice !== undefined && l.unitPrice !== null ? num(l.unitPrice) : Number(p.salePrice)) + choicePrice(mods));
+    return { p, l, unit, mods };
   });
   // offers valid at the moment of the sale (an offline sale keeps the offers of the time it was made)
   const hits = s.applyPromotions === false ? base.map(() => null) : await promotionHits(t, companyId, base.map((b) => ({ productId: b.p.id, qty: num(b.l.qty), unitPrice: b.unit })), issuedAt || new Date(), "POS");
-  let lines: any[] = base.map(({ p, l, unit }, i) => ({
+  let lines: any[] = base.map(({ p, l, unit, mods }, i) => ({
     productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: combinePct(num(l.discountPct), hits[i]?.pct || 0, ticketDisc), taxCode: p.taxCode, uomId: l.uomId || null,
     promotionId: hits[i]?.promotionId || null, promoPct: hits[i]?.pct || 0,
+    ...(mods.length ? { description: `${p.name} (${choiceText(mods)})`, modifiers: mods.map((m) => ({ group: m.group, name: m.name, price: m.price, optionId: m.optionId })) } : {}),
   }));
+  // service charge of a restaurant order (dine-in by default): a taxable line on what is paid now, after discounts
+  const order = s.orderId && /^[0-9a-f-]{36}$/i.test(s.orderId) ? await t.maybe(`SELECT type, guests FROM pos_orders WHERE id=$1 AND company_id=$2`, [s.orderId, companyId]) : null;
+  const svc = serviceSettings(company);
+  let serviceNote = "";
+  if (serviceApplies(svc, order)) {
+    const incl = !!company.pricesIncludeVat;
+    const goods = lines.reduce((a, l) => a + calcLine(l.qty, l.unitPrice, l.discountPct, l.taxCode, incl).net, 0);
+    const amount = r2(goods * svc.pct / 100);
+    if (s.waiveServiceCharge) serviceNote = `أُعفي من ${svc.label} (${svc.pct}%) بواسطة ${user.name}`;
+    else if (amount > 0) {
+      const unitPrice = incl ? r2(calcLine(1, amount, 0, "S", false).total) : amount; // the charge is a % of the net; a VAT-inclusive company enters prices with VAT
+      lines.push({ productId: null, description: `${svc.label} ${svc.pct}%`, qty: 1, unitPrice, discountPct: 0, taxCode: "S", modifiers: { serviceCharge: svc.pct } });
+    }
+  }
   // loyalty points: their value comes off the ticket as an even extra discount on every line
   let redeem: { points: number; value: number } | null = null;
   if (num(s.redeemPoints) > 0) {
@@ -78,7 +99,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   }
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "INVOICE", channel: "POS", date: saleDate, partnerId: partner.id, warehouseId: session.warehouseId,
-    invoiceType: partner.vatNumber ? "STANDARD" : "SIMPLIFIED", notes: s.notes || null, lines, isDemo: !!s.isDemo,
+    invoiceType: partner.vatNumber ? "STANDARD" : "SIMPLIFIED", notes: [s.notes, serviceNote].filter(Boolean).join(" — ") || null, lines, isDemo: !!s.isDemo,
     pricesIncludeVat: !!company.pricesIncludeVat,
   });
   const inv = await t.one(`SELECT total FROM invoices WHERE id=$1`, [draft.id]);
@@ -135,7 +156,7 @@ export async function posReturn(t: Db, company: any, user: { id: string; name: s
   const retLines = lines.map((l) => {
     const ol = origin.lines.find((x: any) => x.productId === l.productId);
     if (!ol) throw bad("الصنف غير موجود في الفاتورة الأصلية");
-    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description, uomId: ol.uomId || null, promotionId: ol.promotionId || null, promoDiscount: Number(ol.qty) ? r2(Number(ol.promoDiscount || 0) * num(l.qty) / Number(ol.qty)) : 0 };
+    return { productId: l.productId, qty: num(l.qty), unitPrice: Number(ol.unitPrice), discountPct: Number(ol.discountPct), taxCode: ol.taxCode, description: ol.description, uomId: ol.uomId || null, promotionId: ol.promotionId || null, modifiers: ol.modifiers || null, promoDiscount: Number(ol.qty) ? r2(Number(ol.promoDiscount || 0) * num(l.qty) / Number(ol.qty)) : 0 };
   });
   const draft = await saveDraft(t, company, user.name, {
     direction: "SALE", kind: "CREDIT_NOTE", channel: "POS", date: today(), partnerId: origin.partnerId, warehouseId: session.warehouseId,

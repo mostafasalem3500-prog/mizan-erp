@@ -33,6 +33,7 @@ export interface LineInput {
   promotionId?: string | null; // offer that gave (part of) the line discount
   promoPct?: number; // the offer's share of the discount, for the usage report
   promoDiscount?: number; // explicit offer amount (returns copy the original's share)
+  modifiers?: any; // sales: chosen add-ons as sold [{group, name, price}], or {serviceCharge: pct} on the service-charge line
 }
 
 export interface InvoiceInput {
@@ -113,6 +114,7 @@ async function buildLines(t: Db, companyId: string, input: InvoiceInput, pricesI
       discount: c.discount,
       promotionId: input.direction === "SALE" && l.promotionId ? l.promotionId : null,
       promoDiscount: input.direction === "SALE" && l.promotionId ? (l.promoDiscount !== undefined ? r2(num(l.promoDiscount)) : r2(D(qty).times(unitPrice).times(num(l.promoPct)).div(100))) : 0,
+      modifiers: input.direction === "SALE" && l.modifiers ? JSON.stringify(l.modifiers) : null,
       product: p,
       sort: i,
     };
@@ -218,7 +220,7 @@ export async function saveDraft(t: Db, company: any, user: string, input: Invoic
     lines.map((l) => ({
       invoiceId: inv.id, productId: l.productId, accountId: l.accountId, description: l.description, qty: l.qty, uom: l.uom, factor: l.factor, lotNo: l.lotNo, expiryDate: l.expiryDate,
       unitPrice: l.unitPrice, fcUnitPrice: l.fcUnitPrice, discountPct: l.discountPct, taxCode: l.taxCode, taxRate: l.taxRate,
-      netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort, promotionId: l.promotionId, promoDiscount: l.promoDiscount,
+      netAmount: l.netAmount, vatAmount: l.vatAmount, total: l.total, unitCost: 0, sort: l.sort, promotionId: l.promotionId, promoDiscount: l.promoDiscount, modifiers: l.modifiers,
     })),
   );
   return inv;

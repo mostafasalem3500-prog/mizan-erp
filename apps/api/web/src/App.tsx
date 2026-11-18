@@ -31,6 +31,10 @@ const lz = <M extends Record<string, any>>(load: () => Promise<M>, name: keyof M
   throw e;
 })));
 const Wait = <div className="empty" style={{ paddingTop: 80 }}><span className="spinner" /></div>;
+const ModifiersPage = lz(() => import("./pages/Round338"), "ModifiersPage");
+const PaymentRunsPage = lz(() => import("./pages/Round338"), "PaymentRunsPage");
+const CashForecastPage = lz(() => import("./pages/Round338"), "CashForecastPage");
+const AuditorPage = lz(() => import("./pages/Round338"), "AuditorPage");
 const DocumentsPage = lz(() => import("./pages/Documents"), "DocumentsPage");
 const DocumentView = lz(() => import("./pages/Documents"), "DocumentView");
 const PublicInvoice = lz(() => import("./pages/Documents"), "PublicInvoice");
@@ -252,6 +256,10 @@ export function App() {
                 <Route path="/learn" element={<LearnPage />} />
                 <Route path="/closing" element={<ClosingPage />} />
                 <Route path="/journal-approvals" element={<JournalApprovalsPage />} />
+                <Route path="/pos/modifiers" element={<ModifiersPage />} />
+                <Route path="/payment-runs" element={<PaymentRunsPage />} />
+                <Route path="/cash-forecast" element={<CashForecastPage />} />
+                <Route path="/auditor" element={<AuditorPage />} />
                 <Route path="/cost-allocations" element={<CostAllocationsPage />} />
                 <Route path="/cvp" element={<CvpPage />} />
                 <Route path="/tasks" element={<TasksPage />} />

@@ -5,17 +5,18 @@
  */
 import { Db } from "../db/pool";
 import { bad, conflict, num, r2 } from "../lib/core";
+import { serviceSettings, cleanService, salesOfModifiers, serviceCollected } from "./modifiers";
 
 export type PosMode = "RETAIL" | "RESTAURANT" | "CAFE";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEF_NOTES = ["بدون بصل", "بدون ثوم", "حار", "حار جداً", "بدون ملح", "إضافة جبن", "مشوي جيداً", "على جنب", "سفري"];
 export function settingsOf(company: any) {
   const s = company.accounting?.pos || {};
-  return { mode: (["RETAIL", "RESTAURANT", "CAFE"].includes(s.mode) ? s.mode : "RETAIL") as PosMode, quickNotes: Array.isArray(s.quickNotes) ? s.quickNotes.map(String).slice(0, 40) : DEF_NOTES, askGuests: s.askGuests !== false };
+  return { mode: (["RETAIL", "RESTAURANT", "CAFE"].includes(s.mode) ? s.mode : "RETAIL") as PosMode, quickNotes: Array.isArray(s.quickNotes) ? s.quickNotes.map(String).slice(0, 40) : DEF_NOTES, askGuests: s.askGuests !== false, serviceCharge: serviceSettings(company) };
 }
 export async function saveSettings(t: Db, companyId: string, b: any) {
   const cur = (await t.one(`SELECT accounting FROM companies WHERE id=$1`, [companyId])).accounting?.pos || {};
-  const next = { ...cur, ...(["RETAIL", "RESTAURANT", "CAFE"].includes(b.mode) ? { mode: b.mode } : {}), ...(Array.isArray(b.quickNotes) ? { quickNotes: b.quickNotes.map((x: any) => String(x).trim().slice(0, 40)).filter(Boolean).slice(0, 40) } : {}), ...(b.askGuests === undefined ? {} : { askGuests: !!b.askGuests }) };
+  const next = { ...cur, ...(["RETAIL", "RESTAURANT", "CAFE"].includes(b.mode) ? { mode: b.mode } : {}), ...(Array.isArray(b.quickNotes) ? { quickNotes: b.quickNotes.map((x: any) => String(x).trim().slice(0, 40)).filter(Boolean).slice(0, 40) } : {}), ...(b.askGuests === undefined ? {} : { askGuests: !!b.askGuests }), ...(b.serviceCharge === undefined ? {} : { serviceCharge: cleanService(b.serviceCharge) }) };
   await t.exec(`UPDATE companies SET accounting = jsonb_set(COALESCE(accounting,'{}'::jsonb), '{pos}', $2::jsonb) WHERE id=$1`, [companyId, JSON.stringify(next)]);
   // a restaurant starts with one hall so the first screen is never empty
   if (next.mode === "RESTAURANT" && !(await t.maybe(`SELECT 1 FROM pos_floors WHERE company_id=$1 LIMIT 1`, [companyId]))) { const f = await t.insert("pos_floors", { companyId, name: "الصالة الرئيسية", sort: 1 }); for (let i = 1; i <= 8; i++) await t.insert("pos_tables", { companyId, floorId: f.id, name: `طاولة ${i}`, seats: 4, sort: i }); }
@@ -61,7 +62,9 @@ export async function deleteTable(t: Db, C: string, id: string) {
   await t.exec(`DELETE FROM pos_tables WHERE id=$1 AND company_id=$2`, [id, C]);
 }
 
-type Line = { key: string; productId: string; name: string; qty: number; unitPrice: number; discountPct: number; uomId: string | null; uomName: string | null; note: string; sentQty: number; readyQty: number };
+type Mod = { optionId: string; name: string; price: number };
+type Line = { key: string; productId: string; name: string; qty: number; unitPrice: number; discountPct: number; uomId: string | null; uomName: string | null; note: string; sentQty: number; readyQty: number; mods?: Mod[] };
+const modsText = (l: Line) => (l.mods?.length ? ` + ${l.mods.map((m) => m.name).join("، ")}` : "");
 function cleanLines(raw: any, prev: Line[] = []): Line[] {
   if (!Array.isArray(raw)) throw bad("سطور الطلب غير صحيحة");
   if (raw.length > 200) throw bad("حتى 200 سطر في الطلب");
@@ -69,7 +72,8 @@ function cleanLines(raw: any, prev: Line[] = []): Line[] {
   return raw.filter((l) => UUID.test(l?.productId || "") && num(l.qty) > 0).map((l) => {
     const key = String(l.key || `${l.productId}:${l.uomId || ""}`).slice(0, 90), p = was.get(key);
     // what the kitchen already has is the server's knowledge, never the screen's
-    return { key, productId: l.productId, name: String(l.name || "").slice(0, 120), qty: r2(num(l.qty)), unitPrice: r2(num(l.unitPrice)), discountPct: Math.min(100, Math.max(0, num(l.discountPct))), uomId: UUID.test(l.uomId || "") ? l.uomId : null, uomName: l.uomName ? String(l.uomName).slice(0, 30) : null, note: String(l.note || "").slice(0, 160), sentQty: p ? num(p.sentQty) : 0, readyQty: p ? num(p.readyQty) : 0 };
+    return { key, productId: l.productId, name: String(l.name || "").slice(0, 120), qty: r2(num(l.qty)), unitPrice: r2(num(l.unitPrice)), discountPct: Math.min(100, Math.max(0, num(l.discountPct))), uomId: UUID.test(l.uomId || "") ? l.uomId : null, uomName: l.uomName ? String(l.uomName).slice(0, 30) : null, note: String(l.note || "").slice(0, 160), sentQty: p ? num(p.sentQty) : 0, readyQty: p ? num(p.readyQty) : 0,
+      mods: Array.isArray(l.mods) ? l.mods.filter((m: any) => UUID.test(m?.optionId || "")).slice(0, 30).map((m: any) => ({ optionId: m.optionId, name: String(m.name || "").slice(0, 60), price: r2(num(m.price)) })) : [] };
   });
 }
 const totalOf = (lines: Line[]) => r2(lines.reduce((a, l) => a + l.qty * l.unitPrice * (1 - l.discountPct / 100), 0));
@@ -105,8 +109,8 @@ export async function sendToKitchen(t: Db, C: string, id: string, b: any) {
   const before = new Map((o.lines as Line[]).map((l) => [l.key, l]));
   const lines = b?.lines === undefined ? (o.lines as Line[]) : cleanLines(b.lines, o.lines);
   const items: { name: string; qty: number; note: string; cancel?: boolean }[] = [];
-  for (const l of lines) { const d = r2(l.qty - l.sentQty); if (d > 0) items.push({ name: l.name + (l.uomName ? ` (${l.uomName})` : ""), qty: d, note: l.note }); else if (d < 0) items.push({ name: l.name, qty: -d, note: "", cancel: true }); l.sentQty = l.qty; l.readyQty = Math.min(l.readyQty, l.qty); }
-  for (const [k, l] of before) if (!lines.some((x) => x.key === k) && l.sentQty > 0) items.push({ name: l.name, qty: l.sentQty, note: "", cancel: true });
+  for (const l of lines) { const d = r2(l.qty - l.sentQty); if (d > 0) items.push({ name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: d, note: l.note }); else if (d < 0) items.push({ name: l.name + modsText(l), qty: -d, note: "", cancel: true }); l.sentQty = l.qty; l.readyQty = Math.min(l.readyQty, l.qty); }
+  for (const [k, l] of before) if (!lines.some((x) => x.key === k) && l.sentQty > 0) items.push({ name: l.name + modsText(l), qty: l.sentQty, note: "", cancel: true });
   o = await t.update("pos_orders", { id, companyId: C }, { lines: JSON.stringify(lines), total: totalOf(lines), updatedAt: new Date() });
   return { order: full(o), ticket: items.length ? { number: o.number, type: o.type, tableName: o.tableName, guests: o.guests, waiter: o.waiter, at: new Date().toISOString(), items, notes: o.notes } : null };
 }
@@ -147,7 +151,7 @@ export async function settle(t: Db, C: string, orderId: string, invoice: any, pa
 /** Kitchen screen: every round that was sent and is not marked ready yet, oldest first. */
 export async function kitchen(t: Db, C: string) {
   const orders = await t.rows(`SELECT id, number, type, table_name, waiter, notes, lines, opened_at, updated_at FROM pos_orders WHERE company_id=$1 AND status='OPEN' ORDER BY updated_at`, [C]);
-  return orders.map((o) => ({ id: o.id, number: o.number, type: o.type, tableName: o.tableName, waiter: o.waiter, notes: o.notes, since: o.updatedAt, items: (o.lines as Line[]).filter((l) => l.sentQty > l.readyQty).map((l) => ({ key: l.key, name: l.name + (l.uomName ? ` (${l.uomName})` : ""), qty: r2(l.sentQty - l.readyQty), note: l.note })) })).filter((o) => o.items.length);
+  return orders.map((o) => ({ id: o.id, number: o.number, type: o.type, tableName: o.tableName, waiter: o.waiter, notes: o.notes, since: o.updatedAt, items: (o.lines as Line[]).filter((l) => l.sentQty > l.readyQty).map((l) => ({ key: l.key, name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: r2(l.sentQty - l.readyQty), note: l.note })) })).filter((o) => o.items.length);
 }
 export async function markReady(t: Db, C: string, id: string, keys?: string[]) {
   const o = await locked(t, C, id); mustOpen(o);
@@ -163,5 +167,6 @@ export async function report(t: Db, C: string, from: string, to: string) {
   const byHour = await t.rows(`SELECT EXTRACT(HOUR FROM (i.issued_at AT TIME ZONE 'Asia/Riyadh'))::int h, COUNT(*)::int n, COALESCE(SUM(total),0) total ${base} GROUP BY 1 ORDER BY 1`, [C, from, to]);
   const cancelled = await t.one(`SELECT COUNT(*)::int n FROM pos_orders WHERE company_id=$1 AND status='CANCELLED' AND COALESCE(cancel_reason,'') NOT LIKE 'دُمج%' AND (opened_at AT TIME ZONE 'Asia/Riyadh')::date BETWEEN $2 AND $3` /* the business day in Saudi time, as the invoice dates are */, [C, from, to]);
   const tot = byType.reduce((a, r) => ({ n: a.n + r.n, total: a.total + Number(r.total) }), { n: 0, total: 0 });
-  return { from, to, orders: tot.n, total: r2(tot.total), average: tot.n ? r2(tot.total / tot.n) : 0, cancelled: cancelled.n, byType: byType.map((r) => ({ ...r, total: Number(r.total) })), byTable: byTable.map((r) => ({ ...r, total: Number(r.total) })), byHour: byHour.map((r) => ({ ...r, total: Number(r.total) })) };
+  const [modifiers, service] = await Promise.all([salesOfModifiers(t, C, from, to), serviceCollected(t, C, from, to)]);
+  return { from, to, modifiers, service, orders: tot.n, total: r2(tot.total), average: tot.n ? r2(tot.total / tot.n) : 0, cancelled: cancelled.n, byType: byType.map((r) => ({ ...r, total: Number(r.total) })), byTable: byTable.map((r) => ({ ...r, total: Number(r.total) })), byHour: byHour.map((r) => ({ ...r, total: Number(r.total) })) };
 }

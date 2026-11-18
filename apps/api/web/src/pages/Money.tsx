@@ -1,3 +1,4 @@
+import { AccountSuggest } from "./Round338";
 import { CUR, CFG, VATF } from "../shared/country";
 import { Attachments } from "./Round28";
 import React, { useEffect, useState } from "react";
@@ -251,7 +252,8 @@ function ExpenseEditor({ onClose }: { onClose: (s?: boolean) => void }) {
     <Modal title="تسجيل مصروف" onClose={() => onClose()} footer={<><span className="grow muted">الصافي <b><Money v={net} /></b> · الضريبة <b><Money v={vat} /></b> · الإجمالي <b><Money v={net + vat} /></b></span><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner) || splitBad} onClick={() => run(async () => setPrev(await api("/expenses/preview-entry", { body: expBody() })))}>معاينة القيد</button><button className="btn primary" disabled={busy || !account || amt <= 0 || (!credit && !pay) || (credit && !partner) || splitBad} onClick={() => run(async () => { await api("/expenses", { body: expBody() }); onClose(true); }, "تم تسجيل المصروف")}>حفظ وترحيل</button></>}>
       {prev && <Modal wide title="معاينة قيد المصروف" onClose={() => setPrev(null)} footer={<><div className="grow" /><button className="btn" onClick={() => setPrev(null)}>رجوع</button></>}><EntryPreview prev={prev} /></Modal>}
       <div className="form-grid">
-        <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus /></Field>
+        <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} autoFocus />
+          <AccountSuggest payee={f.payee} partnerId={credit ? partner?.id : undefined} description={f.description} current={account?.id} onPick={setAccount} /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={s("date")} /></Field>
         <Field label="البيان" span2><Input value={f.description} onChange={s("description")} placeholder="مثال: فاتورة كهرباء شهر 9" /></Field>
         <Field label="المستفيد"><Input value={f.payee} onChange={s("payee")} /></Field>

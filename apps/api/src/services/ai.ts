@@ -3,6 +3,8 @@
  * A proposal is dry-run inside a rolled-back transaction (so the user sees the real journal entry), stored as
  * `pending`, and only the user's «تأكيد» (confirmPlan) executes it — with the user's own permissions.
  */
+import { auditScan } from "./auditor";
+import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
 import { AppError, bad, num, today, isDate, r2 } from "../lib/core";
 import { can } from "../lib/auth";
@@ -145,6 +147,8 @@ const perms = (auth: Auth | undefined, p: string) => !auth || auth.superAdmin ||
 async function runTool(t: Db, company: any, name: string, input: any, auth?: Auth) {
   const C = company.id;
   if (name === "books_check") { if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" }; return booksCheck(t, C); }
+  if (name === "journal_audit") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض القيود" }; const r = await auditScan(t, company, { from: isDate(input.from) ? input.from : undefined, to: isDate(input.to) ? input.to : undefined }); return { from: r.from, to: r.to, score: r.score, counts: r.counts, findings: r.findings.slice(0, 8).map((f: any) => ({ severity: f.severity, title: f.title, detail: f.detail, to: f.to })) }; }
+  if (name === "cash_forecast") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض النقدية" }; const r = await cashForecast(t, company, { weeks: num(input.weeks) || 13 }); return { opening: r.opening, closing: r.closing, lowest: r.lowest, firstNegative: r.firstNegative, totals: r.totals, warnings: r.warnings, weeks: r.buckets.map((b: any) => ({ week: b.week, from: b.from, inflow: b.inflow, outflow: b.outflow, closing: b.closing })) }; }
   if (name === "business_query") {
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
     const to = isDate(input.to) ? input.to : today(); const from = isDate(input.from) ? input.from : to.slice(0, 8) + "01";
