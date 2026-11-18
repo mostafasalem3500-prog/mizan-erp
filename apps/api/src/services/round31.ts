@@ -205,6 +205,10 @@ export async function closeCockpit(t: Db, C: string, periodId?: string) {
   const am = await t.rows(`SELECT number, name, months, posted_months, start_date FROM amortizations WHERE company_id=$1 AND status='ACTIVE' AND start_date <= $2`, [C, to]);
   const amDue = am.filter((a) => { const s = String(a.startDate instanceof Date ? a.startDate.toISOString() : a.startDate).slice(0, 7); const [y, m] = s.split("-").map(Number); const [ty, tm] = to.slice(0, 7).split("-").map(Number); return Math.min(a.months, (ty - y) * 12 + (tm - m) + 1) > a.postedMonths; });
   it("amortization", "إطفاء المصروفات المدفوعة مقدماً والإيرادات المؤجلة مرحّل حتى نهاية الشهر", amDue.length ? "warn" : "ok", amDue.length ? amDue.slice(0, 3).map((a) => `${a.number} ${a.name}`).join("، ") + (amDue.length > 3 ? ` و${amDue.length - 3} أخرى` : "") : undefined, "/amortizations");
+  // leases: every lease month ending by this month's end posted (depreciation and interest)
+  const lsDue = await t.rows(`SELECT number, name FROM leases WHERE company_id=$1 AND status='ACTIVE' AND start_date <= $2
+      AND (start_date + (posted_months + 1) * interval '1 month' - interval '1 day')::date <= $2`, [C, to]);
+  if (lsDue.length || (await one(`SELECT COUNT(*)::int c FROM leases WHERE company_id=$1 AND status='ACTIVE'`, [C])).c) it("leases", "عقود الإيجار: إهلاك حق الاستخدام وفائدة الالتزام مرحّلان حتى نهاية الشهر", lsDue.length ? "warn" : "ok", lsDue.length ? lsDue.slice(0, 3).map((a: any) => `${a.number} ${a.name}`).join("، ") : undefined, "/leases");
   const emp = await one(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND hire_date <= $2`, [C, to]);
   if (emp.c) {
     const run = await t.maybe(`SELECT status FROM payroll_runs WHERE company_id=$1 AND period=$2 ORDER BY (status='DRAFT') LIMIT 1`, [C, from.slice(0, 7)]);

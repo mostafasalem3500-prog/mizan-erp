@@ -22,6 +22,8 @@ export interface AuthCtx {
   superAdmin: boolean;
   branchId?: string | null;
   lockedBranchId?: string | null;
+  /** the sign-in session (user_sessions.id); tokens issued before 3.35 have none */
+  sid?: string;
 }
 
 declare global {
@@ -60,6 +62,8 @@ export function signToken(payload: AuthCtx) {
 
 /** Parses the bearer token and loads the active company (tenant) for this request. */
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
+  // every router mounted on /api carries this middleware: a request passing through several routers is checked once
+  if ((req as any)._authDone) return next();
   try {
     const hdr = req.headers.authorization || "";
     const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : (req.query.token as string) || "";
@@ -69,6 +73,17 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       payload = jwt.verify(token, JWT_SECRET) as AuthCtx;
     } catch {
       throw new AppError(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً", "UNAUTHENTICATED");
+    }
+    // a session ended from another device, or a deactivated user, stops at once; older tokens (no session) end when the password changes
+    if (payload.sid) {
+      const ses = await db.maybe(`SELECT s.revoked_at, s.last_seen_at, u.is_active FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2`, [payload.sid, payload.userId]);
+      if (!ses || ses.revokedAt) throw new AppError(401, "انتهت هذه الجلسة (سُجّل الخروج منها من جهاز آخر أو تغيّرت كلمة المرور) — سجّل الدخول مجدداً", "UNAUTHENTICATED");
+      if (ses.isActive === false) throw new AppError(401, "الحساب موقوف", "UNAUTHENTICATED");
+      if (Date.now() - new Date(ses.lastSeenAt).getTime() > 5 * 60000) db.exec(`UPDATE user_sessions SET last_seen_at=now() WHERE id=$1`, [payload.sid]).catch(() => undefined);
+    } else {
+      const u = await db.maybe(`SELECT password_changed_at, is_active FROM users WHERE id=$1`, [payload.userId]);
+      const iat = Number((payload as any).iat || 0) * 1000;
+      if (!u || u.isActive === false || (u.passwordChangedAt && new Date(u.passwordChangedAt).getTime() > iat + 1000)) throw new AppError(401, "انتهت الجلسة، يرجى تسجيل الدخول مجدداً", "UNAUTHENTICATED");
     }
     req.auth = { ...payload, branchId: null, lockedBranchId: null };
     if (payload.companyId) {
@@ -93,6 +108,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     }
     const b = req.body && typeof req.body === "object" ? req.body.branchId : null;
     const locked = req.auth.lockedBranchId || null;
+    (req as any)._authDone = true;
     reqCtx.run({ userBranchId: req.auth.branchId || null, bodyBranchId: locked || (typeof b === "string" && b ? b : null), lockedBranchId: locked }, () => next());
   } catch (e) {
     next(e);

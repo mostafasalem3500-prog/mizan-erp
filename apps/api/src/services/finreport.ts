@@ -12,6 +12,7 @@ import { financialAnalysis } from "./round25";
 import { executive, dashFilters } from "./insights";
 import { integrity, vatReturn, accountantAlerts } from "./reports";
 import { checkPartner } from "../lib/partnerRules";
+import { budgetVsActual } from "./budgets";
 
 type Level = "good" | "ok" | "warn" | "bad" | "info";
 export interface Check { key: string; label: string; status: Level; text: string; to?: string; ref?: string }
@@ -36,11 +37,10 @@ export async function financialReport(t: Db, C: string, q: any = {}) {
     : T(` ${v > 0 ? "بارتفاع" : "بانخفاض"} ${num(Math.abs(v), 1)}% عن فترة المقارنة${(v > 0) === upGood ? "" : ""}`, ` ${v > 0 ? "up" : "down"} ${num(Math.abs(v), 1)}% on the comparison period`);
 
   const co = await t.one(`SELECT name_ar, name_en, vat_number, vat_period FROM companies WHERE id=$1`, [C]);
-  const [fa, ex] = [await financialAnalysis(t, C, { from, to, branchId }), await executive(t, C, { from, to, branchId: F.branchId, compare: F.compare })];
-  const integ = branchId ? null : await integrity(t, C);
-  const vat = await vatReturn(t, C, { from, to });
   const tdy = today();
-  const alerts = await accountantAlerts(t, C, tdy);
+  // the sources are independent reports: fetched side by side
+  const [fa, ex, integ, vat, alerts] = await Promise.all([financialAnalysis(t, C, { from, to, branchId }), executive(t, C, { from, to, branchId: F.branchId, compare: F.compare }),
+    branchId ? Promise.resolve(null) : integrity(t, C), vatReturn(t, C, { from, to }), accountantAlerts(t, C, tdy)]);
   const R = (k: string) => fa.ratios.find((r: any) => r.key === k) as any;
   const S = fa.summary, E = fa.snapshot.end, O = fa.snapshot.start;
   const rv = ex.receivables, pv = ex.payables, inv = ex.inventory;
@@ -92,6 +92,8 @@ export async function financialReport(t: Db, C: string, q: any = {}) {
   const amort = await t.one(`SELECT COUNT(*)::int c FROM amortizations a WHERE a.company_id=$1 AND a.status='ACTIVE' AND a.posted_months < a.months
       AND (date_trunc('month', a.start_date) + (a.posted_months + 1) * interval '1 month' - interval '1 day')::date <= $2`, [C, lastMonthEnd]);
   if (amort.c) add({ key: "amortization", label: T("الإطفاء الشهري", "Monthly amortisation"), status: "warn", to: "/amortizations", text: T(`${amort.c} جدول إطفاء فيه أشهر منتهية لم تُرحَّل — المصروف المدفوع مقدماً أو الإيراد المؤجل لم يُحمَّل على أشهره.`, `${amort.c} amortisation schedules have ended months not posted yet.`) });
+  const lease = await t.one(`SELECT COUNT(*) FILTER (WHERE (start_date + (posted_months + 1) * interval '1 month' - interval '1 day')::date <= $2)::int c FROM leases WHERE company_id=$1 AND status='ACTIVE'`, [C, lastMonthEnd]).catch(() => ({ c: 0 }));
+  if (lease.c) add({ key: "leases", label: T("عقود الإيجار", "Leases"), status: "warn", to: "/leases", text: T(`${lease.c} عقد إيجار فيه أشهر منتهية لم يُرحَّل إهلاك حق الاستخدام وفائدة الالتزام عنها.`, `${lease.c} leases have ended months without right-of-use depreciation and interest posted.`) });
   const allowance = await t.one(`SELECT COALESCE(SUM(l.credit-l.debit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED' WHERE a.company_id=$1 AND a.system_key='DOUBTFUL_ALLOWANCE' AND e.date <= $2`, [C, to]);
   if (rv.d90p > 0) add({ key: "ecl", label: T("مخصص الديون المشكوك فيها", "Allowance for doubtful debts"), status: N(allowance.b) > 0 ? "good" : "warn", to: "/ecl",
     text: N(allowance.b) > 0 ? T(`المخصص في الدفاتر ${m(allowance.b)} مقابل ديون متأخرة أكثر من 90 يوماً ${m(rv.d90p)}.`, `The allowance is ${m(allowance.b)} against debts more than 90 days overdue of ${m(rv.d90p)}.`)
@@ -224,6 +226,24 @@ export async function financialReport(t: Db, C: string, q: any = {}) {
       `Stock ${m(inv.value)} in ${inv.skus} items; slow-moving with no sale for 90 days ${m(inv.deadValue)} (${pc(inv.value ? (inv.deadValue / inv.value) * 100 : 0)})${inv.counts.outOfStock ? `; ${inv.counts.outOfStock} items in demand are out of stock` : ""}${inv.counts.expiring ? `; ${inv.counts.expiring} lots near expiry` : ""}.`));
     sections.push({ key: "working", title: T("رأس المال العامل: الذمم والمخزون", "Working capital: receivables, payables and stock"), status: (dso ?? 0) > 90 || rv.d90p > rv.total * 0.2 ? "warn" : "ok", paragraphs: W });
   }
+  // ── budget: against the approved budget of the year, company-wide, when the period lies within one year ──
+  if (activity && !branchId && from.slice(0, 4) === to.slice(0, 4)) {
+    const bud = await t.maybe(`SELECT id FROM budgets WHERE company_id=$1 AND year=$2 AND status='APPROVED' ORDER BY created_at DESC LIMIT 1`, [C, Number(from.slice(0, 4))]);
+    if (bud) {
+      const bv: any = await budgetVsActual(t, C, bud.id, { from, to });
+      const pctOf = (a: number, b: number) => (b ? (a / b) * 100 : null);
+      const over = bv.rows.filter((r: any) => r.type === "EXPENSE" && r.variance < -0.5).sort((a: any, b: any) => a.variance - b.variance).slice(0, 3);
+      const under = bv.rows.filter((r: any) => r.type === "REVENUE" && r.variance < -0.5).sort((a: any, b: any) => a.variance - b.variance).slice(0, 3);
+      const P: string[] = [];
+      P.push(T(`الإيرادات الفعلية ${m(bv.revenue.actual)} مقابل موازنة ${m(bv.revenue.budget)} للفترة (${pc(pctOf(bv.revenue.actual, bv.revenue.budget))} من المستهدف)، والمصروفات ${m(bv.expense.actual)} مقابل ${m(bv.expense.budget)} (${pc(pctOf(bv.expense.actual, bv.expense.budget))}).`,
+        `Actual revenue ${m(bv.revenue.actual)} against a budget of ${m(bv.revenue.budget)} for the period (${pc(pctOf(bv.revenue.actual, bv.revenue.budget))} of target), expenses ${m(bv.expense.actual)} against ${m(bv.expense.budget)} (${pc(pctOf(bv.expense.actual, bv.expense.budget))}).`));
+      P.push(T(`صافي النتيجة ${m(bv.net.actual)} مقابل ${m(bv.net.budget)} في الموازنة — ${bv.net.actual >= bv.net.budget ? "أفضل من المخطط" : "أقل من المخطط"} بـ ${m(Math.abs(bv.net.actual - bv.net.budget))}.`, `Net result ${m(bv.net.actual)} against ${m(bv.net.budget)} budgeted — ${bv.net.actual >= bv.net.budget ? "better" : "worse"} than planned by ${m(Math.abs(bv.net.actual - bv.net.budget))}.`));
+      if (over.length) P.push(T(`أكبر تجاوز في المصروفات: ${over.map((r: any) => `${r.name} (${m(-r.variance)} فوق الموازنة)`).join("، ")}.`, `Largest expense overruns: ${over.map((r: any) => `${r.name} (${m(-r.variance)} over budget)`).join(", ")}.`));
+      if (under.length) P.push(T(`إيرادات دون المستهدف: ${under.map((r: any) => `${r.name} (${m(-r.variance)})`).join("، ")}.`, `Revenue below target: ${under.map((r: any) => `${r.name} (${m(-r.variance)})`).join(", ")}.`));
+      sections.push({ key: "budget", title: T(`الموازنة المعتمدة (${bv.budget.name})`, `Approved budget ${bv.budget.year}`), status: bv.net.actual >= bv.net.budget ? "good" : over.length ? "warn" : "ok", paragraphs: P,
+        table: { head: [T("الحساب", "Account"), T("الموازنة", "Budget"), T("الفعلي", "Actual"), T("الانحراف", "Variance")], rows: [...bv.rows].filter((r: any) => r.budget || r.actual).sort((a: any, b: any) => a.variance - b.variance).slice(0, 8).map((r: any) => [`${r.code} ${r.name}`, num(r.budget), num(r.actual), num(r.variance)]) } });
+    }
+  }
   sections.push({ key: "books", title: T("حالة الحسابات وسلامة الدفاتر", "State of the accounts"), status: bad(checks) ? "bad" : warn(checks) ? "warn" : "good",
     paragraphs: [T(`فحوص على الدفاتر حتى ${to}: سليم ${checks.filter((c) => c.status === "good").length}، ملاحظات ${checks.filter((c) => c.status === "info").length}، يحتاج تصحيحاً ${warn(checks)}، أخطاء تؤثر على القوائم ${bad(checks)}.`, `Checks on the books up to ${to}: ${checks.filter((c) => c.status === "good").length} clean, ${checks.filter((c) => c.status === "info").length} notes, ${warn(checks)} to correct, ${bad(checks)} errors affecting the statements.`)] });
   sections.push({ key: "compliance", title: IS_EG ? T("الالتزامات النظامية (مصر)", "Regulatory obligations (Egypt)") : T("الالتزامات النظامية (السعودية)", "Regulatory obligations (Saudi Arabia)"), status: late ? "bad" : warn(comp) ? "warn" : "good",
@@ -254,6 +274,8 @@ export async function financialReport(t: Db, C: string, q: any = {}) {
     lang: en ? "en" : "ar", company: { name: en && co.nameEn ? co.nameEn : co.nameAr, vatNumber: co.vatNumber, country: CFG.code, currency: cur },
     period: { from, to, days: fa.days, prevFrom: fa.prevFrom, prevTo: fa.prevTo, compare: "prev", branchId: F.branchId }, generatedAt: new Date().toISOString(),
     verdict: { level, label: LV, health, redFlags }, keyFigures: kf, sections, checks, compliance: comp, recommendations: recs,
+    // the twelve months to the end of the period, from the ledger (net sales, gross profit, net result, cash at month end)
+    trend: fa.months.map((x: any) => ({ month: x.month, sales: x.sales, grossProfit: x.grossProfit, net: x.net, cash: x.cash })),
   };
 }
 

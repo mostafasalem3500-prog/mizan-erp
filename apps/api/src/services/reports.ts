@@ -406,11 +406,11 @@ export async function vatReturn(t: Db, companyId: string, q: any) {
   const assets = await t.rows(
     `SELECT COALESCE(SUM(l.debit - l.credit),0) vat FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
      WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.type='ASSET' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
-  // VAT on a payment or receipt recorded with an amortisation schedule (and on its reversal): standard-rated supply
+  // VAT on a payment or receipt recorded with an amortisation schedule or a lease payment (and on its reversal): standard-rated supply
   const amort = await t.one(
     `SELECT COALESCE(SUM(CASE WHEN a.system_key='VAT_IN' THEN l.debit-l.credit ELSE 0 END),0) vin, COALESCE(SUM(CASE WHEN a.system_key='VAT_OUT' THEN l.credit-l.debit ELSE 0 END),0) vout
      FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
-     WHERE a.company_id=$1 AND a.system_key IN ('VAT_IN','VAT_OUT') AND e.source_type='AMORTIZATION' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
+     WHERE a.company_id=$1 AND a.system_key IN ('VAT_IN','VAT_OUT') AND e.source_type IN ('AMORTIZATION','LEASE') AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
   if (Number(amort.vout)) sales.push({ taxCode: "S", kind: "INVOICE", net: r2(Number(amort.vout) / VAT_F), vat: Number(amort.vout) });
   if (Number(amort.vin)) exp.push({ taxCode: "S", net: r2(Number(amort.vin) / VAT_F), vat: Number(amort.vin) });
   const sgn = (k: string) => (k === "CREDIT_NOTE" ? -1 : 1);
@@ -485,9 +485,19 @@ export async function integrity(t: Db, companyId: string) {
   checks.push({ name: "ضريبة المخرجات في المستندات = حساب ضريبة المخرجات", ok: Math.abs(vat.outputVat - vat.glOutputVat) < 0.01, a: vat.outputVat, b: vat.glOutputVat });
   checks.push({ name: "ضريبة المدخلات في المستندات = حساب ضريبة المدخلات", ok: Math.abs(vat.inputVat - vat.glInputVat) < 0.01, a: vat.inputVat, b: vat.glInputVat });
   const fa = await t.one(`SELECT COALESCE(SUM(cost),0) c, COALESCE(SUM(accumulated),0) d FROM fixed_assets WHERE company_id=$1 AND status<>'DISPOSED'`, [companyId]);
-  const faGl = await t.one(`SELECT COALESCE(SUM(CASE WHEN a.subtype='FIXED_ASSET' THEN l.debit-l.credit END),0) c, COALESCE(SUM(CASE WHEN a.subtype='ACC_DEPRECIATION' THEN l.credit-l.debit END),0) d FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED'`, [companyId]);
+  const faGl = await t.one(`SELECT COALESCE(SUM(CASE WHEN a.subtype='FIXED_ASSET' AND a.system_key IS DISTINCT FROM 'ROU_ASSET' THEN l.debit-l.credit END),0) c, COALESCE(SUM(CASE WHEN a.subtype='ACC_DEPRECIATION' AND a.system_key IS DISTINCT FROM 'ROU_ACC_DEP' THEN l.credit-l.debit END),0) d FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED'`, [companyId]);
   checks.push({ name: "سجل الأصول الثابتة = حسابات الأصول الثابتة", ok: Math.abs(Number(fa.c) - Number(faGl.c)) < 0.01, a: r2(fa.c), b: r2(faGl.c) });
   checks.push({ name: "مجمع الإهلاك في السجل = حساب مجمع الإهلاك", ok: Math.abs(Number(fa.d) - Number(faGl.d)) < 0.01, a: r2(fa.d), b: r2(faGl.d) });
+  // leases: the register (opening measurement + posted interest − payments; cost − posted depreciation) against the accounts
+  const lsAny = await t.maybe(`SELECT 1 FROM leases WHERE company_id=$1 LIMIT 1`, [companyId]);
+  if (lsAny) {
+    const reg = await t.one(`SELECT COALESCE(SUM(l.liability0 + COALESCE(p.i,0) - COALESCE(p.p,0)) FILTER (WHERE l.status='ACTIVE'),0) liab, COALESCE(SUM(l.rou_cost - COALESCE(p.d,0)) FILTER (WHERE l.status='ACTIVE'),0) nbv
+        FROM leases l LEFT JOIN (SELECT lease_id, SUM(interest) i, SUM(payment) p, SUM(depreciation) d FROM lease_posts GROUP BY 1) p ON p.lease_id=l.id WHERE l.company_id=$1`, [companyId]);
+    const gl = await t.one(`SELECT COALESCE(SUM(CASE WHEN a.system_key='LEASE_LIABILITY' THEN l.credit-l.debit END),0) liab, COALESCE(SUM(CASE WHEN a.system_key IN ('ROU_ASSET','ROU_ACC_DEP') THEN l.debit-l.credit END),0) nbv
+        FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED' AND a.system_key IN ('LEASE_LIABILITY','ROU_ASSET','ROU_ACC_DEP')`, [companyId]);
+    checks.push({ name: "التزامات الإيجار في سجل العقود = حساب التزامات عقود الإيجار", ok: Math.abs(Number(reg.liab) - Number(gl.liab)) < 0.01, a: r2(reg.liab), b: r2(gl.liab) });
+    checks.push({ name: "صافي أصول حق الاستخدام في سجل العقود = حساباتها", ok: Math.abs(Number(reg.nbv) - Number(gl.nbv)) < 0.01, a: r2(reg.nbv), b: r2(gl.nbv) });
+  }
   const prov = await provisionTotals(t, companyId);
   const provGl = await t.rows(`SELECT a.system_key k, COALESCE(SUM(l.credit-l.debit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key IN ('EOSB_PROVISION','LEAVE_PROVISION','EMP_ADVANCES') AND e.status='POSTED' GROUP BY 1`, [companyId]);
   const g = (k: string) => r2(provGl.find((x) => x.k === k)?.b || 0);
@@ -522,36 +532,42 @@ export async function dashboard(t: Db, companyId: string, branchId?: string | nu
   const td = today();
   const month = td.slice(0, 7) + "-01";
   const kpi = async (sql: string, params: any[]) => Number((await t.one(sql, params)).v || 0);
-  const salesMonth = await kpi(`SELECT COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END),0) v FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date >= $2${IB}`, [companyId, month]);
-  const salesToday = await kpi(`SELECT COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END),0) v FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date = $2${IB}`, [companyId, td]);
-  const purchMonth = await kpi(`SELECT COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END),0) v FROM invoices WHERE company_id=$1 AND direction='PURCHASE' AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date >= $2${IB}`, [companyId, month]);
-  const expMonth = await kpi(`SELECT COALESCE(SUM(total),0) v FROM expenses x WHERE company_id=$1 AND status='POSTED' AND date >= $2${B ? ` AND EXISTS (SELECT 1 FROM journal_entries e WHERE e.id=x.journal_id${EB})` : ""}`, [companyId, month]);
-  const ar = await kpi(`SELECT COALESCE(SUM(l.debit-l.credit),0) v FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='AR' AND e.status='POSTED'${EB}`, [companyId]);
-  const ap = await kpi(`SELECT COALESCE(SUM(l.credit-l.debit),0) v FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='AP' AND e.status='POSTED'${EB}`, [companyId]);
-  const cash = await t.rows(`SELECT a.code, a.name_ar, COALESCE(SUM(l.debit-l.credit),0) bal FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id LEFT JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED'${EB} WHERE a.company_id=$1 AND a.is_cash_bank AND NOT a.is_group GROUP BY a.id ORDER BY a.code`, [companyId]);
-  const vatOut = await kpi(`SELECT COALESCE(SUM(l.credit-l.debit),0) v FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='VAT_OUT' AND e.status='POSTED'${EB}`, [companyId]);
-  const vatIn = await kpi(`SELECT COALESCE(SUM(l.debit-l.credit),0) v FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.status='POSTED'${EB}`, [companyId]);
-  const inventory = await kpi(`SELECT COALESCE(SUM(value),0) v FROM stock_balances WHERE company_id=$1${WB}`, [companyId]);
+  // one pass over the month's invoices and one over the ledger balances the home screen needs (they were eight queries)
+  const [inv, led, expMonth] = await Promise.all([
+    t.one(`SELECT COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END) FILTER (WHERE direction='SALE'),0) sales_month,
+        COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END) FILTER (WHERE direction='SALE' AND date = $3),0) sales_today,
+        COALESCE(SUM(CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END) FILTER (WHERE direction='PURCHASE'),0) purch_month
+      FROM invoices WHERE company_id=$1 AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date >= $2${IB}`, [companyId, month, td]),
+    t.rows(`SELECT a.id, a.code, a.name_ar, a.system_key, a.is_cash_bank, COALESCE(SUM(l.debit-l.credit),0) bal FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id LEFT JOIN journal_entries e ON e.id=l.entry_id
+      WHERE a.company_id=$1 AND NOT a.is_group AND (a.is_cash_bank OR a.system_key IN ('AR','AP','VAT_OUT','VAT_IN')) AND (l.id IS NULL OR (e.status='POSTED'${EB})) GROUP BY a.id ORDER BY a.code`, [companyId]),
+    kpi(`SELECT COALESCE(SUM(total),0) v FROM expenses x WHERE company_id=$1 AND status='POSTED' AND date >= $2${B ? ` AND EXISTS (SELECT 1 FROM journal_entries e WHERE e.id=x.journal_id${EB})` : ""}`, [companyId, month]),
+  ]);
+  const salesMonth = Number(inv.salesMonth), salesToday = Number(inv.salesToday), purchMonth = Number(inv.purchMonth);
+  const keyBal = (k: string) => led.filter((a: any) => a.systemKey === k).reduce((s: number, a: any) => s + Number(a.bal), 0);
+  const ar = keyBal("AR"), ap = -keyBal("AP"), vatOut = -keyBal("VAT_OUT"), vatIn = keyBal("VAT_IN");
+  const cash = led.filter((a: any) => a.isCashBank).map((a: any) => ({ code: a.code, nameAr: a.nameAr, bal: a.bal }));
+  const inventoryP = kpi(`SELECT COALESCE(SUM(value),0) v FROM stock_balances WHERE company_id=$1${WB}`, [companyId]);
   const start12 = addDays(month, -335).slice(0, 7) + "-01";
-  const trend = await t.rows(
+  const trendP = t.rows(
     `SELECT to_char(date,'YYYY-MM') m,
        SUM(CASE WHEN direction='SALE' THEN CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END ELSE 0 END) sales,
        SUM(CASE WHEN direction='PURCHASE' THEN CASE WHEN kind='CREDIT_NOTE' THEN -total ELSE total END ELSE 0 END) purchases
      FROM invoices WHERE company_id=$1 AND status='POSTED' AND kind IN ('INVOICE','CREDIT_NOTE') AND date >= $2${IB} GROUP BY 1 ORDER BY 1`, [companyId, start12]);
-  const pnl = await t.rows(
+  const pnlP = t.rows(
     `SELECT to_char(e.date,'YYYY-MM') m, SUM(CASE WHEN a.type='REVENUE' THEN l.credit-l.debit ELSE 0 END) revenue, SUM(CASE WHEN a.type='EXPENSE' THEN l.debit-l.credit ELSE 0 END) expense
      FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date >= $2${EB} GROUP BY 1 ORDER BY 1`, [companyId, start12]);
-  const topProducts = await t.rows(
+  const topProductsP = t.rows(
     `SELECT p.name, SUM(l.qty * l.factor) qty, SUM(l.net_amount) net FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id
      WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date >= $2${IIB} GROUP BY p.id ORDER BY net DESC LIMIT 8`, [companyId, addDays(td, -90)]);
-  const topCustomers = await t.rows(
+  const topCustomersP = t.rows(
     `SELECT p.name, SUM(i.total) total FROM invoices i JOIN partners p ON p.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.date >= $2${IIB} GROUP BY p.id ORDER BY total DESC LIMIT 8`, [companyId, addDays(td, -90)]);
-  const lowStock = await t.rows(`SELECT p.sku, p.name, p.reorder_level, COALESCE(SUM(b.qty),0) qty FROM products p LEFT JOIN stock_balances b ON b.product_id=p.id${B ? ` AND b.warehouse_id IN (SELECT id FROM warehouses WHERE branch_id=${B})` : ""} WHERE p.company_id=$1 AND p.type='STOCK' AND p.is_active GROUP BY p.id HAVING COALESCE(SUM(b.qty),0) <= p.reorder_level ORDER BY qty LIMIT 10`, [companyId]);
-  const overdue = await t.rows(`SELECT i.number, p.name, i.due_date, i.total-i.amount_paid due FROM invoices i JOIN partners p ON p.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.total-i.amount_paid>0.001 AND i.due_date < $2${IIB} ORDER BY i.due_date LIMIT 10`, [companyId, td]);
-  const recent = await t.rows(`SELECT id, number, kind, direction, partner_name, total, date, status, payment_status FROM invoices WHERE company_id=$1 AND status='POSTED'${IB} ORDER BY created_at DESC LIMIT 8`, [companyId]);
-  const openSession = await t.maybe(`SELECT number, user_name, opened_at, cash_sales, card_sales, orders_count FROM pos_sessions WHERE company_id=$1 AND status='OPEN'${WB} ORDER BY opened_at DESC LIMIT 1`, [companyId]);
-  const zatca = await t.rows(`SELECT zatca_status s, COUNT(*)::int c FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND zatca_status IS NOT NULL${IB} GROUP BY 1`, [companyId]);
-  const alerts = B ? { items: [], vat: { filed: true } } : await accountantAlerts(t, companyId, td);
+  const lowStockP = t.rows(`SELECT p.sku, p.name, p.reorder_level, COALESCE(SUM(b.qty),0) qty FROM products p LEFT JOIN stock_balances b ON b.product_id=p.id${B ? ` AND b.warehouse_id IN (SELECT id FROM warehouses WHERE branch_id=${B})` : ""} WHERE p.company_id=$1 AND p.type='STOCK' AND p.is_active GROUP BY p.id HAVING COALESCE(SUM(b.qty),0) <= p.reorder_level ORDER BY qty LIMIT 10`, [companyId]);
+  const overdueP = t.rows(`SELECT i.number, p.name, i.due_date, i.total-i.amount_paid due FROM invoices i JOIN partners p ON p.id=i.partner_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.total-i.amount_paid>0.001 AND i.due_date < $2${IIB} ORDER BY i.due_date LIMIT 10`, [companyId, td]);
+  const recentP = t.rows(`SELECT id, number, kind, direction, partner_name, total, date, status, payment_status FROM invoices WHERE company_id=$1 AND status='POSTED'${IB} ORDER BY created_at DESC LIMIT 8`, [companyId]);
+  const openSessionP = t.maybe(`SELECT number, user_name, opened_at, cash_sales, card_sales, orders_count FROM pos_sessions WHERE company_id=$1 AND status='OPEN'${WB} ORDER BY opened_at DESC LIMIT 1`, [companyId]);
+  const zatcaP = t.rows(`SELECT zatca_status s, COUNT(*)::int c FROM invoices WHERE company_id=$1 AND direction='SALE' AND status='POSTED' AND zatca_status IS NOT NULL${IB} GROUP BY 1`, [companyId]);
+  const alertsP = B ? Promise.resolve({ items: [], vat: { filed: true } } as any) : accountantAlerts(t, companyId, td);
+  const [inventory, trend, pnl, topProducts, topCustomers, lowStock, overdue, recent, openSession, zatca, alerts] = await Promise.all([inventoryP, trendP, pnlP, topProductsP, topCustomersP, lowStockP, overdueP, recentP, openSessionP, zatcaP, alertsP]);
   return { alerts, salesMonth: r2(salesMonth), salesToday: r2(salesToday), purchMonth: r2(purchMonth), expMonth: r2(expMonth), ar: r2(ar), ap: r2(ap), cash: cash.map((c) => ({ ...c, bal: r2(c.bal) })), cashTotal: r2(cash.reduce((a, c) => a + Number(c.bal), 0)), vatDue: r2(vatOut - vatIn), inventory: r2(inventory), trend, pnl: pnl.map((p) => ({ ...p, revenue: r2(p.revenue), expense: r2(p.expense), profit: r2(p.revenue - p.expense) })), topProducts, topCustomers, lowStock, overdue, recent, openSession, zatca };
 }
 

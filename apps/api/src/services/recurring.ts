@@ -2,6 +2,8 @@
 import { Db, tx, pool, db } from "../db/pool";
 import { runAmortization, companiesWithDueAmortization } from "./amortization";
 import { runPeriodicReports } from "./periodic";
+import { runLeases, companiesWithDueLeases } from "./leases";
+import { DEMO_LOADING } from "../lib/core";
 import { beat } from "./monitor";
 import { bad, isDate, today, addDays, addMonths } from "../lib/core";
 import { createExpense } from "./expenses";
@@ -51,6 +53,8 @@ export function startRecurringScheduler() {
       for (const r of rows) await runDueForCompany(r.company_id, "النظام (قيد دوري)");
       // amortisation schedules set to post by themselves: each month as soon as it has ended
       for (const C of await companiesWithDueAmortization(db)) await tx((t) => runAmortization(t, C, "النظام (إطفاء شهري)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[amortization]", C, e.message));
+      // leases: depreciation of the right-of-use asset and interest on the liability, each month as soon as it has ended
+      for (const C of await companiesWithDueLeases(db, DEMO_LOADING)) await tx((t) => runLeases(t, C, "النظام (عقود الإيجار)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[leases]", C, e.message));
       // monthly / quarterly / annual written reports once the period has ended (a few establishments per pass)
       await runPeriodicReports().catch((e) => console.error("[periodic-reports]", e.message));
     } catch (e) {

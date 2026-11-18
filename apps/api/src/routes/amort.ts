@@ -6,6 +6,7 @@ import { authenticate, perm, cid, actor, p } from "../lib/auth";
 import { audit } from "./master";
 import * as am from "../services/amortization";
 import * as ecl from "../services/ecl";
+import * as ls from "../services/leases";
 
 export const amort = Router();
 amort.use(authenticate);
@@ -38,3 +39,14 @@ const parseRates = (v: any) => { if (!v) return undefined; try { return JSON.par
 amort.get("/ecl", perm("accounting.read"), h(async (req) => ecl.eclCalc(db, cid(req), { asOf: req.query.asOf, rates: parseRates(req.query.rates) })));
 amort.get("/ecl/runs", perm("accounting.read"), h(async (req) => ecl.eclRuns(db, cid(req))));
 amort.post("/ecl/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ecl.eclPost(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "ecl", r.runId, { asOf: r.asOf, required: r.required, adjustment: r.adjustment }); return r; }));
+
+// ── leases (IFRS 16 / EAS 49) ──
+amort.get("/leases", perm("accounting.read"), h(async (req) => ({ ...(await ls.listLeases(db, cid(req))), framework: await ls.framework(db, cid(req)) })));
+amort.put("/leases/framework", perm("settings.write"), h(async (req) => { const r = await ls.setFramework(db, cid(req), String(req.body?.framework || "")); await audit(req, "UPDATE", "framework", null, r); return r; }));
+amort.post("/leases/preview", perm("accounting.write"), h(async (req) => ls.previewLease(req.body || {})));
+amort.post("/leases/run", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ls.runLeases(t, cid(req), actor(req), req.body?.through || today(), req.body?.id)); if (r.length) await audit(req, "RUN", "lease", null, { count: r.length }); return r; }));
+amort.get("/leases/:id", perm("accounting.read"), h(async (req) => ls.getLease(db, cid(req), p(req).id)));
+amort.post("/leases", perm("accounting.write"), h(async (req) => { const l = await tx((t) => ls.createLease(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "lease", l.id, { number: l.number, pv: l.pv }); return l; }));
+amort.post("/leases/:id/pay", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ls.payLease(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "PAY", "lease", p(req).id, { n: r.n, amount: r.amount }); return r; }));
+amort.post("/leases/:id/terminate", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ls.terminateLease(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "TERMINATE", "lease", p(req).id, { date: r.date, gain: r.gain }); return r; }));
+amort.delete("/leases/:id", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ls.deleteLease(t, cid(req), actor(req), p(req).id)); await audit(req, "DELETE", "lease", p(req).id); return r; }));

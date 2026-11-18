@@ -51,7 +51,7 @@ export async function financialAnalysis(t: Db, companyId: string, q: any) {
   const vatIn = await glMove(t, companyId, from, to, "a.system_key='VAT_IN'");
   const grossSales = r2(netSales + Math.max(0, vatOut));
   const purchases = r2(cogs + (E.inventory - O.inventory) + Math.max(0, vatIn));
-  const finance = await glMove(t, companyId, from, to, "a.code='5402'");
+  const finance = await glMove(t, companyId, from, to, "(a.code='5402' OR a.system_key='LEASE_INTEREST')");
   const depreciation = await glMove(t, companyId, from, to, "a.system_key='DEPRECIATION'");
 
   const R: Ratio[] = [];

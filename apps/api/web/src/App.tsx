@@ -45,6 +45,7 @@ const ExpensesPage = lz(() => import("./pages/Money"), "ExpensesPage");
 const AssetsPage = lz(() => import("./pages/Money"), "AssetsPage");
 const AmortizationPage = lz(() => import("./pages/Amortization"), "AmortizationPage");
 const EclPage = lz(() => import("./pages/Ecl"), "EclPage");
+const LeasesPage = lz(() => import("./pages/Leases"), "LeasesPage");
 const AccountsPage = lz(() => import("./pages/Accounting"), "AccountsPage");
 const JournalsPage = lz(() => import("./pages/Accounting"), "JournalsPage");
 const PeriodsPage = lz(() => import("./pages/Accounting"), "PeriodsPage");
@@ -154,7 +155,7 @@ export function App() {
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});
   if (!me.company) return <AppCtx.Provider value={{ me, reload, can }}><NoCompany /></AppCtx.Provider>;
-  const logout = () => { session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") || CFG.assoc ? "/charity" : "/login"); };
+  const logout = () => { if (session.token) api("/auth/logout", { body: {} }).catch(() => undefined); session.token = null; setMe(null); nav(loc.pathname.startsWith("/charity") || CFG.assoc ? "/charity" : "/login"); };
   if (loc.pathname === "/charity" || loc.pathname.startsWith("/charity/")) return CFG.charity ? <AppCtx.Provider value={{ me, reload, can }}><React.Suspense fallback={<div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>}><CharityApp onLogout={logout} /></React.Suspense></AppCtx.Provider> : <Navigate to="/" replace />;
   const isPos = loc.pathname === "/pos";
   return (
@@ -224,6 +225,7 @@ export function App() {
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/amortizations" element={<AmortizationPage />} />
                 <Route path="/ecl" element={<EclPage />} />
+                <Route path="/leases" element={<LeasesPage />} />
                 <Route path="/bank" element={<BankPage />} />
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />

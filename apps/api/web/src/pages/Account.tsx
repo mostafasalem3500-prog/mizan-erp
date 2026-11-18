@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { CFG } from "../shared/country";
-import { api, useFetch, Loading, Field, Input, useAction, fmtDT } from "../lib";
+import { api, useFetch, Loading, Field, Input, useAction, fmtDT, confirmDlg } from "../lib";
 import { LangToggle } from "../i18n/LangToggle";
 
 export function AccountPage() {
@@ -53,7 +53,24 @@ export function AccountPage() {
               </>}
         </div></div>
       </div>
+      <Sessions />
     </div>
+  );
+}
+
+/** Devices signed in to this account; any of them can be signed out from here. */
+function Sessions() {
+  const { data, reload } = useFetch<any>("/auth/sessions");
+  const { run, busy } = useAction();
+  if (!data) return null;
+  if (data.showcase) return null;
+  const others = data.rows.filter((r: any) => !r.current).length;
+  return (
+    <div className="card" data-sessions><div className="card-h"><div><h3>الأجهزة المسجّل دخولها</h3><div className="small muted">كل جلسة تنتهي بعد 12 ساعة من آخر دخول. إن رأيت جهازاً لا تعرفه فأنهِ جلسته وغيّر كلمة المرور — تغيير كلمة المرور ينهي الجلسات الأخرى كلها.</div></div>
+      {others > 0 && <button className="btn sm" disabled={busy} data-revoke-others onClick={() => confirmDlg("تسجيل الخروج من كل الأجهزة الأخرى؟") && run(async () => { await api("/auth/sessions/revoke-others", { body: {} }); reload(); }, "سُجّل الخروج من الأجهزة الأخرى")}>تسجيل الخروج من الأجهزة الأخرى ({others})</button>}</div>
+      <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الجهاز</th><th>عنوان IP</th><th>بداية الجلسة</th><th>آخر نشاط</th><th /></tr></thead>
+        <tbody>{data.rows.map((r: any) => <tr key={r.id} data-session={r.current ? "current" : "other"}><td>{r.mobile ? "📱" : "💻"} {r.browser}{r.os ? ` · ${r.os}` : ""} {r.current && <span className="badge green">هذا الجهاز</span>}</td><td dir="ltr" className="num small">{r.ip || "—"}</td><td className="small">{fmtDT(r.createdAt)}</td><td className="small">{fmtDT(r.lastSeenAt)}</td>
+          <td>{!r.current && <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { await api(`/auth/sessions/${r.id}`, { method: "DELETE" }); reload(); }, "انتهت الجلسة")}>إنهاء</button>}</td></tr>)}</tbody></table></div></div>
   );
 }
 

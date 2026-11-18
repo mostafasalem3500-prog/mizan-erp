@@ -58,8 +58,17 @@ async function companiesOf(userId: string) {
   return db.rows(`SELECT c.id, c.name_ar, c.plan, c.status, c.subscription_ends_at, c.logo, m.role FROM memberships m JOIN companies c ON c.id=m.company_id WHERE m.user_id=$1 AND m.is_active ORDER BY m.created_at`, [userId]);
 }
 
-function tokenFor(u: any, companyId: string | null, role: string | null): AuthCtx & { token: string } {
-  const ctx: AuthCtx = { userId: u.id, userName: u.fullName, email: u.email, companyId, role, superAdmin: !!u.isSuperAdmin };
+/**
+ * A token for the user in a company. A new sign-in opens a session (shown in «my account» and can be ended from there);
+ * switching company keeps the same session and extends it.
+ */
+async function tokenFor(u: any, companyId: string | null, role: string | null, req: any, sid?: string | null): Promise<AuthCtx & { token: string }> {
+  if (sid) await db.exec(`UPDATE user_sessions SET expires_at=now() + interval '12 hours', last_seen_at=now() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`, [sid, u.id]);
+  else {
+    await db.exec(`DELETE FROM user_sessions WHERE user_id=$1 AND expires_at < now() - interval '30 days'`, [u.id]);
+    sid = (await db.one(`INSERT INTO user_sessions (user_id, ip, user_agent) VALUES ($1,$2,$3) RETURNING id`, [u.id, String(req.ip || "").slice(0, 64) || null, String(req.headers?.["user-agent"] || "").slice(0, 300) || null])).id;
+  }
+  const ctx: AuthCtx = { userId: u.id, userName: u.fullName, email: u.email, companyId, role, superAdmin: !!u.isSuperAdmin, sid: sid! };
   return { ...ctx, token: signToken(ctx) };
 }
 
@@ -84,7 +93,7 @@ auth.post(
       await t.insert("audit_logs", { companyId: c.id, userId: u.id, userName: fullName, action: "REGISTER", entity: "company", entityId: c.id, details: { nameAr: c.nameAr } });
       return { u, c };
     });
-    return { ...tokenFor(out.u, out.c.id, "OWNER"), user: publicUser(out.u), companies: await companiesOf(out.u.id) };
+    return { ...(await tokenFor(out.u, out.c.id, "OWNER", req)), user: publicUser(out.u), companies: await companiesOf(out.u.id) };
   }),
 );
 
@@ -123,7 +132,7 @@ auth.post(
     const companies = await companiesOf(u.id);
     const preferred = req.body.companyId && companies.find((c) => c.id === req.body.companyId);
     const c = preferred || companies[0] || null;
-    return { ...tokenFor(u, c?.id || null, c?.role || null), user: publicUser(u), companies };
+    return { ...(await tokenFor(u, c?.id || null, c?.role || null, req)), user: publicUser(u), companies };
   }),
 );
 
@@ -200,7 +209,7 @@ auth.post(
     const companies = await companiesOf(u.id);
     const c = companies.find((x) => x.id === req.body.companyId) || (u.isSuperAdmin ? await db.maybe(`SELECT id, 'OWNER' AS role FROM companies WHERE id=$1`, [req.body.companyId]) : null);
     if (!c) throw bad("المنشأة غير متاحة لك");
-    return { ...tokenFor(u, c.id, c.role), companies };
+    return { ...(await tokenFor(u, c.id, c.role, req, req.auth.sid)), companies };
   }),
 );
 
@@ -210,7 +219,7 @@ auth.post(
     const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]);
     const name = String(need(req.body, "nameAr", "اسم المنشأة"));
     const c = await tx((t) => bootstrapCompany(t, { nameAr: name, nameEn: req.body.nameEn, vatNumber: req.body.vatNumber, crNumber: req.body.crNumber, city: req.body.city }, u.id));
-    return { ...tokenFor(u, c.id, "OWNER"), companies: await companiesOf(u.id) };
+    return { ...(await tokenFor(u, c.id, "OWNER", req, req.auth.sid)), companies: await companiesOf(u.id) };
   }),
 );
 
@@ -225,10 +234,46 @@ auth.post(
     if (!/[A-Za-z\u0600-\u06FF]/.test(next) || !/\d/.test(next)) throw bad("كلمة المرور يجب أن تجمع حروفاً وأرقاماً");
     if (next === String(req.body.current)) throw bad("كلمة المرور الجديدة مطابقة للحالية");
     await db.exec(`UPDATE users SET password_hash=$2, password_changed_at=now() WHERE id=$1`, [u.id, await bcrypt.hash(next, 10)]);
+    // every other device signs in again with the new password; this one stays
+    const ended = await db.rows(`UPDATE user_sessions SET revoked_at=now(), revoked_reason='PASSWORD' WHERE user_id=$1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2 RETURNING id`, [u.id, req.auth.sid || null]);
     await audit2(req, "CHANGE_PASSWORD");
-    return { ok: true };
+    return { ok: true, endedSessions: ended.length };
   }),
 );
+
+// ── sign-in sessions ──
+/** Browser and system from the user-agent text, enough to recognise one's own devices. */
+function device(ua: string | null) {
+  const s = String(ua || "");
+  const br = /Edg\//.test(s) ? "Edge" : /OPR\//.test(s) ? "Opera" : /Chrome\//.test(s) ? "Chrome" : /Firefox\//.test(s) ? "Firefox" : /Safari\//.test(s) ? "Safari" : /Electron\//.test(s) ? "Mizan Desktop" : s ? s.split(" ")[0].slice(0, 30) : "—";
+  const os = /Windows/.test(s) ? "Windows" : /iPhone|iPad/.test(s) ? "iOS" : /Android/.test(s) ? "Android" : /Mac OS X/.test(s) ? "macOS" : /Linux/.test(s) ? "Linux" : "";
+  return { browser: /Electron\//.test(s) ? "Mizan Desktop" : br, os, mobile: /Mobile|iPhone|Android/.test(s) };
+}
+auth.get("/sessions", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]);
+  // the shared showcase account: visitors do not see (or end) each other's sessions
+  if (isShowcase(u)) return { showcase: true, rows: [] };
+  const rows = await db.rows(`SELECT id, ip, user_agent, created_at, last_seen_at, expires_at FROM user_sessions WHERE user_id=$1 AND revoked_at IS NULL AND expires_at > now() ORDER BY last_seen_at DESC LIMIT 50`, [u.id]);
+  return { showcase: false, current: req.auth.sid || null, rows: rows.map((r: any) => ({ id: r.id, ip: r.ip, createdAt: r.createdAt, lastSeenAt: r.lastSeenAt, expiresAt: r.expiresAt, current: r.id === req.auth.sid, ...device(r.userAgent) })) };
+}));
+auth.delete("/sessions/:id", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); notShowcase(u);
+  const r = await db.maybe(`UPDATE user_sessions SET revoked_at=now(), revoked_reason='USER' WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING id`, [String(req.params.id), u.id]);
+  if (!r) throw bad("الجلسة غير موجودة أو منتهية");
+  await audit2(req, "END_SESSION");
+  return { ok: true, current: r.id === req.auth.sid };
+}));
+auth.post("/sessions/revoke-others", h(async (req) => {
+  const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); notShowcase(u);
+  const r = await db.rows(`UPDATE user_sessions SET revoked_at=now(), revoked_reason='USER' WHERE user_id=$1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2 RETURNING id`, [u.id, req.auth.sid || null]);
+  await audit2(req, "END_OTHER_SESSIONS");
+  return { ended: r.length };
+}));
+/** Sign out: the token stops working on the server too, not only in this browser. */
+auth.post("/logout", h(async (req) => {
+  if (req.auth.sid) await db.exec(`UPDATE user_sessions SET revoked_at=now(), revoked_reason='LOGOUT' WHERE id=$1 AND user_id=$2`, [req.auth.sid, req.auth.userId]);
+  return { ok: true };
+}));
 
 // ── two-step sign-in ──
 auth.get("/security", h(async (req) => { const u = await db.one(`SELECT * FROM users WHERE id=$1`, [req.auth.userId]); return { email: u.email, fullName: u.fullName, twoFactor: !!u.totpEnabled, recoveryLeft: u.totpEnabled && Array.isArray(u.totpRecovery) ? u.totpRecovery.length : 0, passwordChangedAt: u.passwordChangedAt || null, lastLoginAt: u.lastLoginAt || null, showcase: isShowcase(u) }; }));

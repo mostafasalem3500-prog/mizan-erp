@@ -60,7 +60,7 @@ export async function issueReport(t: Db, C: string, user: string, b: any, auto =
   const p = await bounds(t, C, kind, date);
   if (p.from > today()) throw bad("الفترة لم تبدأ بعد");
   const to = p.to > today() ? today() : p.to;
-  const [ar, en] = [await financialReport(t, C, { from: p.from, to }), await financialReport(t, C, { from: p.from, to, lang: "en" })];
+  const [ar, en] = await Promise.all([financialReport(t, C, { from: p.from, to }), financialReport(t, C, { from: p.from, to, lang: "en" })]);
   const title = reportTitle(kind, p.from, p.to) + (to < p.to ? ` (حتى ${to})` : "");
   const row = await t.one(`INSERT INTO periodic_reports (company_id, kind, period_from, period_to, title, level, health, data, data_en, auto, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)

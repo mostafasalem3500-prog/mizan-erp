@@ -44,6 +44,8 @@ export const SAUDI_COA: Row[] = [
   ["120203", "مجمع إهلاك الأثاث", "Acc. Dep. Furniture", "ACC_DEPRECIATION"],
   ["120204", "مجمع إهلاك الأجهزة والمعدات", "Acc. Dep. Equipment", "ACC_DEPRECIATION", { key: "ACC_DEP" }],
   ["120205", "مجمع إهلاك الحاسب الآلي", "Acc. Dep. Computers", "ACC_DEPRECIATION"],
+  ["1240", "أصول حق الاستخدام", "Right-of-use Assets", "FIXED_ASSET", { key: "ROU_ASSET" }],
+  ["1241", "مجمع إهلاك أصول حق الاستخدام", "Acc. Dep. Right-of-use Assets", "ACC_DEPRECIATION", { key: "ROU_ACC_DEP" }],
 
   ["2", "الخصوم", "Liabilities", "CURRENT_LIABILITY"],
   ["21", "الخصوم المتداولة", "Current Liabilities", "CURRENT_LIABILITY"],
@@ -66,6 +68,7 @@ export const SAUDI_COA: Row[] = [
   ["22", "الخصوم غير المتداولة", "Non-current Liabilities", "LONG_TERM_LIABILITY"],
   ["2201", "مخصص مكافأة نهاية الخدمة", "End of Service Provision", "LONG_TERM_LIABILITY", { key: "EOSB_PROVISION" }],
   ["2202", "قروض طويلة الأجل", "Long-term Loans", "LONG_TERM_LIABILITY"],
+  ["2240", "التزامات عقود الإيجار", "Lease Liabilities", "LONG_TERM_LIABILITY", { key: "LEASE_LIABILITY" }],
 
   ["3", "حقوق الملكية", "Equity", "EQUITY"],
   ["31", "رأس المال والاحتياطيات", "Capital & Reserves", "EQUITY"],
@@ -110,6 +113,7 @@ export const SAUDI_COA: Row[] = [
   ["5216", "مصروف الإجازات المستحقة", "Leave Expense", "EXPENSE", { key: "LEAVE_EXPENSE" }],
   ["5217", "ضريبة استقطاع تتحملها المنشأة", "Withholding Tax Borne", "EXPENSE", { key: "WHT_EXPENSE" }],
   ["5230", "مصروف الديون المشكوك في تحصيلها", "Bad Debt Expense", "EXPENSE", { key: "BAD_DEBT" }],
+  ["5240", "إهلاك أصول حق الاستخدام", "Right-of-use Depreciation", "EXPENSE", { key: "ROU_DEPRECIATION" }],
   ["53", "مصروفات البيع والتسويق", "Selling & Marketing", "SELLING_EXPENSE"],
   ["5301", "الدعاية والإعلان", "Advertising", "SELLING_EXPENSE", { key: "ADVERTISING" }],
   ["5302", "عمولات المبيعات", "Sales Commissions", "SELLING_EXPENSE"],
@@ -120,6 +124,7 @@ export const SAUDI_COA: Row[] = [
   ["5402", "مصروفات تمويلية", "Finance Costs", "OTHER_EXPENSE"],
   ["5403", "خسائر بيع أصول", "Loss on Asset Disposal", "OTHER_EXPENSE"],
   ["5404", "خسائر فروق عملة", "FX Losses", "OTHER_EXPENSE", { key: "FX_LOSS" }],
+  ["5440", "فوائد التزامات الإيجار", "Interest on Lease Liabilities", "OTHER_EXPENSE", { key: "LEASE_INTEREST" }],
 ];
 
 /** Egypt edition: same structure and system keys (so the posting engine is unchanged), Egyptian names,

@@ -11,6 +11,7 @@ import { createPayment, cancelPayment } from "../services/payments";
 import { createExpense, cancelExpense } from "../services/expenses";
 import { createAsset, runDepreciation, disposeAsset } from "../services/assets";
 import { unpostOnReverse } from "../services/amortization";
+import { leaseUnpostOnReverse } from "../services/leases";
 import { closeFiscalYear, reopenFiscalYear } from "../services/closing";
 import * as pos from "../services/pos";
 import { settle as settleOrder } from "../services/restaurant";
@@ -187,7 +188,7 @@ ops.post("/expenses/:id/cancel", perm("expenses.write"), h(async (req) => tx((t)
 ops.get("/journals", perm("accounting.read"), h(async (req) => rep.journalBook(db, cid(req), req.query)));
 ops.get("/journals/:id", perm("accounting.read"), h(async (req) => { const e = await db.one(`SELECT * FROM journal_entries WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); e.lines = await db.rows(`SELECT l.*, a.code, a.name_ar, p.name AS partner_name FROM journal_lines l JOIN accounts a ON a.id=l.account_id LEFT JOIN partners p ON p.id=l.partner_id WHERE l.entry_id=$1 ORDER BY l.sort`, [e.id]); return e; }));
 ops.post("/journals", perm("accounting.write"), h(async (req) => { const e = await tx((t) => misc.manualJournal(t, cid(req), actor(req), req.body)); await audit(req, "CREATE", "journal", e?.id || null, { number: e?.number }); return e; }));
-ops.post("/journals/:id/reverse", perm("accounting.write"), h(async (req) => { const e = await tx(async (t) => { await unpostOnReverse(t, cid(req), p(req).id); return reverse(t, cid(req), p(req).id, req.body?.date || today(), req.body?.memo, actor(req)); }); await audit(req, "REVERSE", "journal", p(req).id, { by: e?.number }); return e; }));
+ops.post("/journals/:id/reverse", perm("accounting.write"), h(async (req) => { const e = await tx(async (t) => { await unpostOnReverse(t, cid(req), p(req).id); await leaseUnpostOnReverse(t, cid(req), p(req).id); return reverse(t, cid(req), p(req).id, req.body?.date || today(), req.body?.memo, actor(req)); }); await audit(req, "REVERSE", "journal", p(req).id, { by: e?.number }); return e; }));
 ops.post("/journals/opening", perm("accounting.write"), h(async (req) => tx((t) => misc.openingBalances(t, cid(req), actor(req), req.body.date, req.body.lines || []))));
 
 // ─── inventory ─────────────────────────────────────────────────────────────

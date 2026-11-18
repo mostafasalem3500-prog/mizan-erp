@@ -856,3 +856,4 @@ html[data-edition="assoc"] .sidebar .group { color: #8fb0e0; }
 @media print { .fr { padding: 0; } .fr-pill, .fr-recs .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 @media (max-width: 600px) { .fr { padding: 12px; } .fr-head { flex-direction: column; align-items: stretch; } .fr-verdict { align-self: center; } }
 .fr .mini-kpis small { display: block; margin-top: 2px; }
+.tbl tr.warn-row td { background: color-mix(in srgb, var(--danger) 7%, transparent); }

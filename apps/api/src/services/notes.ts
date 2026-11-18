@@ -9,6 +9,7 @@ import { Db } from "../db/pool";
 import { IS_EG, CFG } from "../lib/country";
 import { isDate, today, r2 } from "../lib/core";
 import { BAND_AR } from "./ecl";
+import { framework, leaseDisclosure } from "./leases";
 
 const n = (v: any) => r2(Number(v || 0));
 
@@ -59,7 +60,9 @@ export async function financialNotes(t: Db, C: string, q: any) {
   const equity = rows((a) => a.type === "EQUITY", -1); const profit = n(total(revenue) - total(cogs) - total(expenses));
   const provisions = rows((a) => ["EOSB_PROVISION", "LEAVE_PROVISION"].includes(a.systemKey), -1);
   const vat = { output: n(-(acc.find((a: any) => a.systemKey === "VAT_OUT")?.bal || 0)), input: n(acc.find((a: any) => a.systemKey === "VAT_IN")?.bal || 0) };
-  const frame = IS_EG ? "معايير المحاسبة المصرية" : "المعيار الدولي للتقرير المالي للمنشآت الصغيرة والمتوسطة (IFRS for SMEs) المعتمد في المملكة العربية السعودية";
+  const fw = await framework(t, C);
+  const frame = IS_EG ? "معايير المحاسبة المصرية" : fw === "IFRS" ? "المعايير الدولية للتقرير المالي (IFRS) المعتمدة في المملكة العربية السعودية" : "المعيار الدولي للتقرير المالي للمنشآت الصغيرة والمتوسطة (IFRS for SMEs) المعتمد في المملكة العربية السعودية";
+  const lease = await leaseDisclosure(t, C, from, to);
   const vatRate = CFG.vatRate;
   return {
     from, to, company: { name: co.nameAr, nameEn: co.nameEn, vatNumber: co.vatNumber, crNumber: co.crNumber, city: co.city }, currency: CFG.currencyAr || CFG.currency, profit,
@@ -74,6 +77,7 @@ export async function financialNotes(t: Db, C: string, q: any) {
         `ضريبة القيمة المضافة: تُحتسب بنسبة ${vatRate}% على التوريدات الخاضعة؛ ضريبة المخرجات التزام وضريبة المدخلات القابلة للاسترداد أصل، ويُسوّى الصافي في الإقرار الدوري.`,
         "منافع الموظفين: يُكوَّن مخصص لمكافأة نهاية الخدمة والإجازات المستحقة شهرياً وفق نظام العمل.",
         "العملات الأجنبية: تُسجَّل المعاملات بسعر الصرف في تاريخها، وتُثبت فروق الصرف عند السداد في قائمة الدخل.",
+        ...(lease ? [`عقود الإيجار (${IS_EG ? "معيار المحاسبة المصري 49" : "المعيار الدولي للتقرير المالي 16"}): يُثبت في بداية العقد التزام بالقيمة الحالية لدفعات الإيجار مخصومة بمعدل الاقتراض الإضافي، وأصل حق استخدام بالمبلغ نفسه مضافاً إليه التكاليف المباشرة الأولية؛ يُهلك الأصل بالقسط الثابت على مدة العقد، وتُحمَّل فائدة الالتزام بطريقة الفائدة الفعلية. العقود التي مدتها 12 شهراً أو أقل تُحمَّل مصروفاً.`] : !IS_EG && fw === "IFRS_SMES" ? ["عقود الإيجار التشغيلية: تُحمَّل دفعاتها مصروفاً بالقسط الثابت على مدة العقد (القسم 20)."] : []),
       ] },
       { no: 4, title: "النقد وما في حكمه", rows: cash, total: total(cash) },
       { no: 5, title: "الذمم المدينة التجارية", rows: rows(sub("RECEIVABLE"), 1), total: total(rows(sub("RECEIVABLE"), 1)), ageing: await ageing("SALE"), ...(ecl
@@ -91,6 +95,11 @@ export async function financialNotes(t: Db, C: string, q: any) {
       { no: 15, title: "الأطراف ذات العلاقة", todo: "المعاملات والأرصدة مع الملاك وأعضاء الإدارة والمنشآت الشقيقة — تُستكمل من الإدارة. (رصيد جاري المالك ظاهر في إيضاح حقوق الملكية.)" },
       { no: 16, title: "الالتزامات المحتملة والارتباطات", todo: "الضمانات البنكية، القضايا، وعقود الإيجار والشراء غير المنفَّذة — تُستكمل من الإدارة." },
       { no: 17, title: "الأحداث اللاحقة", todo: "أي حدث جوهري بعد تاريخ القوائم وقبل اعتمادها — يُستكمل من الإدارة." },
+      ...(lease ? [{ no: 18, title: "عقود الإيجار — أصول حق الاستخدام والتزامات الإيجار", rows: [
+        { name: `صافي القيمة الدفترية لأصول حق الاستخدام (${lease.count} عقد قائم)`, amount: lease.nbv }, { name: "التزامات عقود الإيجار (القيمة الحالية)", amount: lease.liability },
+        { name: "إهلاك أصول حق الاستخدام للفترة", amount: lease.depreciation }, { name: "فوائد التزامات الإيجار للفترة", amount: lease.interest }, { name: "دفعات الإيجار المسددة في الفترة", amount: lease.paid },
+        { name: "تحليل الاستحقاق (دفعات غير مخصومة): خلال سنة", amount: lease.maturity.y1 }, { name: "من سنة إلى خمس سنوات", amount: lease.maturity.y5 }, { name: "أكثر من خمس سنوات", amount: lease.maturity.over5 },
+      ] }] : []),
     ],
   };
 }

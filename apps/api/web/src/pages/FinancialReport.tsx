@@ -38,6 +38,7 @@ export function ReportView({ r, title }: { r: any; title?: string }) {
       </div>
       <div className="mini-kpis mt">{r.keyFigures.map((k: any) => <div key={k.key}><span>{k.label}</span><b className={"num" + (k.value < 0 ? " neg-val" : "")}>{money(k.value)}</b>
         {k.change !== null && k.change !== undefined ? <small className={(k.change >= 0) !== !!k.upBad ? "pos-val" : "neg-val"}>{k.change >= 0 ? "▲" : "▼"} {Math.abs(k.change)}%</small> : k.prev !== null && k.prev !== undefined ? <small className="muted">كان <span className="num">{money(k.prev)}</span></small> : null}</div>)}</div>
+      {r.trend?.some((x: any) => x.sales || x.net || x.cash) && <TrendChart rows={r.trend} />}
       {r.sections.map((s: any) => <section key={s.key} className="fr-sec" data-section={s.key}>
         <h3><span>{s.title}</span><Pill s={s.status} /></h3>
         {s.paragraphs.map((p: string, i: number) => <p key={i}>{p}</p>)}
@@ -54,6 +55,30 @@ export function ReportView({ r, title }: { r: any; title?: string }) {
     </div>
   );
 }
+/** Twelve months to the end of the period: net sales as bars, net result and month-end cash as lines. */
+function TrendChart({ rows }: { rows: any[] }) {
+  const W = 760, H = 190, P = { l: 6, r: 6, t: 14, b: 26 };
+  const vals = rows.flatMap((x) => [x.sales, x.net, x.cash]);
+  const max = Math.max(1, ...vals), min = Math.min(0, ...vals);
+  const bw = (W - P.l - P.r) / rows.length;
+  const y = (v: number) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
+  const cx = (i: number) => P.l + bw * i + bw / 2;
+  const line = (k: string) => rows.map((x, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${y(x[k]).toFixed(1)}`).join(" ");
+  return (
+    <section className="fr-sec" data-section="trend"><h3><span>آخر 12 شهراً</span></h3>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H }} role="img" aria-label="صافي المبيعات وصافي النتيجة والنقدية لآخر 12 شهراً">
+        <line x1={P.l} x2={W - P.r} y1={y(0)} y2={y(0)} stroke="var(--border)" />
+        {rows.map((x, i) => <g key={x.month}><rect x={cx(i) - bw * 0.32} width={bw * 0.64} y={Math.min(y(x.sales), y(0))} height={Math.abs(y(x.sales) - y(0))} fill="var(--primary)" opacity=".28"><title>{`${x.month}\n${money(x.sales)}`}</title></rect>
+          <text x={cx(i)} y={H - 8} fontSize="10" textAnchor="middle" fill="var(--muted)">{x.month.slice(2)}</text></g>)}
+        <path d={line("net")} fill="none" stroke="var(--success)" strokeWidth="2.2" />
+        <path d={line("cash")} fill="none" stroke="var(--accent)" strokeWidth="2" strokeDasharray="5 4" />
+        {rows.map((x, i) => <circle key={i} cx={cx(i)} cy={y(x.net)} r="2.8" fill={x.net < 0 ? "var(--danger)" : "var(--success)"}><title>{`${x.month}: ${money(x.net)}`}</title></circle>)}
+      </svg>
+      <div className="row small muted" style={{ gap: 16, justifyContent: "center" }}><span><i className="lg-dot" style={{ background: "var(--primary)", opacity: 0.5 }} /> صافي المبيعات</span><span><i className="lg-dot" style={{ background: "var(--success)" }} /> صافي النتيجة</span><span><i className="lg-dot" style={{ background: "var(--accent)" }} /> النقدية آخر الشهر</span></div>
+    </section>
+  );
+}
+
 function CheckTable({ rows, refs }: { rows: any[]; refs?: boolean }) {
   return <div className="table-wrap"><table className="tbl compact fr-checks"><thead><tr><th style={{ width: 130 }}>الحالة</th><th>البند</th><th>النتيجة</th></tr></thead>
     <tbody>{rows.map((c: any) => <tr key={c.key} data-check={c.key} data-status={c.status}><td><Pill s={c.status} /></td><td><b>{c.label}</b>{refs && c.ref && <div className="small muted">{c.ref}</div>}</td>
