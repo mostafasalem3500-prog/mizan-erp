@@ -7,7 +7,7 @@
 |---|---|---|
 | `mizan-api` (السعودي) | — | https://mizan-api-production-7c00.up.railway.app |
 | `mizan-eg` (المصري) | `MIZAN_COUNTRY=EG` | https://mizan-eg-production.up.railway.app |
-| `mizan-assoc` (الجمعيات السعودية) | `MIZAN_ASSOC=1` | انظر لوحة Railway |
+| `mizan-assoc` (الجمعيات السعودية) | `MIZAN_ASSOC=1` | https://mizan-assoc-production.up.railway.app |
 
 لكل خدمة قاعدة بيانات مستقلة. `MIZAN_ASSOC=1` يُشغّل واجهة الجمعيات (`/charity`) ويجعلها الواجهة الأمامية، والبرنامج المحاسبي الكامل بداخلها (زر «النظام المحاسبي الكامل» وفي المحاسبي «↩ نظام الجمعية»). لا تعمل في النسخة المصرية ولا نسخة سطح المكتب. `ASSOC_NAME` اختياري (الاسم قبل الدخول؛ الافتراضي ريادة العطاء).
 
