@@ -39,6 +39,7 @@ import { r12 } from "./routes/round12";
 import { runZatcaSelfTest } from "./zatca/selftest";
 import { runAccountingSelfCheck } from "./services/selfcheck";
 import { startRecurringScheduler } from "./services/recurring";
+import { startDailyBackups } from "./services/assoc2";
 import { seedDemoAccount } from "./services/seed-demo-account";
 import { startDesktopLicenseCheck } from "./services/desktopLicenseCheck";
 import { startDesktopGuard } from "./services/desktopGuard";
@@ -234,6 +235,7 @@ migrate()
     if (IS_DESKTOP) setTimeout(selfCheck, 3 * 60_000).unref(); else selfCheck();
     if (process.env.ZATCA_SELFTEST) zatcaBootSelfTest().catch((e) => console.error("[zatca-selftest]", e));
     startRecurringScheduler();
+    startDailyBackups();
     startDigestScheduler();
     startDesktopGuard().catch((e) => console.error("[guard]", e));
     startDesktopLicenseCheck();

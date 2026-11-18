@@ -260,5 +260,8 @@ export async function alerts(t: Db, companyId: string) {
   const zOld = await t.one(`SELECT COALESCE(SUM(amount),0) s FROM charity_receipts WHERE company_id=$1 AND status='POSTED' AND source='ZAKAT' AND date < CURRENT_DATE - 90`, [companyId]);
   const zSpent = zf.distributed;
   if (zf.available > 0.009 && Number(zOld.s) - zSpent > 0.009) out.push({ level: "warn", title: `زكاة محصّلة منذ أكثر من 90 يوماً لم تُصرف (${r2(Number(zOld.s) - zSpent)} ريال)`, detail: `الرصيد المتاح في صندوق الزكاة ${zf.available} ريال — الأصل تعجيل إخراج الزكاة لمستحقيها`, link: "/charity/zakat" });
+  // reviewer: closing reminders (daily / weekly / monthly) and vouchers without supporting documents
+  const { closingAlerts } = require("./assoc2") as typeof import("./assoc2");
+  for (const x of await closingAlerts(t, companyId)) out.push({ level: x.level, title: x.title, detail: x.detail, link: x.link });
   return out;
 }

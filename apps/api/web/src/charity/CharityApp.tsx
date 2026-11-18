@@ -14,6 +14,7 @@ import { TreasuryPage, JournalView } from "../pages/Round20";
 import { ZakatFundPage } from "./pages4";
 import { CharityIndicatorsPage } from "../pages/Round25";
 import { MembersPage, SharesPage, VouchersPage } from "./pages5";
+import { ClosingPage, ClosingBell, DailyArchivePage, BackupsPage } from "./pages6";
 import { CFG, BASE_TITLE } from "../shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
@@ -60,6 +61,9 @@ export const CH_NAV: any[] = [
   { group: "التخطيط والرقابة" },
   { to: "/charity/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
   { to: "/charity/vouchers", ic: "🔗", label: "سجل السندات الموحّد", perm: "payments.read" },
+  { to: "/charity/closing", ic: "🔒", label: "التقفيل اليومي والأسبوعي والشهري", perm: "payments.read" },
+  { to: "/charity/daily-archive", ic: "🗂", label: "الأرشيف اليومي", perm: "payments.read" },
+  { to: "/charity/backups", ic: "💾", label: "الحفظ اليومي (النسخ الاحتياطية)", perm: "settings.read", companyOnly: true },
   { to: "/charity/projects", ic: "🎯", label: "المشاريع والبرامج", perm: "payments.read" },
   { to: "/charity/budget", ic: "📊", label: "الموازنة التقديرية", perm: "reports.read", companyOnly: true },
   { to: "/charity/reports", ic: "📈", label: "قائمة الأنشطة والتقارير", perm: "reports.read" },
@@ -109,6 +113,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
               <button className="btn sm burger" onClick={() => setMenu((m) => !m)}>☰</button>
               <div className="title">{cur ? labels[cur.to] || cur.label : loc.pathname.startsWith("/charity/doc/") ? "عرض المستند" : ""}</div>
               <div className="grow" />
+              <ClosingBell />
               {can("payments.write") && <><NavLink className="btn sm" to="/charity/receipts?new=1">＋ سند قبض</NavLink><NavLink className="btn sm primary" to="/charity/expenses?new=1">＋ سند صرف</NavLink></>}
             </div>
             <div className="content">
@@ -148,6 +153,9 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/members" element={<MembersPage />} />
                   <Route path="/charity/shares" element={<SharesPage />} />
                   <Route path="/charity/vouchers" element={<VouchersPage />} />
+                  <Route path="/charity/closing" element={<ClosingPage />} />
+                  <Route path="/charity/daily-archive" element={<DailyArchivePage />} />
+                  <Route path="/charity/backups" element={<BackupsPage />} />
                   <Route path="*" element={<Navigate to="/charity" />} />
                 </Routes>
               )}

@@ -20,7 +20,7 @@ const MAX = Number(process.env.I18N_MAX_MISSING ?? 40);
 
 const AR = /[ء-ي]/;
 const SKIP_DIRS = new Set(["charity", "i18n", "node_modules", "dist"]);
-const SKIP_FILES = /^(ai[A-Z].*|ai|selfcheck.*|selftest|scripts-selfcheck|demo|assocDemo|seed-demo-account|assoc|charity\d*|openapi|migrate)\.ts$/;
+const SKIP_FILES = /^(ai[A-Z].*|ai|selfcheck.*|selftest|scripts-selfcheck|demo|assocDemo|seed-demo-account|assoc\d*|charity\d*|openapi|migrate)\.ts$/;
 const NOT_UI = (s) => /\b(SELECT|UPDATE|INSERT|COALESCE|CASE WHEN|replace\(replace)\b/.test(s) || /^<|style="|<\/(div|p|table|td|b)>/.test(s);
 
 function walk(dir, acc = []) {

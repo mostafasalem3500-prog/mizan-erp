@@ -9,6 +9,7 @@ import { CaseStudyModal, VerdictBadge } from "./pages4";
 import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData, DEFAULT_LOGO } from "./templates";
 import { AlertsCard, waLink } from "./pages3";
 import { EntryPreview } from "../pages/EntryPreview";
+import { AttachIcon, PendingFiles, uploadFiles, ProjectBudgetModal, ProjectFinalModal } from "./pages6";
 
 // ─── labels ────────────────────────────────────────────────────────────────
 export const SOURCE: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", REFUND: "استرداد مبلغ", OTHER: "أخرى", GENERAL: "سند قبض عام" };
@@ -172,6 +173,7 @@ export function ReceiptsPage() {
               <td><Badge s={r.status} map={DOC_ST} /></td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨 طباعة</button>
+                <AttachIcon entity="ch_rcpt" row={r} onChanged={reload} />
                 {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ${CFG.words.one} (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
                 {can("payments.write") && r.status === "POSTED" && <button className="btn sm ghost" disabled={busy} onClick={() => { const why = window.prompt(`سبب إلغاء السند ${r.number}؟ (سيُعكس القيد)`); if (why !== null) run(async () => { await api(`/charity/receipts/${r.id}/cancel`, { body: { reason: why } }); reload(); }, "تم الإلغاء وعكس القيد"); }}>إلغاء</button>}
               </td>
@@ -244,7 +246,8 @@ export function DisbursementsPage() {
   const [pr, setPr] = useState<any>(null);
   const { run, busy } = useAction();
   useEffect(() => { if (qs.get("new") === "1" || qs.get("request")) setAdd({ requestId: qs.get("request") }); }, [qs.get("new"), qs.get("request")]);
-  const rows = useMemo(() => (data || []).filter((r) => matches(r, text, ["number", "beneficiaryName", "reason", "refNo", "projectName", "requestNumber", "batchNumber", "iban"])), [data, text]);
+  const [noDocs, setNoDocs] = useState(qs.get("docs") === "missing");
+  const rows = useMemo(() => (data || []).filter((r) => (!noDocs || (r.status === "POSTED" && !r.attachCount)) && matches(r, text, ["number", "beneficiaryName", "reason", "refNo", "projectName", "requestNumber", "batchNumber", "iban"])), [data, text, noDocs]);
   const s = useSorted(rows);
   const total = rows.filter((r) => r.status === "POSTED").reduce((a, r) => a + Number(r.amount), 0);
   const anyF = !!(text || Object.values(f).some(Boolean));
@@ -266,6 +269,7 @@ export function DisbursementsPage() {
           <MapSelect map={CAPACITY} value={f.capacity} onChange={(v) => setF({ ...f, capacity: v })} all="كل الصفات" />
           <div style={{ width: 200 }}><ProjectSelect value={f.projectId} onChange={(v) => setF({ ...f, projectId: v })} all="كل المشاريع" /></div>
           <MapSelect map={DOC_ST} value={f.status} onChange={(v) => setF({ ...f, status: v })} all="كل الحالات" />
+          <label className="row small" style={{ gap: 4 }}><input type="checkbox" checked={noDocs} onChange={(e) => setNoDocs(e.target.checked)} />بلا مسوغات فقط ({(data || []).filter((r) => r.status === "POSTED" && !r.attachCount).length})</label>
           <FilterInfo shown={rows.length} total={data?.length || 0} active={anyF} onClear={() => { setText(""); setF({ from: "", to: "", kind: "", capacity: "", projectId: "", status: "" }); }} />
           <div className="grow" /><b>الإجمالي: <Money v={total} /></b>
         </div>
@@ -284,6 +288,7 @@ export function DisbursementsPage() {
               <td><Badge s={r.status} map={DOC_ST} /></td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨 طباعة</button>
+                <AttachIcon entity="ch_disb" row={r} onChanged={reload} />
                 {can("payments.write") && r.status === "POSTED" && <button className="btn sm ghost" disabled={busy} onClick={() => { const why = window.prompt(`سبب إلغاء السند ${r.number}؟ (سيُعكس القيد)`); if (why !== null) run(async () => { await api(`/charity/disbursements/${r.id}/cancel`, { body: { reason: why } }); reload(); }, "تم الإلغاء وعكس القيد"); }}>إلغاء</button>}
               </td>
             </tr>))}
@@ -321,11 +326,16 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
   const hist = useFetch<any>(benef?.id ? `/charity/beneficiaries/${benef.id}/aid-history` : null);
   const cs = hist.data?.caseStudy;
   const needOverride = f.fund === "ZAKAT" && ["FUQARA", "MASAKIN"].includes(f.zakatCategory) && benef && zmeta.data?.policy?.requireCaseForZakat && (!cs || !cs.zakatEligible || (cs.validUntil && String(cs.validUntil).slice(0, 10) < f.date));
-  const body = () => ({ ...f, requestId: f.requestId || undefined, partnerId: benef?.id, expenseAccountId: exp?.id, payAccountId: pay?.id });
+  const [files, setFiles] = useState<File[]>([]);
+  const [ob, setOb] = useState<{ on: boolean; reason: string; msg?: string }>({ on: false, reason: "" });
+  const pb = useFetch<any>(f.projectId ? `/charity/projects/${f.projectId}/budget?year=${String(f.date || "").slice(0, 4)}` : null, [f.projectId, f.date]);
+  const body = () => ({ ...f, requestId: f.requestId || undefined, partnerId: benef?.id, expenseAccountId: exp?.id, payAccountId: pay?.id, overBudget: ob.on || undefined, overBudgetReason: ob.on ? ob.reason : undefined });
   const [prev, setPrev] = useState<any>(null);
-  const save = () => run(async () => { const r = await api("/charity/disbursements", { body: body() }); const req = reqs.data?.find((x: any) => x.id === f.requestId); onClose({ ...r, projectName: proj?.name, expenseAccountName: exp?.nameAr, payAccountName: pay?.nameAr, requestNumber: req?.number }); }, "تم حفظ سند الصرف وترحيل القيد");
+  const toast = useToast();
+  const guard = async (fn: () => Promise<any>) => { try { return await fn(); } catch (e: any) { if (e?.code === "OVER_BUDGET") setOb((x) => ({ ...x, msg: e.message })); throw e; } };
+  const save = () => run(async () => { const r = await guard(() => api("/charity/disbursements", { body: body() })); if (files.length) { const u = await uploadFiles("ch_disb", r.id, files); if (u.errs.length) toast(`لم يُرفع: ${u.errs.join(" — ")}`, "err"); r.attachCount = u.ok; } const req = reqs.data?.find((x: any) => x.id === f.requestId); onClose({ ...r, projectName: proj?.name, expenseAccountName: exp?.nameAr, payAccountName: pay?.nameAr, requestNumber: req?.number }); }, "تم حفظ سند الصرف وترحيل القيد");
   return (
-    <Modal title="سند صرف — نقدي / شيك / تحويل بنكي" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" disabled={busy} onClick={() => run(async () => setPrev(await api("/charity/disbursements/preview-entry", { body: body() })))}>معاينة القيد</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
+    <Modal title="سند صرف — نقدي / شيك / تحويل بنكي" onClose={() => onClose()} wide footer={<><button className="btn primary" disabled={busy} onClick={save}>حفظ وترحيل</button><button className="btn" disabled={busy} onClick={() => run(async () => setPrev(await guard(() => api("/charity/disbursements/preview-entry", { body: body() }))))}>معاينة القيد</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
       {prev && <Modal title="معاينة القيد" onClose={() => setPrev(null)} footer={<button className="btn" onClick={() => setPrev(null)}>رجوع</button>}><EntryPreview prev={prev} /></Modal>}
       <div className="grid c3">
         <Field label="نوع الصرف"><div className="row" style={{ gap: 6 }}>{Object.entries(KIND).map(([k, v]) => <button key={k} type="button" className={"btn sm" + (f.kind === k ? " primary" : "")} onClick={() => setF({ ...f, kind: k })}>{v}</button>)}</div></Field>
@@ -365,6 +375,10 @@ function DisbModal({ init, onClose }: { init: any; onClose: (saved?: any) => voi
         <Field label="المستندات المؤيدة" span3><Checks options={DOCS} value={f.docs} onChange={(v) => setF({ ...f, docs: v })} /></Field>
         <Field label="ملاحظات" span3><Input value={f.notes} onChange={set("notes")} /></Field>
       </div>
+      {pb.data && pb.data.lines.some((l: any) => l.kind === "EXPENSE") && <div className={"alert small mt " + (pb.data.totals.expenseRemaining < (Number(f.amount) || 0) ? "warn" : "info")}>ميزانية مشروع «{pb.data.project.name}» لعام {String(f.date).slice(0, 4)}: المتبقي <b>{money(pb.data.totals.expenseRemaining)}</b> من {money(pb.data.totals.expenseBudget)} — {pb.data.lines.filter((l: any) => l.kind === "EXPENSE").map((l: any) => `${l.name}: ${money(l.remaining)}`).join("، ")}</div>}
+      {ob.msg && <div className="alert err small mt">{ob.msg}</div>}
+      {(ob.msg || ob.on) && <div className="row mt" style={{ gap: 8, flexWrap: "wrap" }}><label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={ob.on} onChange={(e) => setOb({ ...ob, on: e.target.checked })} />تجاوز ميزانية المشروع</label>{ob.on && <Input value={ob.reason} placeholder="سبب التجاوز ورقم القرار (إلزامي)" onChange={(e: any) => setOb({ ...ob, reason: e.target.value })} style={{ flex: 1, minWidth: 220 }} />}</div>}
+      <PendingFiles files={files} onChange={setFiles} />
       {quick && <PersonModal role="BENEFICIARY" onClose={(p) => { setQuick(false); if (p) pickBenef(p); }} />}
     </Modal>
   );
@@ -416,6 +430,7 @@ export function RequestsPage() {
               <td><div className="ch-steps">{r.status === "REJECTED" ? <span className="no">مرفوض{r.decisionNote ? ": " + r.decisionNote : ""}</span> : r.status === "DRAFT" ? <span>مسودة</span> : steps.map((x, i) => <span key={x} className={steps.indexOf(r.status) >= i ? "on" : ""}>{["مقدَّم", "مراجعة", "معتمد", "مصروف"][i]}</span>)}</div>{r.disbursementNumber && <div className="small muted num">{r.disbursementNumber}</div>}</td>
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨</button>
+                <AttachIcon entity="ch_req" row={r} onChanged={reload} />
                 {can("payments.write") && ["DRAFT", "SUBMITTED", "REJECTED"].includes(r.status) && <button className="btn sm" onClick={() => setEdit(r)}>تعديل</button>}
                 {can("payments.write") && ["SUBMITTED", "REVIEWED"].includes(r.status) && <button className="btn sm" onClick={() => setReview(r)}>مراجعة مالية</button>}
                 {can("accounting.write") && ["SUBMITTED", "REVIEWED"].includes(r.status) && <button className="btn sm primary" disabled={busy} onClick={() => act(r, "approve", window.prompt("ملاحظات الاعتماد (اختياري)") || undefined)}>اعتماد</button>}
@@ -600,7 +615,7 @@ function BatchSheet({ b, onClose }: { b: any; onClose: () => void }) {
 // ─── daily cash-in (تحصيل دخول الأموال اليومية) ─────────────────────────────
 export function DailyPage() {
   const { can } = useCompanyContext();
-  const [d, setD] = useState(today());
+  const [d, setD] = useState(new URLSearchParams(useLocation().search).get("date") || today());
   const { data, loading, reload } = useFetch(`/charity/daily${q({ date: d })}`);
   const [counted, setCounted] = useState("");
   const [notes, setNotes] = useState("");
@@ -689,6 +704,8 @@ export function ProjectsPage() {
   const { can } = useCompanyContext();
   const { projects, reloadProjects } = useCharity();
   const [edit, setEdit] = useState<any>(null);
+  const [bud, setBud] = useState<any>(null);
+  const [fin, setFin] = useState<any>(null);
   const [text, setText] = useState("");
   const rows = projects.filter((p: any) => matches(p, text, ["code", "name", "description"]));
   return (
@@ -702,10 +719,16 @@ export function ProjectsPage() {
           <td className="n"><Money v={p.target} blankZero /></td><td className="n"><Money v={p.received} /></td><td className="n"><Money v={p.spent} /></td><td className="n"><b><Money v={Number(p.received) - Number(p.spent)} sign /></b></td>
           <td style={{ minWidth: 120 }}>{pct !== null ? <><div className="progress"><div style={{ width: pct + "%" }} /></div><span className="small muted">{pct.toFixed(0)}%</span></> : <span className="muted small">—</span>}</td>
           <td><span className={"badge " + (p.status === "ACTIVE" ? "green" : "gray")}>{p.status === "ACTIVE" ? "نشط" : "مغلق"}</span></td>
-          <td>{can("payments.write") && <button className="btn sm" onClick={() => setEdit(p)}>تعديل</button>}</td>
+          <td className="row" style={{ gap: 4 }}>
+            <button className="btn sm" title="جدول ميزانية المشروع" onClick={() => setBud(p)}>📊 الميزانية</button>
+            <button className="btn sm" title="الكشف الختامي والصرف النهائي وإقفال المشروع" onClick={() => setFin(p)}>{p.status === "CLOSED" ? "🏁 الكشف الختامي" : "🏁 الصرف النهائي"}</button>
+            {can("payments.write") && p.status !== "CLOSED" && <button className="btn sm ghost" onClick={() => setEdit(p)}>تعديل</button>}
+          </td>
         </tr>; })}</tbody>
       </table></div>}
       {edit && <ProjectModal init={edit} onClose={(ok) => { setEdit(null); if (ok) reloadProjects(); }} />}
+      {bud && <ProjectBudgetModal project={bud} onClose={() => { setBud(null); reloadProjects(); }} />}
+      {fin && <ProjectFinalModal project={fin} onClose={(ch) => { setFin(null); if (ch) reloadProjects(); }} />}
     </div>
   );
 }

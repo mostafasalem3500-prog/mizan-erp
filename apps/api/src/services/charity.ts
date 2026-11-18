@@ -222,7 +222,8 @@ export async function listReceipts(t: Db, companyId: string, q: any) {
   if (q.partnerId) add("r.partner_id = ?", q.partnerId);
   if (q.status) add("r.status = ?", q.status);
   return t.rows(
-    `SELECT r.*, pr.name project_name, ca.name_ar cash_account_name, ra.name_ar revenue_account_name, je.number journal_number
+    `SELECT r.*, pr.name project_name, ca.name_ar cash_account_name, ra.name_ar revenue_account_name, je.number journal_number,
+       (SELECT COUNT(*) FROM attachments x WHERE x.company_id=r.company_id AND x.entity='ch_rcpt' AND x.entity_id=r.id)::int attach_count
      FROM charity_receipts r LEFT JOIN charity_projects pr ON pr.id=r.project_id JOIN accounts ca ON ca.id=r.cash_account_id JOIN accounts ra ON ra.id=r.revenue_account_id
      LEFT JOIN journal_entries je ON je.id=r.journal_id
      WHERE ${w.join(" AND ")} ORDER BY r.date DESC, r.number DESC LIMIT 5000`, params);
@@ -239,6 +240,7 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
   const payerName = String(b.payerName || p?.name || "").trim();
   if (!payerName) throw bad("اسم الدافع / المتبرع مطلوب");
   const pr = await project(t, companyId, b.projectId);
+  if (pr && pr.status === "CLOSED") throw conflict(`المشروع «${pr.name}» مُقفل بعد الصرف النهائي — لا تُسجَّل عليه حركات جديدة`);
   const cash = await acct(t, companyId, b.cashAccountId, method === "CASH" ? "CASH" : "BANK", "حساب الصندوق / البنك", { cash: true });
   const restricted = !!b.restricted || !!pr?.restricted;
   const rev = await acct(t, companyId, b.revenueAccountId, restricted && !b.revenueAccountId ? "DON_RESTRICTED" : SOURCE_KEY[source], "حساب الإيراد");
@@ -292,7 +294,8 @@ export async function listDisbursements(t: Db, companyId: string, q: any) {
   if (q.status) add("d.status = ?", q.status);
   if (q.batchId) add("d.batch_id = ?", q.batchId);
   return t.rows(
-    `SELECT d.*, pr.name project_name, ea.name_ar expense_account_name, pa.name_ar pay_account_name, rq.number request_number, b.number batch_number, je.number journal_number
+    `SELECT d.*, pr.name project_name, ea.name_ar expense_account_name, pa.name_ar pay_account_name, rq.number request_number, b.number batch_number, je.number journal_number,
+       (SELECT COUNT(*) FROM attachments x WHERE x.company_id=d.company_id AND x.entity='ch_disb' AND x.entity_id=d.id)::int attach_count
      FROM charity_disbursements d LEFT JOIN charity_projects pr ON pr.id=d.project_id JOIN accounts ea ON ea.id=d.expense_account_id JOIN accounts pa ON pa.id=d.pay_account_id
      LEFT JOIN charity_requests rq ON rq.id=d.request_id LEFT JOIN charity_batches b ON b.id=d.batch_id LEFT JOIN journal_entries je ON je.id=d.journal_id
      WHERE ${w.join(" AND ")} ORDER BY d.date DESC, d.number DESC LIMIT 5000`, params);
@@ -317,6 +320,7 @@ export async function createDisbursement(t: Db, companyId: string, user: string,
     if (amount > r2(rq.amount)) throw bad(`المبلغ أكبر من المعتمد في الطلب (${r2(rq.amount)})`);
   }
   const pr = await project(t, companyId, b.projectId || rq?.projectId);
+  if (pr && pr.status === "CLOSED") throw conflict(`المشروع «${pr.name}» مُقفل بعد الصرف النهائي — لا تُسجَّل عليه حركات جديدة`);
   const exp = await acct(t, companyId, b.expenseAccountId || rq?.expenseAccountId, CAPACITY_KEY[capacity], "حساب المصروف");
   if (exp.isCashBank) throw bad("حساب المصروف لا يمكن أن يكون صندوقاً أو بنكاً");
   const pay = await acct(t, companyId, b.payAccountId, kind === "CASH" ? "CASH" : "BANK", "حساب الصرف (الصندوق / البنك)", { cash: true });
@@ -375,7 +379,8 @@ export async function listRequests(t: Db, companyId: string, q: any) {
   if (isDate(q.from)) { params.push(q.from); w.push(`r.date >= $${params.length}`); }
   if (isDate(q.to)) { params.push(q.to); w.push(`r.date <= $${params.length}`); }
   return t.rows(
-    `SELECT r.*, pr.name project_name, ea.name_ar expense_account_name, d.number disbursement_number
+    `SELECT r.*, pr.name project_name, ea.name_ar expense_account_name, d.number disbursement_number,
+       (SELECT COUNT(*) FROM attachments x WHERE x.company_id=r.company_id AND x.entity='ch_req' AND x.entity_id=r.id)::int attach_count
      FROM charity_requests r LEFT JOIN charity_projects pr ON pr.id=r.project_id LEFT JOIN accounts ea ON ea.id=r.expense_account_id LEFT JOIN charity_disbursements d ON d.id=r.disbursement_id
      WHERE ${w.join(" AND ")} ORDER BY r.date DESC, r.number DESC LIMIT 5000`, params);
 }

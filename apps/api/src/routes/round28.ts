@@ -40,8 +40,8 @@ r28.get("/partners/:id/loyalty", perm("partners.read"), h(async (req) => tx((t) 
 r28.post("/partners/:id/loyalty/adjust", perm("settings.write"), h(async (req) => { const r = await tx((t) => ly.adjustPoints(t, req.company, p(req).id, req.body?.points, req.body?.note, actor(req))); await audit(req, "LOYALTY_ADJUST", "partner", p(req).id, { points: r.points, note: r.note }); return r; }));
 
 // ─── attachments ─────────────────────────────────────────────────────────
-const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"], archive: ["accounting"] };
-const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations" };
+const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"], archive: ["accounting"], ch_disb: ["payments"], ch_rcpt: ["payments"], ch_req: ["payments"] };
+const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations", ch_disb: "charity_disbursements", ch_rcpt: "charity_receipts", ch_req: "charity_requests" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIME_OK = /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/plain|text\/csv|application\/(msword|vnd\.openxmlformats-officedocument\.[a-z.]+|vnd\.ms-excel|zip))$/;
 const MAX = 8 * 1024 * 1024;
@@ -144,7 +144,7 @@ r28.post("/digest/send", perm("settings.write"), h(async (req) => {
 }));
 
 const sha256 = (buf: Buffer) => crypto.createHash("sha256").update(buf).digest("hex");
-const ENTITY_LABEL: Record<string, string> = { invoice: "فاتورة", expense: "مصروف", payment: "سند", journal: "قيد", partner: "ملف عميل/مورد", product: "صنف", asset: "أصل ثابت", archive: "مستندات المنشأة" };
+const ENTITY_LABEL: Record<string, string> = { invoice: "فاتورة", expense: "مصروف", payment: "سند", journal: "قيد", partner: "ملف عميل/مورد", product: "صنف", asset: "أصل ثابت", archive: "مستندات المنشأة", ch_disb: "سند صرف جمعية", ch_rcpt: "سند قبض جمعية", ch_req: "طلب صرف" };
 /** The same bytes already filed in this company: where, so the user can tell a real duplicate from a deliberate second copy. */
 async function sameFile(companyId: string, sha: string) {
   const d = await db.maybe(`${ARCH_SELECT} WHERE a.company_id=$1 AND a.sha256=$2 AND a.entity<>'ai' ORDER BY a.created_at LIMIT 1`, [companyId, sha]);
@@ -153,11 +153,12 @@ async function sameFile(companyId: string, sha: string) {
 // archive: every attached file in one searchable place, plus stand-alone company documents with expiry dates
 export const ARCHIVE_CATEGORIES = ["فاتورة مورد", "فاتورة مبيعات", "إيصال / سند", "عقد", "سجل تجاري", "رخصة / تصريح", "شهادة ضريبية أو زكوية", "كشف بنكي", "مستند حكومي", "مستند موظف", "مراسلات", "أخرى"];
 const ARCH_SELECT = `SELECT a.id, a.entity, a.entity_id, a.name, a.mime, a.size, a.category, a.title, a.tags, a.notes, a.doc_date, a.expires_at, a.created_by, a.created_at,
-    COALESCE(i.number, e.number, pm.number, j.number, pr.name, pd.name, fa.name) ref, i.direction, i.kind doc_kind, i.partner_name, COALESCE(i.total, e.total, pm.amount) amount, pm.direction pay_dir, pr.is_customer
+    COALESCE(i.number, e.number, pm.number, j.number, pr.name, pd.name, fa.name, cd.number, cr.number, cq.number) ref, i.direction, i.kind doc_kind, COALESCE(i.partner_name, cd.beneficiary_name, cr.payer_name) partner_name, COALESCE(i.total, e.total, pm.amount, cd.amount, cr.amount, cq.amount) amount, pm.direction pay_dir, pr.is_customer
   FROM attachments a
   LEFT JOIN invoices i ON a.entity='invoice' AND i.id=a.entity_id LEFT JOIN expenses e ON a.entity='expense' AND e.id=a.entity_id
   LEFT JOIN payments pm ON a.entity='payment' AND pm.id=a.entity_id LEFT JOIN journal_entries j ON a.entity='journal' AND j.id=a.entity_id
-  LEFT JOIN partners pr ON a.entity='partner' AND pr.id=a.entity_id LEFT JOIN products pd ON a.entity='product' AND pd.id=a.entity_id LEFT JOIN fixed_assets fa ON a.entity='asset' AND fa.id=a.entity_id`;
+  LEFT JOIN partners pr ON a.entity='partner' AND pr.id=a.entity_id LEFT JOIN products pd ON a.entity='product' AND pd.id=a.entity_id LEFT JOIN fixed_assets fa ON a.entity='asset' AND fa.id=a.entity_id
+  LEFT JOIN charity_disbursements cd ON a.entity='ch_disb' AND cd.id=a.entity_id LEFT JOIN charity_receipts cr ON a.entity='ch_rcpt' AND cr.id=a.entity_id LEFT JOIN charity_requests cq ON a.entity='ch_req' AND cq.id=a.entity_id`;
 r28.get("/archive", perm("reports.read"), h(async (req) => {
   const q: any = req.query; const params: any[] = [cid(req)]; const w = ["a.company_id=$1", "a.entity<>'ai'"];
   const add = (sql: string, v: any) => { params.push(v); w.push(sql.replace("?", `$${params.length}`)); };
@@ -166,7 +167,7 @@ r28.get("/archive", perm("reports.read"), h(async (req) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(q.from || "")) add("COALESCE(a.doc_date, a.created_at::date) >= ?", q.from);
   if (/^\d{4}-\d{2}-\d{2}$/.test(q.to || "")) add("COALESCE(a.doc_date, a.created_at::date) <= ?", q.to);
   if (q.tab === "expiring") w.push("a.expires_at IS NOT NULL AND a.expires_at <= CURRENT_DATE + 60");
-  if (q.q) { params.push(`%${q.q}%`); const n = `$${params.length}`; w.push(`(${["a.name", "a.title", "a.tags", "a.notes", "i.number", "i.partner_name", "e.number", "e.description", "pr.name", "pm.number", "j.number"].map((c) => `${c} ILIKE ${n}`).join(" OR ")})`); }
+  if (q.q) { params.push(`%${q.q}%`); const n = `$${params.length}`; w.push(`(${["a.name", "a.title", "a.tags", "a.notes", "i.number", "i.partner_name", "e.number", "e.description", "pr.name", "pm.number", "j.number", "cd.number", "cd.beneficiary_name", "cr.number", "cq.number"].map((c) => `${c} ILIKE ${n}`).join(" OR ")})`); }
   const sql = `${ARCH_SELECT} WHERE ${w.join(" AND ")} ORDER BY ${q.tab === "expiring" ? "a.expires_at" : "a.created_at DESC"} LIMIT 500`;
   const rows = await db.rows(sql, params);
   const stats = await db.one(`SELECT COUNT(*)::int files, COALESCE(SUM(size),0)::bigint bytes, COUNT(*) FILTER (WHERE entity='invoice')::int invoices, COUNT(*) FILTER (WHERE entity='expense')::int expenses, COUNT(*) FILTER (WHERE entity='archive')::int general,
@@ -178,14 +179,14 @@ r28.get("/archive", perm("reports.read"), h(async (req) => {
 r28.get("/archive/pack", perm("reports.read"), h(async (req, res) => {
   const q: any = req.query; const D = /^\d{4}-\d{2}-\d{2}$/;
   const from = D.test(q.from || "") ? q.from : `${today().slice(0, 4)}-01-01`, to = D.test(q.to || "") ? q.to : today();
-  const params: any[] = [cid(req), from, to]; const w = ["a.company_id=$1", "a.entity<>'ai'", "COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, a.created_at::date) BETWEEN $2 AND $3"];
+  const params: any[] = [cid(req), from, to]; const w = ["a.company_id=$1", "a.entity<>'ai'", "COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, cd.date, cr.date, cq.date, a.created_at::date) BETWEEN $2 AND $3"];
   if (q.entity && ENTITY_LABEL[String(q.entity)]) { params.push(String(q.entity)); w.push(`a.entity=$${params.length}`); }
   if (q.category) { params.push(String(q.category)); w.push(`a.category=$${params.length}`); }
-  const list = await db.rows(`${ARCH_SELECT.replace("a.created_at,", "a.created_at, COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, a.created_at::date) on_date,")} WHERE ${w.join(" AND ")} ORDER BY a.entity, on_date, a.created_at LIMIT 2001`, params);
+  const list = await db.rows(`${ARCH_SELECT.replace("a.created_at,", "a.created_at, COALESCE(a.doc_date, i.date, e.date, pm.date, j.date, cd.date, cr.date, cq.date, a.created_at::date) on_date,")} WHERE ${w.join(" AND ")} ORDER BY a.entity, on_date, a.created_at LIMIT 2001`, params);
   if (!list.length) throw bad("لا توجد مستندات في هذه الفترة");
   const total = list.reduce((s2, x) => s2 + Number(x.size), 0);
   if (list.length > 2000 || total > 250 * 1024 * 1024) throw bad(`الحزمة كبيرة (${list.length > 2000 ? "أكثر من 2000 ملف" : Math.round(total / 1048576) + " ميجابايت"}) — قصّر الفترة أو اختر نوعاً واحداً`);
-  const folder = (x: any) => x.entity === "invoice" ? (x.direction === "PURCHASE" ? "فواتير المشتريات" : "فواتير المبيعات") : x.entity === "expense" ? "المصروفات" : x.entity === "payment" ? (x.payDir === "IN" ? "سندات القبض" : "سندات الصرف") : x.entity === "journal" ? "القيود اليومية" : x.entity === "partner" ? "العملاء والموردون" : x.entity === "product" ? "الأصناف" : x.entity === "asset" ? "الأصول الثابتة" : `مستندات المنشأة/${x.category || "أخرى"}`;
+  const folder = (x: any) => x.entity === "invoice" ? (x.direction === "PURCHASE" ? "فواتير المشتريات" : "فواتير المبيعات") : x.entity === "expense" ? "المصروفات" : x.entity === "payment" ? (x.payDir === "IN" ? "سندات القبض" : "سندات الصرف") : x.entity === "journal" ? "القيود اليومية" : x.entity === "partner" ? "العملاء والموردون" : x.entity === "product" ? "الأصناف" : x.entity === "asset" ? "الأصول الثابتة" : x.entity === "ch_disb" ? "سندات صرف الجمعية" : x.entity === "ch_rcpt" ? "سندات قبض الجمعية" : x.entity === "ch_req" ? "طلبات الصرف" : `مستندات المنشأة/${x.category || "أخرى"}`;
   const csvCell = (v: any) => { const t = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
   const files: { name: string; data: Buffer; date?: Date }[] = []; const index = [["المجلد", "الملف", "المرجع", "الطرف", "التاريخ", "المبلغ", "العنوان", "الوسوم", "ينتهي في", "أرشفه", "تاريخ الأرشفة"]];
   for (let i = 0; i < list.length; i += 25) {

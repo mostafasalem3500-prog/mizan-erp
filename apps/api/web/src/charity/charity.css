@@ -174,3 +174,8 @@
 .a4 .a4-org { max-width: 66%; }
 .a4 .a4-org b { font-size: 1.2em; text-wrap: balance; }
 .a4 .a4-title { min-width: 0; }
+/* reviewer notes: bell pop-over, vouchers missing supporting documents */
+.bell-pop { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; width: min(440px, 92vw); max-height: 70vh; overflow: auto; z-index: 60; box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+.btn.warn-btn { border-color: #f0b44c; background: #fff7e6; color: #8a5300; }
+html[data-theme="dark"] .btn.warn-btn { background: #3a2a12; color: #f3c27a; }
+@media (max-width: 600px) { .bell-pop { position: fixed; top: 56px; inset-inline: 8px; width: auto; } }

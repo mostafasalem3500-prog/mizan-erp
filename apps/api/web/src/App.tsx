@@ -36,6 +36,7 @@ const DocumentView = lz(() => import("./pages/Documents"), "DocumentView");
 const PublicInvoice = lz(() => import("./pages/Documents"), "PublicInvoice");
 const PosPage = lz(() => import("./pages/Pos"), "PosPage");
 const PartnersPage = lz(() => import("./pages/Master"), "PartnersPage");
+const BackupsCore = lz(() => import("./pages/Backups"), "BackupsPage");
 const ProductsPage = lz(() => import("./pages/Master"), "ProductsPage");
 const InventoryPage = lz(() => import("./pages/Master"), "InventoryPage");
 const PaymentsPage = lz(() => import("./pages/Money"), "PaymentsPage");
@@ -255,6 +256,7 @@ export function App() {
                 <Route path="/zatca" element={<ZatcaPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/templates" element={<PrintTemplatesPage />} />
+                <Route path="/backups" element={<BackupsCore />} />
                 <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/quick" element={<QuickPage />} />
                 <Route path="/notes" element={<NotesPage />} />
