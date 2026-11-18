@@ -79,6 +79,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/journal-approvals", label: "قيود بانتظار الاعتماد", perm: "accounting.read", company: true },
     { to: "/accounts", label: "دليل الحسابات", perm: "accounting.read", company: true },
     { to: "/assets", label: "الأصول الثابتة والإهلاك", perm: "assets.read", company: true },
+    { to: "/amortizations", label: "المدفوع مقدماً والإيرادات المؤجلة", perm: "accounting.read", company: true },
     { to: "/budgets", label: "الموازنات التقديرية", perm: "reports.read", company: true },
     { to: "/closing", label: "إقفال الشهر (قائمة التحقق)", perm: "accounting.read", company: true },
     { to: "/periods", label: "السنوات والفترات المالية", perm: "accounting.read", company: true },

@@ -77,6 +77,7 @@ function Editor({ tpl, doc, qr, busy, onClose, onSave }: { tpl: Tpl; doc: any; q
               <Field label="حجم الخط"><Select value={o.font} onChange={(e) => set({ font: e.target.value as any })}><option value="S">صغير</option><option value="M">متوسط</option><option value="L">كبير</option></Select></Field></div>
             {!roll && <Field label="اللون الرئيسي"><div className="row" style={{ gap: 6 }}>{COLORS.map((c) => <button key={c} type="button" className={"swatch" + (o.accent === c ? " on" : "")} style={{ background: c }} title={c} aria-label={`اللون ${c}`} onClick={() => set({ accent: c })} />)}<input type="color" value={o.accent} aria-label="لون مخصص" onChange={(e) => set({ accent: e.target.value })} /></div></Field>}
             {!roll && <div className="row"><Chk k="english" label="العناوين بالعربية والإنجليزية" /><Chk k="watermark" label="علامة «مسودة» على غير المرحّل" /></div>}
+            {CFG.country === "SA" && <div className="row"><Chk k="hijri" label="التاريخ الهجري (أم القرى) بجانب الميلادي" /></div>}
             {o.style === "letterhead" && !roll && <Field label="هامش علوي لترويسة الورق (مم)"><NumInput value={o.topMargin} onChange={(e) => set({ topMargin: Number(e.target.value) })} /></Field>}
           </details>
           <details><summary>الشعار وبيانات المنشأة</summary>

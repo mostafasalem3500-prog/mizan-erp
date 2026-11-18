@@ -23,7 +23,7 @@ export default defineConfig({
         globIgnores: ["sw-update.js"],
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//, /^\/p\//, /^\/c\//, /^\/developers/, /^\/\.well-known\//, /^\/robots\.txt/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/p\//, /^\/c\//, /^\/developers/, /^\/status$/, /^\/\.well-known\//, /^\/robots\.txt/],
         runtimeCaching: [
           {
             // POS needs these while offline: catalog, categories, session, identity

@@ -7,6 +7,9 @@ import { CUR, CFG } from "../shared/country";
 import { amountToArabicWords } from "../shared/tafqeet";
 import { money, fmtDate, fmtDT, METHOD_AR } from "../lib";
 import { Tpl, TplOpts, lbl, enOf, isRoll } from "../shared/printTemplates";
+import { hijri } from "../shared/hijri";
+/** Hijri beside the Gregorian date: the Saudi edition, unless the template turns it off. */
+const showHijri = (o: TplOpts) => o.hijri !== false && CFG.country === "SA";
 
 const ID_AR: Record<string, string> = { CRN: "السجل التجاري", NAT: "الهوية الوطنية", IQA: "الإقامة", "700": "الرقم الموحد", PAS: "جواز السفر", GCC: "هوية خليجية" };
 const FS: Record<string, number> = { S: 11.5, M: 13, L: 14.5 };
@@ -24,6 +27,7 @@ export function InvoicePaper({ d, qr, tpl, docTitle }: { d: any; qr: string; tpl
   const L = (ar: string) => lbl(o, ar);
   const title = o.title || docTitle, titleEn = o.english ? enOf(docTitle) : "";
   const meta: [string, React.ReactNode][] = [[L("الرقم"), <b className="num">{d.number}</b>], [L("التاريخ"), <span className="num">{fmtDate(d.date)} {d.issuedAt ? new Date(d.issuedAt).toTimeString().slice(0, 5) : ""}</span>]];
+  if (showHijri(o)) meta.push([L("الموافق"), <span className="num">{hijri(d.date, "long", "ar")}</span>]);
   if (d.dueDate && d.kind === "INVOICE") meta.push([L("الاستحقاق"), <span className="num">{fmtDate(d.dueDate)}</span>]);
   if (d.origin) meta.push(["مرجع الفاتورة", <span className="num">{d.origin.number}</span>]);
   if (d.supplierRef) meta.push(["فاتورة المورد", <span className="num">{d.supplierRef}</span>]);
@@ -103,7 +107,7 @@ function RollPaper({ d, qr, tpl, docTitle }: { d: any; qr: string; tpl: Tpl; doc
       <div className="c" style={{ margin: "6px 0", fontWeight: 700 }}>{o.title || docTitle}{d.kind === "CREDIT_NOTE" ? " — إشعار دائن" : ""}</div>
       {o.headerNote && <div className="c">{o.headerNote}</div>}
       <div>رقم: <span className="num">{d.number}</span></div>
-      <div>التاريخ: <span className="num">{fmtDT(d.issuedAt)}</span></div>
+      <div>التاريخ: <span className="num">{fmtDT(d.issuedAt)}</span>{showHijri(o) && <> · <span className="num">{hijri(d.date, "short", "ar")}</span></>}</div>
       {d.partnerName && d.partnerName !== "عميل نقدي" && <div>العميل: {d.partnerName}{o.customerContact && d.partner?.phone ? <span className="num"> · {d.partner.phone}</span> : ""}</div>}
       {(d.tableName || d.orderNo) && <div>{d.tableName ? <>الطاولة: <b>{d.tableName}</b> · </> : ""}طلب #{d.orderNo}{d.orderType ? ` · ${({ DINE_IN: "محلي", TAKEAWAY: "سفري", DELIVERY: "توصيل" } as any)[d.orderType] || ""}` : ""}</div>}
       {o.cashier && d.createdBy && <div>الكاشير: {d.createdBy}</div>}

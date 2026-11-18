@@ -1,4 +1,5 @@
 import { verifyDesktopLicense, signDesktopLicense, signRebindKey, isDesktopLocal, currentDeviceId, normalizeDeviceId, validDeviceId, deviceMatches, licenseServer, TRANSFERS_PER_YEAR, DesktopLicense } from "../lib/desktopLicense";
+import { listErrors } from "../services/monitor";
 import os from "os";
 
 /** Desktop (local) edition info for the licence screen: this PC's fingerprint and its LAN addresses when shared. */
@@ -351,6 +352,9 @@ auth.post(
 // ─── super admin ───────────────────────────────────────────────────────────
 export const admin = Router();
 admin.use(authenticate, superAdmin);
+
+/** Errors recorded by the monitor (server 5xx and browser errors), newest first. */
+admin.get("/errors", h(async (req) => listErrors(Math.min(30, Math.max(1, Number(req.query.days) || 7)))));
 
 admin.get(
   "/overview",

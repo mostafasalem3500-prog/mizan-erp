@@ -11,6 +11,7 @@ import { r16 } from "./routes/round16";
 import { assocRoutes } from "./routes/assoc";
 import { r28 } from "./routes/round28";
 import { r31 } from "./routes/round31";
+import { amort } from "./routes/amort";
 import { startDigestScheduler } from "./services/digest";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -21,6 +22,7 @@ import fs from "fs";
 import { migrate } from "./db/migrate";
 import { pool } from "./db/pool";
 import { AppError } from "./lib/core";
+import * as monitor from "./services/monitor";
 import { auth, admin } from "./routes/auth";
 import { master } from "./routes/master";
 import { ops } from "./routes/ops";
@@ -97,6 +99,29 @@ app.get("/api/health", async (_req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+// service status: a public page (no script) and the same figures as JSON; errors reported by the browser
+app.get("/api/status", async (_req, res) => { res.set("Cache-Control", "no-cache"); const s = await monitor.status(APP_VERSION); res.status(s.ok ? 200 : 503).json(s); });
+app.get("/status", async (_req, res) => {
+  const s = await monitor.status(APP_VERSION);
+  res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  res.setHeader("Cache-Control", "no-cache");
+  res.status(s.ok ? 200 : 503).type("html").send(monitor.statusHtml(s, publicConfig().appName || "ميزان ERP"));
+});
+const clientHits = new Map<string, { at: number; n: number }>();
+app.post("/api/client-errors", (req, res) => {
+  const ip = String(req.ip || "");
+  const now = Date.now(), h0 = clientHits.get(ip);
+  const h1 = h0 && now - h0.at < 60_000 ? { at: h0.at, n: h0.n + 1 } : { at: now, n: 1 };
+  clientHits.set(ip, h1);
+  if (clientHits.size > 5000) clientHits.clear();
+  const b = req.body || {};
+  if (h1.n <= 20 && typeof b.message === "string" && b.message.trim()) {
+    void monitor.recordError({ source: "client", message: b.message, stack: typeof b.stack === "string" ? b.stack : null, path: typeof b.path === "string" ? b.path : null, version: typeof b.version === "string" ? b.version : null, userAgent: String(req.headers["user-agent"] || "") });
+  }
+  res.status(204).end();
+});
+process.on("unhandledRejection", (e: any) => { console.error("[unhandledRejection]", e); void monitor.recordError({ source: "server", message: String(e?.message || e), stack: e?.stack || null, version: APP_VERSION }); });
+
 app.use("/api/media", media);
 app.use("/api/public", pub);
 app.use("/api/public", portal);
@@ -132,20 +157,24 @@ app.use("/api", r25);
 app.use("/api", r27);
 app.use("/api", r28);
 app.use("/api", r31);
+app.use("/api", amort);
 app.use("/api", egr);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof AppError) return res.status(err.status).json({ message: err.message, code: err.code, details: err.details });
   if (err?.status === 404) return res.status(404).json({ message: err.message, code: "NOT_FOUND" });
   if (err?.type === "entity.too.large") return res.status(413).json({ message: "حجم البيانات المرسلة أكبر من المسموح", code: "TOO_LARGE" });
   if (err?.type === "entity.parse.failed") return res.status(400).json({ message: "JSON غير صحيح", code: "BAD_JSON" });
+  if (err?.code === "22P02") return res.status(404).json({ message: "السجل غير موجود (معرّف غير صحيح)", code: "NOT_FOUND" }); // a malformed id in the address
   if (err?.code === "23505") return res.status(409).json({ message: "قيمة مكررة — السجل موجود مسبقاً", code: "CONFLICT" });
   if (err?.code === "23503") return res.status(409).json({ message: "لا يمكن الحذف — السجل مرتبط بسجلات أخرى", code: "CONFLICT" });
   if (typeof err?.message === "string" && err.message.startsWith("UNBALANCED_ENTRY")) return res.status(400).json({ message: "القيد غير متوازن", code: "UNBALANCED" });
   console.error(err);
+  const r: any = req;
+  void monitor.recordError({ source: "server", message: String(err?.message || err), stack: err?.stack || null, path: req.originalUrl, method: req.method, status: 500, version: APP_VERSION, userAgent: String(req.headers["user-agent"] || ""), companyId: r.company?.id || null, userId: r.auth?.userId || null });
   res.status(500).json({ message: err?.message || "خطأ غير متوقع", code: "INTERNAL" });
 });
 
@@ -191,6 +220,7 @@ migrate()
     // every boot re-proves the accounting engine on a throw-away company (rolled back, nothing stored)
     // on the desktop the check waits until the user has started working, so the first screen opens at full speed
     const selfCheck = () => runAccountingSelfCheck().then((r) => {
+      monitor.setSelfcheck(r);
       console.log(`[selfcheck] ${r.ok ? "PASS" : "FAIL"} ${r.passed}/${r.passed + r.failed} in ${r.durationMs}ms`);
       for (const c of r.checks.filter((x) => !x.ok)) console.log(`[selfcheck] ✘ [${c.group}] ${c.name} expected=${JSON.stringify(c.expected)} actual=${JSON.stringify(c.actual)}`);
       if (r.error) console.log(`[selfcheck] error ${r.error}`);

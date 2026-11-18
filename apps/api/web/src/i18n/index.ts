@@ -137,12 +137,12 @@ export async function startI18n(allowed: boolean) {
   // most specific first: more fixed Arabic text and fewer variable parts win
   const score = (x: [RegExp, string, number]) => x[2] - 4 * (x[0].source.match(/\(\[/g) || []).length;
   // a value may hold Arabic (a name) only where fixed words mark where it starts and ends: not in a short pattern, and not
-  // in two values written side by side («${1}${2}»), which could split any text anywhere
-  const NUM = "([^\\u0621-\\u064A]+?)", ANY = "([\\s\\S]+?)";
+  // as the first of two values written side by side («${1}${2}»), which could otherwise split any text anywhere
+  const NUM = "([^\\u0621-\\u064A]*?)", ANY = "([\\s\\S]*?)"; // a value may be empty: «${x ? "، …" : ""}»
   P = d.p.map(([k, en]) => {
     const parts = k.split(/\$\{\d\}/), fixed = (parts.join("").match(AR_ALL) || []).length, n = parts.length - 1;
     let src = "^" + esc(parts[0]);
-    for (let i = 1; i <= n; i++) src += (fixed < 5 || (i > 1 && parts[i - 1] === "") || (i < n && parts[i] === "") ? NUM : ANY) + esc(parts[i]);
+    for (let i = 1; i <= n; i++) src += (fixed < 5 || (i < n && parts[i] === "") ? NUM : ANY) + esc(parts[i]); // of two values side by side, the first is a number
     return [new RegExp(src + "$"), en, fixed] as [RegExp, string, number];
   })
     .sort((x, y) => score(y) - score(x) || y[0].source.length - x[0].source.length);

@@ -3,6 +3,7 @@ import { Attachments } from "./Round28";
 import React, { useEffect, useState } from "react";
 import { BranchField } from "./Branches";
 import { amountToArabicWords } from "../shared/tafqeet";
+import { hijri } from "../shared/hijri";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, fmtDate, METHOD_AR, TAX_AR, confirmDlg, useUrlSearch, SearchBox, FilterInfo, useSorted, Th, matches, useNewParam } from "../lib";
 import { PartnerStatement, AccountLedger, AccountStatementButton } from "./Statements";
 import { CentreEditor } from "./Projects";
@@ -158,7 +159,7 @@ export function VoucherPrint({ p, direction, onClose }: { p: any; direction: str
   return (
     <Modal title={`${direction === "IN" ? "سند قبض" : "سند صرف"} ${p.number}`} onClose={onClose} footer={<><PrintBtn /><button className="btn" onClick={onClose}>إغلاق</button></>}>
       <div className="print-doc">
-        <div className="head"><div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && <>الرقم الضريبي: {me.company.vatNumber}</>}</div></div><div><h2 style={{ color: "var(--primary)" }}>{direction === "IN" ? "سند قبض" : "سند صرف"}</h2><div>رقم: <b className="num">{p.number}</b></div><div>التاريخ: <span className="num">{fmtDate(p.date)}</span></div></div></div>
+        <div className="head"><div><h2>{me.company.nameAr}</h2><div className="small">{me.company.vatNumber && <>الرقم الضريبي: {me.company.vatNumber}</>}</div></div><div><h2 style={{ color: "var(--primary)" }}>{direction === "IN" ? "سند قبض" : "سند صرف"}</h2><div>رقم: <b className="num">{p.number}</b></div><div>التاريخ: <span className="num">{fmtDate(p.date)}</span></div>{CFG.country === "SA" && hijri(p.date) && <div className="small">الموافق: <span className="num">{hijri(p.date)}</span></div>}</div></div>
         <table><tbody>
           <tr><td style={{ width: 160 }}>{direction === "IN" ? "استلمنا من السيد/السادة" : "صرفنا إلى السيد/السادة"}</td><td><b>{p.partnerName}</b></td></tr>
           <tr><td>مبلغاً وقدره</td><td><b className="num" style={{ fontSize: 18 }}>{money(p.amount)} {CFG.currencyAr}</b><div className="small">{amountToArabicWords(Number(p.amount))}</div></td></tr>

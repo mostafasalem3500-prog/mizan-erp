@@ -14,6 +14,8 @@ import "./styles.css";
 import { loadConfig, CFG } from "./shared/country";
 import { startA11y } from "./a11y";
 import { startI18n, tr } from "./i18n";
+import { startErrorReports } from "./monitor";
+startErrorReports();
 
 // theme before the first paint (no flash): saved choice, else the system setting
 try { const v = localStorage.getItem("mz_theme") || "auto"; document.documentElement.dataset.theme = v === "dark" || (v === "auto" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light"; } catch {}

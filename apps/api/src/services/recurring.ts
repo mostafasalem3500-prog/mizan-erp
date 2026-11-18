@@ -1,5 +1,7 @@
 /** Recurring templates: expenses, manual journals and sales invoices generated on a schedule. */
-import { Db, tx, pool } from "../db/pool";
+import { Db, tx, pool, db } from "../db/pool";
+import { runAmortization, companiesWithDueAmortization } from "./amortization";
+import { beat } from "./monitor";
 import { bad, isDate, today, addDays, addMonths } from "../lib/core";
 import { createExpense } from "./expenses";
 import { manualJournal } from "./misc";
@@ -42,9 +44,12 @@ export async function runDueForCompany(companyId: string, user: string, upTo = t
 /** Hourly scheduler for all companies with an active subscription. */
 export function startRecurringScheduler() {
   const tick = async () => {
+    beat("scheduler");
     try {
       const rows = (await pool.query(`SELECT DISTINCT r.company_id FROM recurring_templates r JOIN companies c ON c.id=r.company_id WHERE r.is_active AND r.next_date <= $1 AND c.status='ACTIVE' AND (c.subscription_ends_at IS NULL OR c.subscription_ends_at > now())`, [today()])).rows;
       for (const r of rows) await runDueForCompany(r.company_id, "النظام (قيد دوري)");
+      // amortisation schedules set to post by themselves: each month as soon as it has ended
+      for (const C of await companiesWithDueAmortization(db)) await tx((t) => runAmortization(t, C, "النظام (إطفاء شهري)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[amortization]", C, e.message));
     } catch (e) {
       console.error("[recurring]", e);
     }

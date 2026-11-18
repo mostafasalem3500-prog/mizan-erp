@@ -5,7 +5,7 @@
  */
 import { Db } from "../db/pool";
 import { IS_EG } from "../lib/country";
-import { isDate, today, addDays, r2 } from "../lib/core";
+import { isDate, today, addDays, addMonths, monthEnd, r2 } from "../lib/core";
 import { checkPartner } from "../lib/partnerRules";
 import { bad } from "../lib/core";
 
@@ -59,6 +59,10 @@ export async function todoList(t: Db, C: string) {
   if (low.c) out.push({ key: "lowStock", text: "أصناف وصلت حد إعادة الطلب", count: low.c, to: "/reorder", level: "normal" });
   const ses = await t.one(`SELECT COUNT(*)::int c FROM pos_sessions WHERE company_id=$1 AND status='OPEN' AND opened_at < now() - interval '20 hours'`, [C]).catch(() => ({ c: 0 }));
   if (ses.c) out.push({ key: "posOpen", text: "وردية نقطة بيع مفتوحة منذ أمس — أغلقها وطابق الصندوق", count: ses.c, to: "/pos", level: "normal" });
+  // manual amortisation schedules with a month that has ended (automatic ones post by themselves)
+  const am = await t.rows(`SELECT months, posted_months, start_date FROM amortizations WHERE company_id=$1 AND status='ACTIVE' AND NOT auto`, [C]).catch(() => [] as any[]);
+  const amDue = am.reduce((s: number, a: any) => { const st = String(a.startDate instanceof Date ? a.startDate.toISOString() : a.startDate).slice(0, 10); let k = 0; for (let i = a.postedMonths; i < a.months; i++) { if (monthEnd(addMonths(st.slice(0, 7) + "-01", i)) <= d) k++; else break; } return s + k; }, 0);
+  if (amDue) out.push({ key: "amortization", text: "أشهر إطفاء مستحقة لم تُرحَّل (مدفوع مقدماً / إيرادات مؤجلة)", count: amDue, to: "/amortizations", level: "normal" });
   if (!IS_EG) {
     const ps = await t.rows(`SELECT * FROM partners WHERE company_id=$1 AND is_active AND code <> 'WALKIN'`, [C]);
     const bad1 = ps.filter((p: any) => { const c = checkPartner(p); return (p.isSupplier && !c.supplierReady) || (p.isCustomer && p.kind === "COMPANY" && !c.standardReady); }).length;

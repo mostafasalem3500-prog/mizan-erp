@@ -10,6 +10,7 @@ import { Dashboard } from "./pages/Dashboard"; // the landing screen ships with 
 import { setSheetMeta } from "./shared/sheet";
 import { ThemeToggle } from "./pages/Round28";
 import { LangToggle } from "./i18n/LangToggle";
+import { ScreenGuard } from "./monitor";
 import { LearnPage, TasksPage, HelpButton, TasksBadge, FavStar, NetBar, OfflineNote, useShortcuts } from "./pages/Learn";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./charity/ctx";
 
@@ -40,6 +41,7 @@ const InventoryPage = lz(() => import("./pages/Master"), "InventoryPage");
 const PaymentsPage = lz(() => import("./pages/Money"), "PaymentsPage");
 const ExpensesPage = lz(() => import("./pages/Money"), "ExpensesPage");
 const AssetsPage = lz(() => import("./pages/Money"), "AssetsPage");
+const AmortizationPage = lz(() => import("./pages/Amortization"), "AmortizationPage");
 const AccountsPage = lz(() => import("./pages/Accounting"), "AccountsPage");
 const JournalsPage = lz(() => import("./pages/Accounting"), "JournalsPage");
 const PeriodsPage = lz(() => import("./pages/Accounting"), "PeriodsPage");
@@ -185,7 +187,7 @@ export function App() {
             </div>
             <NetBar /><OfflineNote />
             <div className="content" id="content" role="main" tabIndex={-1}>
-              <React.Suspense fallback={Wait}><Routes>
+              <ScreenGuard resetKey={loc.pathname}><React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />
                 <Route path="/sales/quotations" element={<DocumentsPage direction="SALE" kinds={["QUOTATION", "ORDER"]} title="عروض الأسعار وأوامر البيع" />} />
@@ -213,6 +215,7 @@ export function App() {
                 <Route path="/accounts" element={<AccountsPage />} />
                 <Route path="/journals" element={<JournalsPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
+                <Route path="/amortizations" element={<AmortizationPage />} />
                 <Route path="/bank" element={<BankPage />} />
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />
@@ -262,7 +265,7 @@ export function App() {
                 <Route path="/settings/:tab" element={<SettingsPage />} />
                 <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />
-              </Routes></React.Suspense>
+              </Routes></React.Suspense></ScreenGuard>
             </div>
           </div>
         </div>

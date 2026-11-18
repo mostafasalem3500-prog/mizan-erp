@@ -13,7 +13,7 @@ export type TplOpts = {
   colSku: boolean; colUnit: boolean; colDiscount: boolean; colTax: boolean; striped: boolean; borders: "full" | "rows" | "none";
   words: boolean; paid: boolean; notes: boolean; terms: boolean; footer: boolean; bank: boolean; signatures: boolean; watermark: boolean;
   title: string; headerNote: string; footerText: string; termsText: string; bankText: string; sign1: string; sign2: string; thanks: string;
-  unitPrice: boolean; cashier: boolean; topMargin: number;
+  unitPrice: boolean; cashier: boolean; topMargin: number; hijri: boolean;
 };
 export type Tpl = { id: string; name: string; builtin?: boolean; note?: string; opts: TplOpts };
 export type TplConfig = { defaults: { doc?: string; pos?: string }; items: Tpl[] };
@@ -24,7 +24,7 @@ const BASE: TplOpts = {
   colSku: true, colUnit: true, colDiscount: true, colTax: true, striped: false, borders: "full",
   words: true, paid: true, notes: true, terms: true, footer: true, bank: false, signatures: false, watermark: true,
   title: "", headerNote: "", footerText: "", termsText: "", bankText: "", sign1: "المستلم", sign2: "المحاسب", thanks: "شكراً لتعاملكم معنا",
-  unitPrice: true, cashier: true, topMargin: 0,
+  unitPrice: true, cashier: true, topMargin: 0, hijri: true,
 };
 const T = (id: string, name: string, note: string, o: Partial<TplOpts>): Tpl => ({ id, name, note, builtin: true, opts: { ...BASE, ...o } });
 export const PRESETS: Tpl[] = [
@@ -54,7 +54,7 @@ const str = (v: any, n: number) => String(v ?? "").slice(0, n);
 export function cleanOpts(o: any): TplOpts {
   const x = { ...BASE, ...(o || {}) };
   const bool = (k: keyof TplOpts) => ((x as any)[k] = !!(x as any)[k]);
-  (["english", "logo", "companyAddress", "companyContact", "companyCr", "customerAddress", "customerContact", "colSku", "colUnit", "colDiscount", "colTax", "striped", "words", "paid", "notes", "terms", "footer", "bank", "signatures", "watermark", "unitPrice", "cashier"] as (keyof TplOpts)[]).forEach(bool);
+  (["english", "logo", "companyAddress", "companyContact", "companyCr", "customerAddress", "customerContact", "colSku", "colUnit", "colDiscount", "colTax", "striped", "words", "paid", "notes", "terms", "footer", "bank", "signatures", "watermark", "unitPrice", "cashier", "hijri"] as (keyof TplOpts)[]).forEach(bool);
   return { ...x,
     size: (["A4", "A5", "T80", "T58"] as TplSize[]).includes(x.size) ? x.size : "A4", style: (Object.keys(STYLE_AR) as TplStyle[]).includes(x.style) ? x.style : "classic",
     accent: HEX.test(x.accent) ? x.accent : BASE.accent, font: ["S", "M", "L"].includes(x.font) ? x.font : "M", logoPos: ["start", "center", "end"].includes(x.logoPos) ? x.logoPos : "start",
@@ -74,7 +74,7 @@ export function resolveTpl(c: any, use: "doc" | "pos", id?: string | null): Tpl 
 }
 /** Arabic label, with the English one beside it on bilingual templates. */
 const EN: Record<string, string> = {
-  "الرقم": "No.", "التاريخ": "Date", "الاستحقاق": "Due date", "العميل": "Customer", "المورد": "Supplier", "البيان": "Description", "الكمية": "Qty", "سعر الوحدة": "Unit price", "خصم": "Disc.",
+  "الرقم": "No.", "التاريخ": "Date", "الموافق": "Hijri date", "الاستحقاق": "Due date", "العميل": "Customer", "المورد": "Supplier", "البيان": "Description", "الكمية": "Qty", "سعر الوحدة": "Unit price", "خصم": "Disc.",
   "المبلغ قبل الضريبة": "Amount excl. tax", "الضريبة": "Tax", "الإجمالي": "Total", "الإجمالي قبل الخصم": "Subtotal", "الخصم": "Discount", "الإجمالي الخاضع للضريبة": "Taxable amount",
   "ضريبة القيمة المضافة": "VAT", "الإجمالي شامل الضريبة": "Total incl. tax", "المسدد": "Paid", "المتبقي": "Balance due", "الرقم الضريبي": "VAT No.", "السجل التجاري": "C.R.", "ملاحظات": "Notes",
   "فاتورة ضريبية": "Tax Invoice", "فاتورة ضريبية مبسطة": "Simplified Tax Invoice", "عرض سعر": "Quotation", "إشعار دائن": "Credit Note", "إشعار مدين": "Debit Note", "الوحدة": "Unit", "الرمز": "Code", "بيانات التحويل البنكي": "Bank details",

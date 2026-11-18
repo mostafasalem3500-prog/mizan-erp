@@ -201,6 +201,10 @@ export async function closeCockpit(t: Db, C: string, periodId?: string) {
   it("recurring", "القيود والمصروفات الدورية المستحقة نُفّذت", rec.length ? "warn" : "ok", rec.length ? rec.slice(0, 4).map((r) => r.name).join("، ") + (rec.length > 4 ? ` و${rec.length - 4} أخرى` : "") : undefined, "/recurring");
   const dep = await t.rows(`SELECT code FROM fixed_assets WHERE company_id=$1 AND status='ACTIVE' AND acquisition_date <= $2 AND (last_depreciation IS NULL OR last_depreciation < $3) AND accumulated < cost - COALESCE(salvage_value,0)`, [C, to, monthEnd(to)]);
   it("depreciation", "إهلاك الأصول الثابتة محسوب حتى نهاية الشهر", dep.length ? "warn" : "ok", dep.length ? `${dep.length} أصل لم يُهلك لهذا الشهر` : undefined, "/assets");
+  // amortisation schedules: every month up to this month's end posted
+  const am = await t.rows(`SELECT number, name, months, posted_months, start_date FROM amortizations WHERE company_id=$1 AND status='ACTIVE' AND start_date <= $2`, [C, to]);
+  const amDue = am.filter((a) => { const s = String(a.startDate instanceof Date ? a.startDate.toISOString() : a.startDate).slice(0, 7); const [y, m] = s.split("-").map(Number); const [ty, tm] = to.slice(0, 7).split("-").map(Number); return Math.min(a.months, (ty - y) * 12 + (tm - m) + 1) > a.postedMonths; });
+  it("amortization", "إطفاء المصروفات المدفوعة مقدماً والإيرادات المؤجلة مرحّل حتى نهاية الشهر", amDue.length ? "warn" : "ok", amDue.length ? amDue.slice(0, 3).map((a) => `${a.number} ${a.name}`).join("، ") + (amDue.length > 3 ? ` و${amDue.length - 3} أخرى` : "") : undefined, "/amortizations");
   const emp = await one(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND hire_date <= $2`, [C, to]);
   if (emp.c) {
     const run = await t.maybe(`SELECT status FROM payroll_runs WHERE company_id=$1 AND period=$2 ORDER BY (status='DRAFT') LIMIT 1`, [C, from.slice(0, 7)]);

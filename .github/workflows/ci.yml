@@ -67,3 +67,50 @@ jobs:
         run: |
           tail -n 60 server-sa.log
           tail -n 60 server-eg.log
+
+  screens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGPASSWORD: postgres
+      TZ: Asia/Riyadh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run build
+      - name: Browser
+        run: |
+          pip install playwright openpyxl
+          python -m playwright install --with-deps chromium
+      - name: Start both editions
+        working-directory: apps/api
+        run: |
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE mizan" -c "CREATE DATABASE mizan_eg"
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/mizan PORT=3100 JWT_SECRET=ci-sa nohup node dist/server.js > ../../server-sa.log 2>&1 &
+          DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/mizan_eg PORT=3200 JWT_SECRET=ci-eg MIZAN_COUNTRY=EG nohup node dist/server.js > ../../server-eg.log 2>&1 &
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:3100/api/health > /dev/null && curl -sf http://127.0.0.1:3200/api/health > /dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:3100/api/health && curl -sf http://127.0.0.1:3200/api/health
+      - name: Screen tests (menu crawl in Arabic and English, English interface, 3.30 features)
+        run: bash tests/ui/run_all.sh
+      - name: Server logs on failure
+        if: failure()
+        run: |
+          tail -n 60 server-sa.log
+          tail -n 60 server-eg.log
