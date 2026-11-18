@@ -37,6 +37,7 @@ const PublicInvoice = lz(() => import("./pages/Documents"), "PublicInvoice");
 const PosPage = lz(() => import("./pages/Pos"), "PosPage");
 const PartnersPage = lz(() => import("./pages/Master"), "PartnersPage");
 const BackupsCore = lz(() => import("./pages/Backups"), "BackupsPage");
+const DonationVerify = lz(() => import("./charity/verify"), "DonationVerify");
 const ProductsPage = lz(() => import("./pages/Master"), "ProductsPage");
 const InventoryPage = lz(() => import("./pages/Master"), "InventoryPage");
 const PaymentsPage = lz(() => import("./pages/Money"), "PaymentsPage");
@@ -146,6 +147,7 @@ export function App() {
   useEffect(() => setMenu(false), [loc.pathname]);
   useEffect(() => { if (me?.company) warmScreens(); }, [!!me?.company]);
   if (loc.pathname.startsWith("/p/")) return <React.Suspense fallback={Wait}><Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes></React.Suspense>;
+  if (loc.pathname.startsWith("/v/")) return <React.Suspense fallback={Wait}><Routes><Route path="/v/:token" element={<DonationVerify />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
   if (!me) return <React.Suspense fallback={null}><Routes><Route path="/privacy" element={<LegalPage kind="privacy" />} /><Route path="/terms" element={<LegalPage kind="terms" />} /><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes></React.Suspense>;

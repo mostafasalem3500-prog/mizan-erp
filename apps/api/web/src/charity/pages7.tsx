@@ -281,3 +281,68 @@ export function NpoStatementsPage() {
     </div>}
   </>;
 }
+
+/** Pick the board decision that authorises an operation above the authority limits. */
+export function DecisionPickModal({ title, onPick, onClose }: { title: string; onPick: (id: string) => void; onClose: () => void }) {
+  const { data } = useFetch<any[]>("/charity/decisions");
+  const [id, setId] = useState("");
+  const list = (data || []).filter((d) => d.status !== "CANCELLED");
+  return <Modal narrow title={title} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary" disabled={!id} onClick={() => onPick(id)}>اعتماد بالقرار</button></>}>
+    <div className="alert warn small mb">المبلغ يتجاوز حد الصرف المباشر في لائحة الصلاحيات — يلزم قرار اعتماد مسجّل.</div>
+    {!data ? <Loading /> : !list.length ? <Empty text="لا توجد قرارات — سجّل القرار من «الحوكمة ← سجل القرارات»" /> : <Field label="القرار"><select className="input" value={id} onChange={(e) => setId(e.target.value)}><option value="">— اختر —</option>{list.map((d) => <option key={d.id} value={d.id}>{d.number} — {String(d.text).slice(0, 70)}{d.amount ? ` (${money(d.amount)})` : ""}</option>)}</select></Field>}
+  </Modal>;
+}
+
+// ─── Salla donation store ───────────────────────────────────────────────────
+const SRC_AR: Record<string, string> = { CASH_DONATION: "تبرع نقدي عام", SUPPORT: "دعم / منحة", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", FOUNDING: "مساهمة تأسيسية", OTHER: "أخرى" };
+const EV: Record<string, string> = { DONE: "green", FAILED: "red", IGNORED: "gray", PENDING: "amber" };
+export function DonationStorePage() {
+  const { data, loading, reload } = useFetch<any>("/charity/store");
+  const { projects } = useCharity();
+  const { can } = useCompanyContext();
+  const { run, busy } = useAction();
+  const [f, setF] = useState<any>(null);
+  const v = f || (data ? { mode: data.connection?.mode || "DONATIONS", enabled: data.connection?.enabled ?? true, secret: "", map: data.map } : null);
+  if (loading && !data) return <Loading />;
+  if (!v) return null;
+  const set = (k: string, x: any) => setF({ ...v, [k]: x });
+  const setMap = (k: string, x: any) => setF({ ...v, map: { ...v.map, [k]: x } });
+  const setRule = (i: number, k: string, x: any) => setMap("rules", v.map.rules.map((r: any, j: number) => (j === i ? { ...r, [k]: x } : r)));
+  const url = data?.connection ? `${location.origin}/api/hooks/salla/${data.connection.token}` : "";
+  const write = can("settings.write");
+  return <>
+    <div className="kpis mb">
+      <div className="card kpi"><span className="label">تبرعات المتجر</span><span className="value"><Money v={data.stats.total} /></span><span className="sub">{data.stats.receipts} سند · {data.stats.donors} متبرع</span></div>
+      <div className="card kpi"><span className="label">حالة الربط</span><span className="value" style={{ fontSize: 18 }}>{!data.connected ? "غير مربوط" : data.connection.enabled ? (data.connection.mode === "DONATIONS" ? "متجر تبرعات ✓" : "متجر مبيعات") : "موقوف"}</span><span className="sub">{data.connection?.lastEventAt ? `آخر طلب ${fmtDate(data.connection.lastEventAt)}` : "لم يصل طلب بعد"}</span></div>
+    </div>
+    <div className="card mb"><div className="card-h"><h3>ربط متجر التبرعات في سلة</h3></div><div className="card-b grid">
+      <div className="alert info small">كل طلب في متجر سلة يُسجَّل تلقائياً <b>سند قبض تبرع</b> (لا فاتورة مبيعات): من ح/ تسوية المتاجر الإلكترونية إلى ح/ التبرعات بحسب المنتج — والمتبرع يُضاف لسجل المتبرعين. الطلب الملغى أو المسترجع يُلغي سنده بقيد عكسي.</div>
+      {url && <Field label="رابط الإشعارات (Webhook) — يُلصق في سلة: لوحة المتجر ← الإعدادات ← الربط والتطبيقات ← Webhooks، للأحداث order.created و order.status.updated و order.refunded"><div className="row"><input className="input" dir="ltr" readOnly value={url} onFocus={(e) => e.target.select()} /><button className="btn sm" onClick={() => navigator.clipboard?.writeText(url)}>نسخ</button></div></Field>}
+      <div className="grid c3">
+        <Field label="نوع المتجر"><select className="input" value={v.mode} disabled={!write} onChange={(e) => set("mode", e.target.value)}><option value="DONATIONS">متجر تبرعات (سندات قبض)</option><option value="SALES">متجر مبيعات (فواتير ضريبية)</option></select></Field>
+        <Field label="المصدر الافتراضي"><select className="input" value={v.map.defaultSource} disabled={!write} onChange={(e) => setMap("defaultSource", e.target.value)}>{Object.entries(SRC_AR).map(([k, x]) => <option key={k} value={k}>{x}</option>)}</select></Field>
+        <Field label="المشروع الافتراضي"><select className="input" value={v.map.defaultProjectId || ""} disabled={!write} onChange={(e) => setMap("defaultProjectId", e.target.value || null)}><option value="">— تبرع عام —</option>{projects.filter((p: any) => p.status !== "CLOSED").map((p: any) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select></Field>
+        <Field label="مفتاح التوقيع (Webhook Secret) — اختياري" hint={data.connection?.hasSecret ? "مضبوط — اتركه فارغاً لإبقائه" : "يتحقق من توقيع سلة"}><Input dir="ltr" value={v.secret} disabled={!write} onChange={(e: any) => set("secret", e.target.value)} /></Field>
+        <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={v.enabled} disabled={!write} onChange={(e) => set("enabled", e.target.checked)} />الربط مفعّل</label>
+      </div>
+      <h4>توجيه منتجات المتجر</h4>
+      <table className="tbl compact"><thead><tr><th>رمز المنتج (SKU) أو جزء من اسمه</th><th>يُسجَّل على المشروع</th><th>المصدر</th>{write && <th />}</tr></thead><tbody>
+        {v.map.rules.map((r: any, i: number) => <tr key={i}>
+          <td><Input value={r.match} disabled={!write} placeholder="مثال: سلة غذائية" onChange={(e: any) => setRule(i, "match", e.target.value)} /></td>
+          <td><select className="input" value={r.projectId || ""} disabled={!write} onChange={(e) => setRule(i, "projectId", e.target.value || null)}><option value="">— عام —</option>{projects.filter((p: any) => p.status !== "CLOSED").map((p: any) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select></td>
+          <td><select className="input" value={r.source || ""} disabled={!write} onChange={(e) => setRule(i, "source", e.target.value || null)}><option value="">— الافتراضي —</option>{Object.entries(SRC_AR).map(([k, x]) => <option key={k} value={k}>{x}</option>)}</select></td>
+          {write && <td><button className="btn ghost sm" onClick={() => setMap("rules", v.map.rules.filter((_: any, j: number) => j !== i))}>✕</button></td>}
+        </tr>)}
+      </tbody></table>
+      {write && <div className="row"><button className="btn sm" onClick={() => setMap("rules", [...v.map.rules, { match: "", projectId: null, source: null }])}>＋ قاعدة</button><div className="grow" />
+        {data.connected && data.connection.mode === "DONATIONS" && <button className="btn sm" disabled={busy} onClick={() => run(async () => { await api("/charity/store/sample", { body: {} }); reload(); }, "سُجّل طلب تبرع تجريبي")}>🧪 طلب تبرع تجريبي</button>}
+        <button className="btn primary" disabled={busy} onClick={() => run(async () => { await api("/charity/store", { method: "PUT", body: { ...v, secret: v.secret || undefined } }); setF(null); reload(); }, data.connected ? "حُفظت الإعدادات" : "أُنشئ رابط الربط — الصقه في سلة")}>{data.connected ? "حفظ" : "إنشاء رابط الربط"}</button></div>}
+      <div className="small muted">أول قاعدة تطابق رمز المنتج (أو بدايته مثل FOOD لـ FOOD-1) أو يظهر نصها في اسمه هي التي تُطبَّق. منتجات الزكاة اجعل مصدرها «زكاة» لتدخل صندوق الزكاة. الطلب التجريبي يُوسَم تجريبياً ويُحذف مع البيانات التجريبية.</div>
+    </div></div>
+    <div className="card"><div className="card-h"><h3>آخر أحداث المتجر</h3></div>
+      {!data.events.length ? <Empty text="لم يصل أي طلب بعد" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الوقت</th><th>الحدث</th><th>الطلب</th><th>النتيجة</th></tr></thead><tbody>
+        {data.events.map((e: any) => <tr key={e.id}><td className="dt">{fmtDate(e.createdAt)}</td><td dir="ltr">{e.event}{e.isTest ? " (تجريبي)" : ""}</td><td className="num">{e.reference}</td><td><span className={"badge " + (EV[e.status] || "gray")}>{e.status}</span> <span className="small">{e.message}</span></td></tr>)}
+      </tbody></table></div>}
+    </div>
+  </>;
+}

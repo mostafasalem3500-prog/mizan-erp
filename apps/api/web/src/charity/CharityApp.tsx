@@ -15,7 +15,7 @@ import { ZakatFundPage } from "./pages4";
 import { CharityIndicatorsPage } from "../pages/Round25";
 import { MembersPage, SharesPage, VouchersPage } from "./pages5";
 import { ClosingPage, ClosingBell, DailyArchivePage, BackupsPage } from "./pages6";
-import { GovernancePage, GrantsPage, NpoStatementsPage } from "./pages7";
+import { GovernancePage, GrantsPage, NpoStatementsPage, DonationStorePage } from "./pages7";
 import { CFG, BASE_TITLE } from "../shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
@@ -40,6 +40,7 @@ export const CH_NAV: any[] = [
   { to: "/charity/collections", ic: "📞", label: "التحصيل", perm: "sales.read" },
   { to: "/charity/sponsorships", ic: "🤲", label: "الكفالات", perm: "payments.read", nonProfit: true },
   { to: "/charity/inkind", ic: "📦", label: "التبرعات العينية", perm: "payments.read", nonProfit: true },
+  { to: "/charity/store", ic: "🛒", label: "متجر التبرعات (سلة)", perm: "payments.read", nonProfit: true },
   { to: "/charity/daily", ic: "📥", label: "تحصيل دخول الأموال اليومية", perm: "payments.read" },
   { to: "/charity/quotations", ic: "📝", label: "عروض الأسعار", perm: "sales.read" },
   { group: "الأعضاء والجمعية العمومية" },
@@ -78,6 +79,8 @@ export const CH_NAV: any[] = [
   { to: "/charity/settings", ic: "⚙", label: "إعدادات الجمعية", perm: "settings.read", companyOnly: true },
 ];
 
+const norm = (v: string) => String(v || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[ًٌٍَُِّْـ]/g, "").toLowerCase();
+
 export function CharityApp({ onLogout }: { onLogout: () => void }) {
   const { me, can } = useContext(AppCtx);
   const [menu, setMenu] = useState(false);
@@ -92,6 +95,11 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
   const labels: Record<string, string> = s?.theme?.labels || {};
   const coop = s?.assocType === "COOPERATIVE";
   const items = CH_NAV.filter((n) => n.group || (can(n.perm) && !(me.lockedBranch && n.companyOnly) && !(coop && n.nonProfit) && !(!coop && n.coopOnly))).map((n) => (coop && n.coopLabel ? { ...n, label: n.coopLabel } : n));
+  // the menu: searchable, and each group can be folded (remembered on this device; the open screen's group stays open)
+  const [navQ, setNavQ] = useState("");
+  const [closed, setClosed] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("mz-ch-closed") || "[]"); } catch { return []; } });
+  const toggle = (g: string) => setClosed((c) => { const n = c.includes(g) ? c.filter((x) => x !== g) : [...c, g]; try { localStorage.setItem("mz-ch-closed", JSON.stringify(n)); } catch { /* private mode */ } return n; });
+  const sections = items.reduce((acc: { title: string | null; items: any[] }[], n) => { if (n.group) acc.push({ title: n.group, items: [] }); else (acc[acc.length - 1] || acc[acc.push({ title: null, items: [] }) - 1]).items.push(n); return acc; }, []).filter((x) => x.items.length);
   const cur = items.find((n) => n.to === loc.pathname) || items.find((n) => n.to && n.to !== "/charity" && loc.pathname.startsWith(n.to + "/"));
   return (
     <BaseCtx.Provider value="/charity">
@@ -103,8 +111,14 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
               <span className="ch-name">{s?.associationName || DEFAULT_NAME}</span>
               <small>{`ترخيص رقم ${s?.licenseNo || DEFAULT_LICENSE}`}{s?.assocTypes?.[s.assocType] ? ` · ${s.assocTypes[s.assocType].ar.replace(/ \(.*\)$/, "")}` : ""}</small>
             </div>
+            <div className="ch-navsearch"><input className="input" type="search" placeholder="بحث في القائمة…" aria-label="بحث في القائمة" value={navQ} onChange={(e) => setNavQ(e.target.value)} /></div>
             <nav>
-              {items.map((n, i) => n.group ? <div key={i} className="group">{n.group}</div> : <NavLink key={n.to} to={n.to} end={n.to === "/charity"}><span className="ic">{n.ic}</span>{labels[n.to] || n.label}</NavLink>)}
+              {navQ.trim() ? items.filter((n) => n.to && norm(labels[n.to] || n.label).includes(norm(navQ))).map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/charity"} onClick={() => setNavQ("")}><span className="ic">{n.ic}</span>{labels[n.to] || n.label}</NavLink>)
+                : sections.map((sec, i) => {
+                  const isOpen = !sec.title || !closed.includes(sec.title) || sec.items.some((n: any) => n.to === cur?.to);
+                  return <React.Fragment key={i}>{sec.title && <button type="button" className="group ch-group" aria-expanded={isOpen} onClick={() => toggle(sec.title)}>{sec.title}<span aria-hidden>{isOpen ? "▾" : "◂"}</span></button>}
+                    {isOpen && sec.items.map((n: any) => <NavLink key={n.to} to={n.to} end={n.to === "/charity"}><span className="ic">{n.ic}</span>{labels[n.to] || n.label}</NavLink>)}</React.Fragment>;
+                })}
             </nav>
             <div className="foot">
               <div>{me.user.fullName} · {me.roles?.[me.role] || me.role}</div>
@@ -160,6 +174,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/closing" element={<ClosingPage />} />
                   <Route path="/charity/governance" element={<GovernancePage />} />
                   <Route path="/charity/grants" element={<GrantsPage />} />
+                  <Route path="/charity/store" element={<DonationStorePage />} />
                   <Route path="/charity/npo-statements" element={<NpoStatementsPage />} />
                   <Route path="/charity/daily-archive" element={<DailyArchivePage />} />
                   <Route path="/charity/backups" element={<BackupsPage />} />

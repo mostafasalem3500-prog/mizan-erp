@@ -271,7 +271,7 @@ const SRC_AR: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUP
 const MTH_AR: Record<string, string> = { CASH: "نقدي", TRANSFER: "تحويل بنكي", CHEQUE: "شيك", CARD: "تحويل بنكي" };
 const CAP_AR: Record<string, string> = { VOLUNTEER: "متطوع", EMPLOYEE: "موظف", SUPPLIER: "مورد", BENEFICIARY: "مستفيد", OTHER: "أخرى" };
 
-export const fromReceipt = (r: any) => ({ journalNo: r.journalNumber, number: r.number, date: fmtDate(r.date), project: r.projectName, payer: r.payerName, idNo: r.payerIdNo, phone: r.payerPhone, payerType: PAYER_AR[r.payerType], amount: r.amount, purpose: r.purpose, source: SRC_AR[r.source], method: MTH_AR[r.method], bank: r.bankName, ref: r.refNo, depositDate: fmtDate(r.depositDate) });
+export const fromReceipt = (r: any) => ({ verifyUrl: r.verifyToken ? `${location.origin}/v/${r.verifyToken}` : undefined, journalNo: r.journalNumber, number: r.number, date: fmtDate(r.date), project: r.projectName, payer: r.payerName, idNo: r.payerIdNo, phone: r.payerPhone, payerType: PAYER_AR[r.payerType], amount: r.amount, purpose: r.purpose, source: SRC_AR[r.source], method: MTH_AR[r.method], bank: r.bankName, ref: r.refNo, depositDate: fmtDate(r.depositDate) });
 export const fromDisb = (d: any) => ({ number: d.number, date: fmtDate(d.date), requestNo: d.requestNumber || d.batchNumber, beneficiary: d.beneficiaryName, idNo: d.beneficiaryIdNo, phone: d.beneficiaryPhone, capacity: CAP_AR[d.capacity], department: d.department, amount: d.amount, reason: d.reason, project: d.projectName, budgetLine: d.budgetLine || d.expenseAccountName, method: d.kind === "CHEQUE" ? "شيك" : d.kind === "TRANSFER" ? "تحويل بنكي" : "نقدي", bank: d.bankName, holder: d.accountHolder, iban: d.iban, ref: d.refNo, execDate: fmtDate(d.execDate || d.date), payFrom: d.payAccountName, docs: d.docs || [], program: d.programName || d.projectName, periodFrom: fmtDate(d.periodFrom), periodTo: fmtDate(d.periodTo) });
 const DEC = (st: string, yes: string, no: string) => (["APPROVED", "DISBURSED", "SETTLED", "ORDERED", "RECEIVED", "PAID"].includes(st) ? yes : st === "REJECTED" ? no : "");
 const RES_AR: Record<string, string> = { FULL: "تمت التسوية بالكامل", RETURNED: "يوجد مبلغ متبقٍ واجب إعادته إلى الجمعية", EXTRA: "يوجد مبلغ مستحق لصاحب العهدة بعد المراجعة والاعتماد" };
@@ -418,6 +418,7 @@ export function A4({ tplKey, settings, data, blank }: { tplKey: string; settings
               {t.seal && <div className="a4-seal">ختم الجمعية</div>}
             </div>
             {t.note && <p className="a4-note">{t.note}</p>}
+            {d.verifyUrl && <VerifyQr url={d.verifyUrl} />}
             <div className="a4-foot">{name}{lic ? ` — ترخيص رقم ${lic}` : ""}{theme.footer ? ` — ${theme.footer}` : ""}</div>
           </footer>
         ) : <div className="a4-foot">{name}{lic ? ` — ترخيص رقم ${lic}` : ""}</div>}
@@ -487,4 +488,11 @@ export function PrintModal({ tplKey, data, settings, onClose, choices }: { tplKe
       <div className="a4-stage"><div ref={ref} className="a4-wrap">{settings ? Array.from({ length: blank ? copies : 1 }).map((_, i) => <A4 key={i} tplKey={k} settings={settings} data={blank ? {} : data} blank={blank} />) : null}</div></div>
     </Modal>
   );
+}
+
+/** QR on a printed donation receipt: the donor (or an auditor) scans it to see the receipt as the association recorded it. */
+function VerifyQr({ url }: { url: string }) {
+  const [src, setSrc] = React.useState("");
+  React.useEffect(() => { import("qrcode").then((Q) => Q.default.toDataURL(url, { margin: 0, width: 120 })).then(setSrc).catch(() => setSrc("")); }, [url]);
+  return <div className="a4-verify"><img src={src} alt="" width={64} height={64} /><span>للتحقق من صحة السند امسح الرمز أو افتح:<br /><b dir="ltr">{url.replace(/^https?:\/\//, "")}</b></span></div>;
 }

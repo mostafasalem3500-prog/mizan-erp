@@ -6,6 +6,7 @@
  *   • طلب صرف (FIN-001)           : workflow only (submitted → reviewed → approved → paid by a voucher)
  *   • مسير المصروفات              : a batch of disbursements posted together
  */
+import crypto from "crypto";
 import { Db } from "../db/pool";
 import { bad, conflict, notFound, r2, D, num, isDate, today } from "../lib/core";
 import { post, reverse, nextNumber } from "../accounting/engine";
@@ -259,6 +260,7 @@ export async function createReceipt(t: Db, companyId: string, user: string, b: a
     sponsorshipId: b.sponsorshipId || null, periodsCount: b.periodsCount || null, periodLabel: b.periodLabel || null,
     feeYear: source === "MEMBERSHIP" && b.feeYear ? Math.floor(num(b.feeYear)) || null : null,
     grantId: grant?.id || null,
+    externalRef: b.externalRef ? String(b.externalRef).slice(0, 120) : null, verifyToken: crypto.randomBytes(12).toString("base64url"),
   });
   const je = await post(t, companyId, {
     date: d, type: "DONATION", sourceType: "CHARITY_RECEIPT", sourceId: row.id, reference: number, memo, createdBy: user, isDemo: !!b.isDemo,

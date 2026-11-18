@@ -319,6 +319,13 @@ export async function processEvent(conn: any, rawBody: any, opts: { eventId?: st
   try {
     if (!conn.enabled) r = { status: "IGNORED", message: "الربط موقوف" };
     else r = await reqCtx.run({ bodyBranchId: conn.branchId || null }, async () => {
+      // associations: a donation store's orders are donations, not sales
+      if (conn.mode === "DONATIONS" && /^order\./.test(event)) {
+        if (event === "order.refunded") data.status = { slug: "refunded", name: "مسترجع" };
+        if (event === "order.cancelled" || event === "order.deleted") data.status = { slug: "canceled", name: "ملغي" };
+        const { handleDonationOrder } = require("./assocStore") as typeof import("./assocStore");
+        return handleDonationOrder(conn, data, { sample: !!opts.sample || !!opts.isTest });
+      }
       if (event === "order.created") return handleOrderCreated(conn, data, { forceDraft: !!opts.isTest, sample: !!opts.sample || !!opts.isTest });
       if (event === "order.updated" || event === "order.status.updated" || event === "order.refunded" || event === "order.cancelled" || event === "order.deleted") {
         if (event === "order.refunded") data.status = { slug: "refunded", name: "مسترجع" };

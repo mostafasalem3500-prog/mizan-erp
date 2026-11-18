@@ -34,7 +34,7 @@ export function authorityConfig(a: any) {
 }
 export async function getAuthority(t: Db, companyId: string) {
   await ensureCharity(t, companyId);
-  return authorityConfig((await t.one(`SELECT authority FROM charity_settings WHERE company_id=$1`, [companyId])).authority);
+  return authorityConfig((await t.one(`SELECT authority_matrix FROM charity_settings WHERE company_id=$1`, [companyId])).authorityMatrix);
 }
 export async function saveAuthority(t: Db, companyId: string, b: any) {
   await ensureCharity(t, companyId);
@@ -42,7 +42,7 @@ export async function saveAuthority(t: Db, companyId: string, b: any) {
   const ups = c.levels.map((l) => l.upTo);
   if (ups.filter((u) => u === null).length !== 1 || ups[ups.length - 1] !== null) throw bad("آخر مستوى يكون «بلا حد أعلى» ومستوى واحد فقط كذلك");
   if (new Set(ups).size !== ups.length) throw bad("حدود المستويات مكررة");
-  await t.exec(`UPDATE charity_settings SET authority=$2 WHERE company_id=$1`, [companyId, JSON.stringify(c)]);
+  await t.exec(`UPDATE charity_settings SET authority_matrix=$2 WHERE company_id=$1`, [companyId, JSON.stringify(c)]);
   return c;
 }
 export const levelFor = (c: ReturnType<typeof authorityConfig>, amount: number) => c.levels.find((l) => l.upTo === null || amount <= l.upTo + 0.004)!;

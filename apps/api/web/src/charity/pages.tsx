@@ -10,6 +10,7 @@ import { PrintModal, fromReceipt, fromDisb, fromRequest, printA4, donorCertData,
 import { AlertsCard, waLink } from "./pages3";
 import { EntryPreview } from "../pages/EntryPreview";
 import { AttachIcon, PendingFiles, uploadFiles, ProjectBudgetModal, ProjectFinalModal } from "./pages6";
+import { DecisionPickModal } from "./pages7";
 
 // ─── labels ────────────────────────────────────────────────────────────────
 export const SOURCE: Record<string, string> = { CASH_DONATION: "تبرع نقدي", SUPPORT: "دعم مالي / منحة", FOUNDING: "مساهمة تأسيسية", PROGRAM: "إيرادات برامج", ZAKAT: "زكاة", MEMBERSHIP: "اشتراك عضوية", SPONSORSHIP: "كفالة", REFUND: "استرداد مبلغ", OTHER: "أخرى", GENERAL: "سند قبض عام" };
@@ -510,6 +511,8 @@ export function BatchesPage() {
   const [zcheck, setZcheck] = useState<any>(null);
   const { run, busy } = useAction();
   const BS: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", CANCELLED: "ملغى" };
+  const [decFor, setDecFor] = useState<any>(null);
+  const toast = useToast();
   return (
     <div className="card">
       <div className="card-h"><h3>مسير المصروفات (صرف جماعي)</h3>{can("payments.write") && <button className="btn primary" onClick={() => setEdit({})}>＋ مسير جديد</button>}</div>
@@ -523,11 +526,12 @@ export function BatchesPage() {
               <button className="btn sm" onClick={() => setSheet(b)}>🖨 الكشف</button>
               {b.status === "DRAFT" && can("payments.write") && <button className="btn sm" onClick={() => setEdit(b)}>تعديل</button>}
               {b.status === "DRAFT" && can("accounting.write") && b.fund === "ZAKAT" && <button className="btn sm primary" onClick={() => setZcheck(b)}>فحص الأهلية والترحيل</button>}
-              {b.status === "DRAFT" && can("accounting.write") && b.fund !== "ZAKAT" && <button className="btn sm primary" disabled={busy} onClick={() => confirmDlg(`اعتماد وترحيل المسير ${b.number} بإجمالي ${money(b.total)}؟ سيُنشأ سند صرف لكل بند.`) && run(async () => { await api(`/charity/batches/${b.id}/post`, { body: {} }); reload(); }, "تم ترحيل المسير")}>اعتماد وترحيل</button>}
+              {b.status === "DRAFT" && can("accounting.write") && b.fund !== "ZAKAT" && <button className="btn sm primary" disabled={busy} onClick={async () => { if (!confirmDlg(`اعتماد وترحيل المسير ${b.number} بإجمالي ${money(b.total)}؟ سيُنشأ سند صرف لكل بند.`)) return; try { await api(`/charity/batches/${b.id}/post`, { body: {} }); toast("تم ترحيل المسير"); reload(); } catch (e: any) { if (e?.code === "AUTHORITY") setDecFor(b); else toast(e.message, "err"); } }}>اعتماد وترحيل</button>}
               {b.status !== "CANCELLED" && can("accounting.write") && <button className="btn sm ghost" disabled={busy} onClick={() => confirmDlg(b.status === "DRAFT" ? "حذف المسودة؟" : `إلغاء المسير ${b.number}؟ ستُلغى جميع سندات الصرف التابعة وتُعكس قيودها.`) && run(async () => { await api(`/charity/batches/${b.id}/cancel`, { body: {} }); reload(); }, "تم")}>{b.status === "DRAFT" ? "حذف" : "إلغاء"}</button>}
             </td></tr>)}</tbody>
         </table></div>
       )}
+      {decFor && <DecisionPickModal title={`قرار اعتماد المسير ${decFor.number} (${money(decFor.total)})`} onClose={() => setDecFor(null)} onPick={(id) => run(async () => { await api(`/charity/batches/${decFor.id}/post`, { body: { decisionId: id } }); setDecFor(null); reload(); }, "تم ترحيل المسير بقرار الاعتماد")} />}
       {edit && <BatchModal init={edit} onClose={(ok) => { setEdit(null); if (ok) reload(); }} />}
       {sheet && <BatchSheet b={sheet} onClose={() => setSheet(null)} />}
       {zcheck && <ZakatBatchCheck b={zcheck} onClose={(ok) => { setZcheck(null); if (ok) reload(); }} />}

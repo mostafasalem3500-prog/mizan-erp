@@ -9,7 +9,7 @@ import { r27 } from "./routes/round27";
 import { egr } from "./routes/egypt";
 import { publicConfig, COUNTRY, CHARITY, IS_DESKTOP, ASSOC, ASSOC_BRAND } from "./lib/country";
 import { r16 } from "./routes/round16";
-import { assocRoutes } from "./routes/assoc";
+import { assocRoutes, assocPublic } from "./routes/assoc";
 import { r28 } from "./routes/round28";
 import { r31 } from "./routes/round31";
 import { amort } from "./routes/amort";
@@ -133,6 +133,7 @@ process.on("unhandledRejection", (e: any) => { console.error("[unhandledRejectio
 app.use("/api/media", media);
 app.use("/api/public", pub);
 app.use("/api/public", portal);
+app.use("/api/public", assocPublic);
 // public description of the REST API: the OpenAPI file and a readable page (before the API-key check)
 const originOf = (req: express.Request) => `${req.protocol}://${req.get("host")}`;
 app.get("/api/v1/openapi.json", (req, res) => { res.setHeader("Cache-Control", "public, max-age=300"); res.json(openapi(originOf(req))); });
