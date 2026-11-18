@@ -92,6 +92,8 @@ export async function closingStatus(t: Db, companyId: string) {
 }
 
 /** Reminders for the alert centre and the bell (only what the settings ask for). */
+const auditCache = new Map<string, { at: number; r: { errors: number; warnings: number; titles: string[] } }>();
+export const clearAuditCache = (companyId: string) => auditCache.delete(companyId);
 export async function closingAlerts(t: Db, companyId: string) {
   const s = await closingStatus(t, companyId);
   const out: { level: "danger" | "warn" | "info"; title: string; detail: string; link: string; kind: string }[] = [];
@@ -111,6 +113,11 @@ export async function closingAlerts(t: Db, companyId: string) {
   }
   const nd = await t.one(`SELECT COUNT(*)::int n FROM charity_disbursements d WHERE d.company_id=$1 AND d.status='POSTED' AND d.date >= CURRENT_DATE - 60 AND NOT EXISTS (SELECT 1 FROM attachments x WHERE x.company_id=$1 AND x.entity='ch_disb' AND x.entity_id=d.id)`, [companyId]);
   if (nd.n) out.push({ kind: "docs", level: s.config.requireDocs ? "warn" : "info", title: `${nd.n} سند صرف بلا مسوغات مرفقة (آخر 60 يوماً)`, detail: "ارفع الفاتورة أو الإيصال أو قرار الصرف من أيقونة 📎 في سندات الصرف", link: "/charity/expenses?docs=missing" });
+  // the integration audit, at most every 10 minutes per establishment
+  const hit = auditCache.get(companyId);
+  let au = hit && Date.now() - hit.at < 600_000 ? hit.r : null;
+  if (!au) { const { integrationAudit } = require("./assocAudit") as typeof import("./assocAudit"); const r = await integrationAudit(t, companyId); au = { errors: r.errors, warnings: r.warnings, titles: r.checks.filter((c) => !c.ok).map((c) => c.title) }; auditCache.set(companyId, { at: Date.now(), r: au }); }
+  if (au.errors || au.warnings) out.push({ kind: "integration", level: au.errors ? "danger" : "warn", title: au.errors ? `فحص الربط المحاسبي: ${au.errors} خلل بين السندات والقيود` : `فحص الربط المحاسبي: ${au.warnings} ملاحظة`, detail: au.titles.slice(0, 2).join(" — "), link: "/charity/integration" });
   return out;
 }
 

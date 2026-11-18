@@ -1,6 +1,6 @@
 /** Governance (meetings & decisions), grants from donor entities, the financial authority matrix, and the non-profit statements. */
 import React, { useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, NumInput, Picker, useAction, useCompanyContext, today, fmtDate, Tabs, PeriodFilter, yearStart, exportExcel, PdfBtn } from "../lib";
 import { CFG } from "../shared/country";
 import { useCharity } from "./ctx";
@@ -339,10 +339,67 @@ export function DonationStorePage() {
         <button className="btn primary" disabled={busy} onClick={() => run(async () => { await api("/charity/store", { method: "PUT", body: { ...v, secret: v.secret || undefined } }); setF(null); reload(); }, data.connected ? "حُفظت الإعدادات" : "أُنشئ رابط الربط — الصقه في سلة")}>{data.connected ? "حفظ" : "إنشاء رابط الربط"}</button></div>}
       <div className="small muted">أول قاعدة تطابق رمز المنتج (أو بدايته مثل FOOD لـ FOOD-1) أو يظهر نصها في اسمه هي التي تُطبَّق. منتجات الزكاة اجعل مصدرها «زكاة» لتدخل صندوق الزكاة. الطلب التجريبي يُوسَم تجريبياً ويُحذف مع البيانات التجريبية.</div>
     </div></div>
+    {data.connected && <StorePayouts data={data} reload={reload} />}
     <div className="card"><div className="card-h"><h3>آخر أحداث المتجر</h3></div>
       {!data.events.length ? <Empty text="لم يصل أي طلب بعد" /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الوقت</th><th>الحدث</th><th>الطلب</th><th>النتيجة</th></tr></thead><tbody>
         {data.events.map((e: any) => <tr key={e.id}><td className="dt">{fmtDate(e.createdAt)}</td><td dir="ltr">{e.event}{e.isTest ? " (تجريبي)" : ""}</td><td className="num">{e.reference}</td><td><span className={"badge " + (EV[e.status] || "gray")}>{e.status}</span> <span className="small">{e.message}</span></td></tr>)}
       </tbody></table></div>}
     </div>
   </>;
+}
+
+// ─── integration audit: every association document ↔ its entry ↔ the ledger ─────
+export function IntegrationAuditPage() {
+  const { data, loading, reload } = useFetch<any>("/charity/integration-audit");
+  const [open, setOpen] = useState<string | null>(null);
+  if (loading && !data) return <Loading />;
+  if (!data) return null;
+  const groups = Array.from(new Set(data.checks.map((c: any) => c.group))) as string[];
+  return <>
+    <div className="kpis mb">
+      <div className="card kpi"><span className="label">النتيجة</span><span className="value" style={{ fontSize: 20, color: data.ok ? (data.warnings ? "#b54708" : "#067647") : "#b42318" }}>{data.ok ? (data.warnings ? `سليم مع ${data.warnings} ملاحظة` : "✔ الربط سليم") : `✖ ${data.errors} خلل`}</span><span className="sub">{data.checks.length} فحصاً · آخر فحص {new Date(data.at).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}</span></div>
+      <div className="card kpi"><span className="label">المستندات المفحوصة</span><span className="value">{data.docs}</span><span className="sub">سندات الجمعية والعهد والعيني والأسهم</span></div>
+      <div className="card kpi"><span className="label">القيود المرحّلة</span><span className="value">{data.entries}</span><span className="sub">في دفاتر النظام المحاسبي كلها</span></div>
+    </div>
+    <div className="alert info small mb">يفحص أن كل سند في نظام الجمعية له قيد واحد سارٍ بنفس المبلغ، وأن كل ملغى عُكس قيده، وأن لا قيود يتيمة، وأن ميزان المراجعة متوازن، وأن أرصدة الأستاذ تطابق السجلات (صندوق الزكاة، مخزون العيني، العهد، مراكز تكلفة المشاريع، رأس مال الأعضاء)، وأن كل سند — من الجمعية أو من البرنامج المحاسبي — حرّك الصندوق/البنك بمبلغه. اضغط على فحص فيه خلل لترى المستندات.</div>
+    {groups.map((g) => <div key={g} className="card mb"><div className="card-h"><h3>{g}</h3></div>
+      <div className="table-wrap"><table className="tbl compact"><tbody>
+        {data.checks.filter((c: any) => c.group === g).map((c: any) => <React.Fragment key={c.key}>
+          <tr style={{ cursor: c.items.length ? "pointer" : undefined }} onClick={() => c.items.length && setOpen(open === c.key ? null : c.key)}>
+            <td style={{ width: 28 }}>{c.ok ? "✅" : c.level === "warn" ? "⚠️" : "❌"}</td>
+            <td>{c.title}{c.note && !c.ok && <div className="small muted">{c.note}</div>}</td>
+            <td className="num small">{c.expected !== undefined && c.expected !== null ? <>{c.labels?.[0] || "السجل"} <Money v={c.expected} /> · {c.labels?.[1] || "الأستاذ"} <Money v={c.actual} /></> : !c.ok ? `${c.count} مستند` : ""}</td>
+          </tr>
+          {open === c.key && <tr><td /><td colSpan={2}><table className="tbl compact"><thead><tr><th>النوع</th><th>الرقم</th><th>التاريخ</th><th>المشكلة</th></tr></thead><tbody>
+            {c.items.map((i: any, k: number) => <tr key={k}><td>{i.type}</td><td><Link to={i.link}>{i.number}</Link></td><td className="dt">{i.date}</td><td>{i.issue}</td></tr>)}
+          </tbody></table>{c.count > c.items.length && <div className="small muted">يُعرض أول {c.items.length} من {c.count}</div>}</td></tr>}
+        </React.Fragment>)}
+      </tbody></table></div></div>)}
+    <div className="row"><button className="btn" onClick={reload}>↻ إعادة الفحص</button></div>
+  </>;
+}
+
+/** Salla transfers what it collected to the bank less its commission: clearing account → bank, commission + VAT as expense. */
+function StorePayouts({ data, reload }: { data: any; reload: () => void }) {
+  const { can } = useCompanyContext();
+  const { run, busy } = useAction();
+  const [f, setF] = useState<any>({ date: today(), net: "", fees: "", bankAccountId: "", reference: "" });
+  const banks = useFetch<any>("/accounts").data;
+  const list = (banks?.rows || banks || []).filter((a: any) => a.isCashBank && !a.isGroup && a.systemKey !== "ESTORE_CLEARING" && a.systemKey !== "CASH");
+  const bal = data.clearing?.balance || 0;
+  return <div className="card mb"><div className="card-h"><h3>تحويلات سلة إلى البنك</h3><span className="muted small">رصيد التسوية لدى سلة: <b><Money v={bal} /></b></span></div><div className="card-b grid">
+    <div className="small muted">عند وصول تحويل من سلة: من ح/ البنك (الصافي) + ح/ عمولات المتاجر وضريبتها، إلى ح/ تسوية المتاجر الإلكترونية (الإجمالي). الرصيد الباقي هو ما لم تحوّله سلة بعد.</div>
+    {can("payments.write") && <div className="grid c3">
+      <Field label="التاريخ"><Input type="date" value={f.date} onChange={(e: any) => setF({ ...f, date: e.target.value })} /></Field>
+      <Field label="المبلغ الواصل للبنك"><NumInput value={f.net} onChange={(v: any) => setF({ ...f, net: v })} /></Field>
+      <Field label="عمولة سلة (قبل الضريبة)"><NumInput value={f.fees} onChange={(v: any) => setF({ ...f, fees: v })} /></Field>
+      <Field label="البنك المستلم"><select className="input" value={f.bankAccountId} onChange={(e) => setF({ ...f, bankAccountId: e.target.value })}><option value="">— اختر —</option>{list.map((a: any) => <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>)}</select></Field>
+      <Field label="مرجع التحويل"><Input value={f.reference} onChange={(e: any) => setF({ ...f, reference: e.target.value })} /></Field>
+      <div className="row" style={{ alignItems: "end" }}><button className="btn primary" disabled={busy || !f.net || !f.bankAccountId} onClick={() => run(async () => { await api("/integrations/salla/payouts", { body: { ...f, fees: f.fees || 0 } }); setF({ ...f, net: "", fees: "", reference: "" }); reload(); }, "سُجّل التحويل")}>تسجيل التحويل</button></div>
+    </div>}
+    {!!data.payouts?.length && <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الرقم</th><th>التاريخ</th><th>الصافي</th><th>العمولة</th><th>ضريبتها</th><th>الإجمالي</th><th>البنك</th><th>القيد</th><th /></tr></thead><tbody>
+      {data.payouts.map((p: any) => <tr key={p.id} className={p.status === "CANCELLED" ? "muted" : ""}><td>{p.number}</td><td className="dt">{fmtDate(p.date)}</td><td className="n"><Money v={p.net} /></td><td className="n"><Money v={p.fees} /></td><td className="n"><Money v={p.feeVat} /></td><td className="n"><b><Money v={p.gross} /></b></td><td>{p.bankName}</td><td>{p.journalNumber}</td>
+        <td>{p.status === "POSTED" && can("payments.write") ? <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { await api(`/integrations/salla/payouts/${p.id}/cancel`, { body: {} }); reload(); }, "أُلغي التحويل وعُكس قيده")}>إلغاء</button> : p.status === "CANCELLED" ? "ملغى" : ""}</td></tr>)}
+    </tbody></table></div>}
+  </div></div>;
 }

@@ -47,6 +47,12 @@ with sync_playwright() as p:
             ok('/api/hooks/salla/' in url, 'store page creates the webhook link: ' + url[-30:])
             pg.click('text=🧪 طلب تبرع تجريبي'); pg.wait_for_timeout(1500)
             ok('order.created' in pg.inner_text('body'), 'sample donation appears in the store events')
+            ok('تحويلات سلة إلى البنك' in pg.inner_text('body'), 'store page has the Salla payouts section with the clearing balance')
+            # integration audit page
+            pg.goto(B + '/charity/integration'); pg.wait_for_selector('text=المستندات والقيود', timeout=20000)
+            body = pg.inner_text('body')
+            ok('الربط سليم' in body and '❌' not in body, 'integration audit page: «✔ الربط سليم» on the demo books')
+            pg.screenshot(path='/tmp/integration.png', full_page=True)
             # receipt print has a verification QR
             if live:
                 pg.goto(B + '/charity/receipts'); pg.wait_for_timeout(1200)

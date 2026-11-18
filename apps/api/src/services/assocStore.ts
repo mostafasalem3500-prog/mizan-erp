@@ -101,5 +101,12 @@ export async function storeOverview(companyId: string) {
   const conn = await db.maybe(`SELECT * FROM salla_connections WHERE company_id=$1 AND platform='SALLA'`, [companyId]);
   const events = conn ? await db.rows(`SELECT id, event, reference, status, message, is_test, created_at FROM salla_events WHERE company_id=$1 AND platform='SALLA' ORDER BY created_at DESC LIMIT 30`, [companyId]) : [];
   const stats = await db.one(`SELECT COUNT(*)::int n, COALESCE(SUM(amount),0) total, COUNT(DISTINCT partner_id)::int donors FROM charity_receipts WHERE company_id=$1 AND status='POSTED' AND external_ref LIKE 'salla:%'`, [companyId]);
-  return { connected: !!conn, connection: conn ? { token: conn.token, enabled: conn.enabled, mode: conn.mode, hasSecret: !!conn.secret, lastEventAt: conn.lastEventAt, depositAccountId: conn.depositAccountId } : null, map: donationMap(conn?.donationMap), events, stats: { receipts: stats.n, total: r2(num(stats.total)), donors: stats.donors } };
+  // the clearing account holds what Salla collected and has not yet transferred to the bank
+  const clearing = await db.maybe(
+    `SELECT a.id, a.code, a.name_ar, COALESCE((SELECT SUM(l.debit-l.credit) FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED' WHERE l.account_id=a.id),0) balance
+     FROM accounts a WHERE a.company_id=$1 AND a.id=COALESCE($2::uuid, (SELECT id FROM accounts WHERE company_id=$1 AND system_key='ESTORE_CLEARING'))`, [companyId, conn?.depositAccountId || null]);
+  const payouts = await db.rows(
+    `SELECT p.id, p.number, p.date, p.net, p.fees, p.fee_vat, p.gross, p.status, p.reference, b.name_ar AS bank_name, j.number AS journal_number FROM estore_payouts p JOIN accounts b ON b.id=p.bank_account_id LEFT JOIN journal_entries j ON j.id=p.journal_id
+     WHERE p.company_id=$1 AND p.platform='SALLA' ORDER BY p.date DESC, p.created_at DESC LIMIT 20`, [companyId]);
+  return { clearing: clearing ? { ...clearing, balance: r2(num(clearing.balance)) } : null, payouts, connected: !!conn, connection: conn ? { token: conn.token, enabled: conn.enabled, mode: conn.mode, hasSecret: !!conn.secret, lastEventAt: conn.lastEventAt, depositAccountId: conn.depositAccountId } : null, map: donationMap(conn?.donationMap), events, stats: { receipts: stats.n, total: r2(num(stats.total)), donors: stats.donors } };
 }

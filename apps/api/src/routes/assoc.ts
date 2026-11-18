@@ -141,6 +141,10 @@ assocRoutes.post("/charity/batches/:id/post", perm("accounting.write"), h(async 
   return r;
 }));
 
+// ─── integration audit: documents ↔ entries ↔ sub-registers ─────────────────
+import { integrationAudit } from "../services/assocAudit";
+assocRoutes.get("/charity/integration-audit", perm("reports.read"), h(async (req) => tx((t) => integrationAudit(t, cid(req)))));
+
 // ─── public verification of a donation receipt (QR on the printed receipt) ──
 export const assocPublic = Router();
 assocPublic.get("/donation/:token", h(async (req) => {

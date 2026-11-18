@@ -179,7 +179,7 @@ export function ReceiptsPage() {
               <td className="row" style={{ gap: 4 }}>
                 <button className="btn sm" onClick={() => setPr(r)}>🖨 طباعة</button>
                 <AttachIcon entity="ch_rcpt" row={r} onChanged={reload} />
-                {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ${CFG.words.one} (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
+                {r.payerPhone && r.status === "POSTED" && <a className="btn sm" target="_blank" rel="noreferrer" title="إرسال شكر وإشعار بالسند عبر واتساب" href={waLink(r.payerPhone, `السلام عليكم ${r.payerName}،\nتشكر ${settings?.associationName || "الجمعية"} دعمكم الكريم.\nتم استلام مبلغ ${money(r.amount)} ${CFG.words.one} (${SOURCE[r.source]}${r.purpose ? " — " + r.purpose : ""}) بموجب السند رقم ${r.number} بتاريخ ${fmtDate(r.date)}.${r.verifyToken ? `\nللتحقق من السند: ${location.origin}/v/${r.verifyToken}` : ""}\nجزاكم الله خيراً وجعله في موازين حسناتكم.`)}>واتساب</a>}
                 {can("payments.write") && r.status === "POSTED" && <button className="btn sm ghost" disabled={busy} onClick={() => { const why = window.prompt(`سبب إلغاء السند ${r.number}؟ (سيُعكس القيد)`); if (why !== null) run(async () => { await api(`/charity/receipts/${r.id}/cancel`, { body: { reason: why } }); reload(); }, "تم الإلغاء وعكس القيد"); }}>إلغاء</button>}
               </td>
             </tr>))}

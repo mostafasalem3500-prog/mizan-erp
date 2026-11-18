@@ -15,7 +15,7 @@ import { ZakatFundPage } from "./pages4";
 import { CharityIndicatorsPage } from "../pages/Round25";
 import { MembersPage, SharesPage, VouchersPage } from "./pages5";
 import { ClosingPage, ClosingBell, DailyArchivePage, BackupsPage } from "./pages6";
-import { GovernancePage, GrantsPage, NpoStatementsPage, DonationStorePage } from "./pages7";
+import { GovernancePage, GrantsPage, NpoStatementsPage, DonationStorePage, IntegrationAuditPage } from "./pages7";
 import { CFG, BASE_TITLE } from "../shared/country";
 import { DEFAULT_LOGO, DEFAULT_NAME, DEFAULT_LICENSE } from "./templates";
 import "./charity.css";
@@ -66,6 +66,7 @@ export const CH_NAV: any[] = [
   { group: "التخطيط والرقابة" },
   { to: "/charity/treasury", ic: "🏦", label: "الحسابات البنكية والخزائن", perm: "payments.read" },
   { to: "/charity/vouchers", ic: "🔗", label: "سجل السندات الموحّد", perm: "payments.read" },
+  { to: "/charity/integration", ic: "🩺", label: "فحص الربط المحاسبي", perm: "reports.read" },
   { to: "/charity/closing", ic: "🔒", label: "التقفيل اليومي والأسبوعي والشهري", perm: "payments.read" },
   { to: "/charity/daily-archive", ic: "🗂", label: "الأرشيف اليومي", perm: "payments.read" },
   { to: "/charity/backups", ic: "💾", label: "الحفظ اليومي (النسخ الاحتياطية)", perm: "settings.read", companyOnly: true },
@@ -171,6 +172,7 @@ export function CharityApp({ onLogout }: { onLogout: () => void }) {
                   <Route path="/charity/members" element={<MembersPage />} />
                   <Route path="/charity/shares" element={<SharesPage />} />
                   <Route path="/charity/vouchers" element={<VouchersPage />} />
+                  <Route path="/charity/integration" element={<IntegrationAuditPage />} />
                   <Route path="/charity/closing" element={<ClosingPage />} />
                   <Route path="/charity/governance" element={<GovernancePage />} />
                   <Route path="/charity/grants" element={<GrantsPage />} />
