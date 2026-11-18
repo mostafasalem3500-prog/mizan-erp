@@ -46,7 +46,7 @@ export async function listErrors(days = 7) {
     `SELECT e.*, c.name_ar company_name FROM app_errors e LEFT JOIN companies c ON c.id=e.company_id
       WHERE e.day >= CURRENT_DATE - $1::int ORDER BY e.last_at DESC LIMIT 300`, [days])).rows;
   const sum = (await pool.query(`SELECT source, SUM(count)::int n FROM app_errors WHERE last_at > now() - interval '24 hours' GROUP BY 1`)).rows;
-  return { rows, last24h: Object.fromEntries(sum.map((r: any) => [r.source, r.n])) };
+  return { rows, last24h: Object.fromEntries(sum.map((r: any) => [r.source, r.n])), performance: perfStats() };
 }
 
 export async function status(version: string) {
@@ -56,7 +56,8 @@ export async function status(version: string) {
   let errors24h = 0;
   try { errors24h = Number((await pool.query(`SELECT COALESCE(SUM(count),0)::int n FROM app_errors WHERE source='server' AND last_at > now() - interval '24 hours'`)).rows[0].n); } catch { /* table missing on a fresh boot */ }
   const ok = db.ok && (!selfcheck || selfcheck.ok);
-  return { ok, version, uptimeSeconds: Math.round((Date.now() - started) / 1000), database: db, selfcheck, schedulers: beats, serverErrors24h: errors24h, time: new Date().toISOString() };
+  const pf = perfStats(0);
+  return { ok, version, uptimeSeconds: Math.round((Date.now() - started) / 1000), database: db, selfcheck, schedulers: beats, serverErrors24h: errors24h, responseMs: { median: pf.medianMs, p95: pf.p95Ms, requests: pf.requests }, time: new Date().toISOString() };
 }
 
 const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -78,9 +79,34 @@ td{padding:12px 14px;border-bottom:1px solid #e3ebe9;vertical-align:top}.v{font-
 ${row("قاعدة البيانات", "Database", s.database.ok, s.database.ok ? `${s.database.ms} ms` : "down")}
 ${row("الفحص الذاتي للمحرك المحاسبي", "Accounting engine self-check", s.selfcheck ? s.selfcheck.ok : null, s.selfcheck ? `${s.selfcheck.passed}/${s.selfcheck.total}` : "pending")}
 ${row("أخطاء الخادم آخر 24 ساعة", "Server errors, last 24 hours", s.serverErrors24h === 0, String(s.serverErrors24h))}
+${row("زمن الاستجابة (الوسيط / 95%)", "Response time (median / 95th percentile)", s.responseMs.requests ? s.responseMs.p95 < 1500 : null, s.responseMs.requests ? `${s.responseMs.median} / ${s.responseMs.p95} ms` : "—")}
 ${row("مدة التشغيل منذ آخر تحديث", "Uptime since last release", null, esc(dur(s.uptimeSeconds)))}
 ${row("الإصدار", "Version", null, esc(s.version))}
 </table>
 <p class="small">آخر تحديث للصفحة ${esc(s.time.slice(0, 16).replace("T", " "))} UTC — <a href="/api/status">JSON</a></p>
 </main></body></html>`;
 }
+
+// ─── response times (since the server started; kept in memory) ───
+type Perf = { count: number; total: number; max: number; slow: number; recent: number[] };
+const perf = new Map<string, Perf>();
+const recentAll: number[] = [];
+const SLOW_MS = 1500;
+/** One finished API request. `key` is the route pattern (ids collapsed), so the same screen's calls group together. */
+export function trackRequest(method: string, key: string, ms: number) {
+  const k = `${method} ${key}`;
+  let p = perf.get(k);
+  if (!p) { if (perf.size > 600) return; p = { count: 0, total: 0, max: 0, slow: 0, recent: [] }; perf.set(k, p); }
+  p.count++; p.total += ms; if (ms > p.max) p.max = ms; if (ms >= SLOW_MS) p.slow++;
+  p.recent.push(ms); if (p.recent.length > 200) p.recent.shift();
+  recentAll.push(ms); if (recentAll.length > 2000) recentAll.shift();
+}
+const pct = (xs: number[], q: number) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))]); };
+/** The slowest routes by their 95th percentile, and the overall median / 95th percentile of the last 2,000 requests. */
+export function perfStats(limit = 20) {
+  const rows = [...perf.entries()].map(([route, p]) => ({ route, count: p.count, avgMs: Math.round(p.total / p.count), p95Ms: pct(p.recent, 0.95), maxMs: Math.round(p.max), slow: p.slow }))
+    .sort((a, b) => b.p95Ms - a.p95Ms).slice(0, limit);
+  return { since: new Date(started).toISOString(), requests: recentAll.length, medianMs: pct(recentAll, 0.5), p95Ms: pct(recentAll, 0.95), slowMs: SLOW_MS, rows };
+}
+/** Collapses ids and numbers in a path so /invoices/5f…/post and /invoices/9a…/post count as one route. */
+export const routeKey = (path: string) => path.split("?")[0].replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{27}/gi, ":id").replace(/\/\d+(?=\/|$)/g, "/:n").slice(0, 120);

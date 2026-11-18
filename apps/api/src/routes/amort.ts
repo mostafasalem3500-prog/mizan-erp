@@ -1,10 +1,11 @@
 /** Amortisation schedules: prepaid expenses and deferred revenue spread over the months they cover. */
 import { Router } from "express";
 import { db, tx } from "../db/pool";
-import { h, today, r2 } from "../lib/core";
+import { h, today, r2, bad } from "../lib/core";
 import { authenticate, perm, cid, actor, p } from "../lib/auth";
 import { audit } from "./master";
 import * as am from "../services/amortization";
+import * as ecl from "../services/ecl";
 
 export const amort = Router();
 amort.use(authenticate);
@@ -31,3 +32,9 @@ amort.post("/amortizations/run", perm("accounting.write"), h(async (req) => { co
 amort.post("/amortizations/:id/finish", perm("accounting.write"), h(async (req) => { const a = await tx((t) => am.finishAmortization(t, cid(req), actor(req), p(req).id, req.body?.date || today())); await audit(req, "FINISH", "amortization", a.id, { number: a.number }); return a; }));
 amort.post("/amortizations/:id/cancel", perm("accounting.write"), h(async (req) => { const r = await tx((t) => am.cancelAmortization(t, cid(req), p(req).id)); await audit(req, "CANCEL", "amortization", p(req).id); return r; }));
 amort.delete("/amortizations/:id", perm("accounting.write"), h(async (req) => { const r = await tx((t) => am.deleteAmortization(t, cid(req), actor(req), p(req).id)); await audit(req, "DELETE", "amortization", p(req).id); return r; }));
+
+// ─── allowance for doubtful debts (expected credit losses) ───
+const parseRates = (v: any) => { if (!v) return undefined; try { return JSON.parse(String(v)); } catch { throw bad("صيغة النسب غير صحيحة"); } };
+amort.get("/ecl", perm("accounting.read"), h(async (req) => ecl.eclCalc(db, cid(req), { asOf: req.query.asOf, rates: parseRates(req.query.rates) })));
+amort.get("/ecl/runs", perm("accounting.read"), h(async (req) => ecl.eclRuns(db, cid(req))));
+amort.post("/ecl/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => ecl.eclPost(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "ecl", r.runId, { asOf: r.asOf, required: r.required, adjustment: r.adjustment }); return r; }));

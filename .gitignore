@@ -5,3 +5,4 @@ dist/
 apps/api/web/dist/
 apps/desktop/release/
 apps/desktop/server/
+__pycache__/

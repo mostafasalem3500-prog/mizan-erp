@@ -86,6 +86,12 @@ app.use((req, res, next) => {
 app.get("/.well-known/security.txt", (_req, res) => { const exp = new Date(Date.now() + 300 * 864e5).toISOString(); res.type("text/plain").send(`Contact: mailto:${process.env.SECURITY_CONTACT || process.env.SUPPORT_EMAIL || "security@mizan-erp.sa"}\nExpires: ${exp}\nPreferred-Languages: ar, en\n`); });
 // attachments carry files (base64): their own, larger body limit; parsed bodies are skipped by the general parser
 app.use(["/api/attachments", "/api/ai/chat", "/api/archive/upload"], express.json({ limit: "30mb" }));
+// response times per route (in memory), for the system manager's error page and the status page
+app.use("/api", (req, res, next) => {
+  const t0 = process.hrtime.bigint();
+  res.on("finish", () => { if (req.path !== "/client-errors") monitor.trackRequest(req.method, monitor.routeKey(req.baseUrl + req.path), Number(process.hrtime.bigint() - t0) / 1e6); });
+  next();
+});
 app.use(express.json({ limit: "2mb", verify: (req: any, _res, buf) => { if (String(req.url || "").startsWith("/api/hooks/")) req.rawBody = Buffer.from(buf); } }));
 
 app.get("/api/config", (_req, res) => { res.set("Cache-Control", "no-cache"); res.json(publicConfig()); });

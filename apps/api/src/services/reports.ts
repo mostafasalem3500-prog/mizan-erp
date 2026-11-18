@@ -406,6 +406,13 @@ export async function vatReturn(t: Db, companyId: string, q: any) {
   const assets = await t.rows(
     `SELECT COALESCE(SUM(l.debit - l.credit),0) vat FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
      WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.type='ASSET' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
+  // VAT on a payment or receipt recorded with an amortisation schedule (and on its reversal): standard-rated supply
+  const amort = await t.one(
+    `SELECT COALESCE(SUM(CASE WHEN a.system_key='VAT_IN' THEN l.debit-l.credit ELSE 0 END),0) vin, COALESCE(SUM(CASE WHEN a.system_key='VAT_OUT' THEN l.credit-l.debit ELSE 0 END),0) vout
+     FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+     WHERE a.company_id=$1 AND a.system_key IN ('VAT_IN','VAT_OUT') AND e.source_type='AMORTIZATION' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
+  if (Number(amort.vout)) sales.push({ taxCode: "S", kind: "INVOICE", net: r2(Number(amort.vout) / VAT_F), vat: Number(amort.vout) });
+  if (Number(amort.vin)) exp.push({ taxCode: "S", net: r2(Number(amort.vin) / VAT_F), vat: Number(amort.vin) });
   const sgn = (k: string) => (k === "CREDIT_NOTE" ? -1 : 1);
   const acc = (rows: any[], codes: string[]) => ({
     net: r2(rows.filter((r) => codes.includes(r.taxCode)).reduce((a, r) => a + Number(r.net) * sgn(r.kind || "INVOICE"), 0)),

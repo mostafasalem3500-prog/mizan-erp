@@ -12,4 +12,5 @@ run SA 3100 crawl
 run EG 3200 crawl
 run SA 3100 en_ui
 run SA 3100 r330_ui
+run SA 3100 r331_ui
 echo "screen checks passed: $total"; exit $bad

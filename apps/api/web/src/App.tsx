@@ -42,6 +42,7 @@ const PaymentsPage = lz(() => import("./pages/Money"), "PaymentsPage");
 const ExpensesPage = lz(() => import("./pages/Money"), "ExpensesPage");
 const AssetsPage = lz(() => import("./pages/Money"), "AssetsPage");
 const AmortizationPage = lz(() => import("./pages/Amortization"), "AmortizationPage");
+const EclPage = lz(() => import("./pages/Ecl"), "EclPage");
 const AccountsPage = lz(() => import("./pages/Accounting"), "AccountsPage");
 const JournalsPage = lz(() => import("./pages/Accounting"), "JournalsPage");
 const PeriodsPage = lz(() => import("./pages/Accounting"), "PeriodsPage");
@@ -216,6 +217,7 @@ export function App() {
                 <Route path="/journals" element={<JournalsPage />} />
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/amortizations" element={<AmortizationPage />} />
+                <Route path="/ecl" element={<EclPage />} />
                 <Route path="/bank" element={<BankPage />} />
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />

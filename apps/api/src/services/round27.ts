@@ -202,6 +202,12 @@ export async function closeCheck(t: Db, companyId: string, fiscalYearId: string)
 
   const dep = await t.rows(`SELECT code, name FROM fixed_assets WHERE company_id=$1 AND status='ACTIVE' AND acquisition_date <= $2 AND (last_depreciation IS NULL OR last_depreciation < $3) AND accumulated < cost - COALESCE(salvage_value,0)`, [companyId, to, monthEnd(to)]);
   it("depreciation", "إهلاك الأصول الثابتة محسوب حتى نهاية السنة", dep.length ? "warn" : "ok", dep.length ? `${dep.length} أصل لم يُهلك حتى ${to}: ${dep.slice(0, 5).map((a) => a.code).join("، ")}` : undefined, "/assets");
+  // overdue customer balances at year end and no allowance measured for that date (within the last 40 days of the year)
+  const od = await one(`SELECT COALESCE(SUM(total-amount_paid),0) v FROM invoices WHERE company_id=$1 AND direction='SALE' AND kind='INVOICE' AND status='POSTED' AND total-amount_paid > 0.001 AND COALESCE(due_date,date) < $2`, [companyId, to]);
+  if (Number(od.v) > 0) {
+    const run = await t.maybe(`SELECT 1 FROM ecl_runs WHERE company_id=$1 AND as_of BETWEEN $2 AND $3`, [companyId, addDays(to, -40), addDays(to, 31)]);
+    it("ecl", "مخصص الديون المشكوك في تحصيلها مقدَّر في نهاية السنة", run ? "ok" : "warn", run ? undefined : `ذمم عملاء متأخرة ${Number(od.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} — قدّر المخصص بمصفوفة الأعمار`, "/ecl");
+  }
   const emp = await one(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND hire_date <= $2`, [companyId, to]);
   if (emp.c) {
     const prov = await t.maybe(`SELECT 1 FROM hr_provisions WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3`, [companyId, addDays(to, -40), addDays(to, 31)]);

@@ -9,6 +9,7 @@ import { saveDraft, postInvoice, payCustomsVat } from "./invoices";
 import { createPayment } from "./payments";
 import { createExpense } from "./expenses";
 import { createAsset, runDepreciation } from "./assets";
+import { createAmortization, runAmortization } from "./amortization";
 import { openSession, posSale, posReturn, closeSession } from "./pos";
 import { stockAdjustment, fileVatReturn } from "./misc";
 import { createRun, postRun, payRun } from "./payroll";
@@ -48,7 +49,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 13;
+export const DEMO_VERSION = 14;
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -113,6 +114,12 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     await createAsset(t, companyId, userName, { name: "سيارة توصيل - تويوتا هايس", category: "سيارات", acquisitionDate: start, cost: 95000, vatAmount: 14250, salvageValue: 15000, usefulLifeMonths: 60, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120103'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120202'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أجهزة نقاط البيع والحاسب", category: "حاسب آلي", acquisitionDate: start, cost: 18000, vatAmount: 2700, salvageValue: 0, usefulLifeMonths: 36, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120106'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120205'`, [companyId])).id });
     await createAsset(t, companyId, userName, { name: "أثاث ورفوف المعرض", category: "أثاث", acquisitionDate: start, cost: 24000, vatAmount: 3600, salvageValue: 2000, usefulLifeMonths: 84, payAccountId: bank.id, isDemo: true, assetAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120104'`, [companyId])).id, accDepAccountId: (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code='120203'`, [companyId])).id });
+    // amortisation schedules: a year's insurance paid in advance, and a maintenance contract received in advance
+    const accK = Object.fromEntries((await t.rows(`SELECT id, system_key FROM accounts WHERE company_id=$1 AND system_key IS NOT NULL`, [companyId])).map((a) => [a.systemKey, a.id]));
+    const insExp = (await t.maybe(`SELECT id FROM accounts WHERE company_id=$1 AND type='EXPENSE' AND NOT is_group AND name_ar LIKE '%رسوم حكومية%' ORDER BY code LIMIT 1`, [companyId]))?.id || accK.GENERAL_EXPENSE;
+    const svcRev = (await t.maybe(`SELECT id FROM accounts WHERE company_id=$1 AND type='REVENUE' AND NOT is_group ORDER BY (system_key='SERVICE_REVENUE') DESC NULLS LAST, code LIMIT 1`, [companyId]))?.id;
+    if (insExp && accK.PREPAID) await createAmortization(t, companyId, userName, { kind: "PREPAID", name: "تأمين المركبات والمعرض لسنة", total: 9600, months: 12, startDate: start, targetAccountId: insExp, payAccountId: bank.id, vat: 1440, isDemo: true });
+    if (svcRev && accK.DEFERRED_REVENUE) await createAmortization(t, companyId, userName, { kind: "DEFERRED", name: "عقد صيانة سنوي مقبوض مقدماً — فندق واحة مكة", total: 18000, months: 12, startDate: start, targetAccountId: svcRev, payAccountId: bank.id, vat: 2700, isDemo: true });
     const usdSupplier = await t.insert("partners", { companyId, code: "S-D090", name: "Shenzhen Electronics Trading Co.", isSupplier: true, kind: "COMPANY", city: "Shenzhen", country: "CN", phone: "008675500000000", email: "export@example.cn", street: "Futian District", currency: "USD", paymentTerms: 30, isDemo: true });
     // wholesale price list (8% off) linked to two company customers
     const pl = await savePriceList(t, companyId, { name: "عملاء الجملة", kind: "DISCOUNT", discountPct: 8, isDemo: true });
@@ -287,6 +294,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
       }
       // ── depreciation for the month ──
       await runDepreciation(t, companyId, userName, mEnd, true);
+      await runAmortization(t, companyId, userName, mEnd);
       // quotations / orders pipeline (open documents for the UI)
       if (mi === 5) {
         for (let i = 0; i < 3; i++) {
@@ -426,6 +434,11 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM stock_adjustments WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM stock_moves WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);
     await t.exec(`DELETE FROM stock_balances WHERE company_id=$1 AND product_id = ANY($2)`, [companyId, demoProducts]);
+    await t.exec(`DELETE FROM amortizations WHERE company_id=$1 AND is_demo`, [companyId]);
+    // records kept by the user that point at demo entries (a doubtful-debts run, a schedule month) go with them
+    await t.exec(`DELETE FROM amortization_posts WHERE company_id=$1 AND entry_id IN (SELECT id FROM journal_entries WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`UPDATE amortizations SET pay_entry_id=NULL WHERE company_id=$1 AND pay_entry_id IN (SELECT id FROM journal_entries WHERE company_id=$1 AND is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM ecl_runs WHERE company_id=$1 AND entry_id IN (SELECT id FROM journal_entries WHERE company_id=$1 AND is_demo)`, [companyId]);
     await t.exec(`DELETE FROM journal_entries WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM products WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`UPDATE employees SET cost_center_id=NULL WHERE company_id=$1 AND cost_center_id IN (SELECT id FROM cost_centers WHERE company_id=$1 AND is_demo)`, [companyId]);

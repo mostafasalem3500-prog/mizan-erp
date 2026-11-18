@@ -1,5 +1,6 @@
 import { CFG } from "./shared/country";
 import { locale, tr } from "./i18n";
+import { hijri } from "./shared/hijri";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { writeSheet } from "./shared/sheet";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -76,7 +77,7 @@ export const yearStart = () => today().slice(0, 4) + "-01-01";
 export const KIND_AR: Record<string, string> = { QUOTATION: "عرض سعر", ORDER: "أمر", INVOICE: "فاتورة", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" };
 export const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", CANCELLED: "ملغى", CONVERTED: "محوّل", UNPAID: "غير مسدد", PARTIAL: "مسدد جزئياً", PAID: "مسدد", OPEN: "مفتوح", CLOSED: "مغلق", LOCKED: "مقفل", ACTIVE: "نشط", FULLY_DEPRECIATED: "مهلك بالكامل", DISPOSED: "مستبعد", FILED: "مقدَّم", SETTLED: "مسدد" };
 export const ZATCA_AR: Record<string, string> = { NOT_REQUIRED: "مرحلة أولى (QR)", NOT_ONBOARDED: "بانتظار الربط", PENDING: "بانتظار الإرسال", REPORTED: "مُبلَّغ", CLEARED: "معتمد", WARNING: "مقبول بتحذير", REJECTED: "مرفوض", FAILED: "فشل الإرسال" };
-export const JTYPE_AR: Record<string, string> = { MANUAL: "قيد يدوي", AMORTIZATION: "إطفاء مدفوع مقدماً / إيراد مؤجل", OPENING: "افتتاحي", CLOSING: "إقفال", SALES: "مبيعات", SALES_RETURN: "مرتجع مبيعات", PURCHASE: "مشتريات", PURCHASE_RETURN: "مرتجع مشتريات", RECEIPT: "سند قبض", PAYMENT: "سند صرف", EXPENSE: "مصروف", POS: "نقاط بيع", POS_CLOSE: "إغلاق وردية", STOCK: "مخزون", DEPRECIATION: "إهلاك", ASSET: "أصول", VAT_SETTLEMENT: "تسوية ضريبة", REVERSAL: "قيد عكسي", CHEQUE: "شيكات", PAYROLL: "رواتب", DONATION: "سند قبض جمعية", CHARITY_DISB: "سند صرف جمعية", ZAKAT: "زكاة", WHT: "ضريبة استقطاع" };
+export const JTYPE_AR: Record<string, string> = { MANUAL: "قيد يدوي", ECL: "مخصص الديون المشكوك فيها", AMORTIZATION: "إطفاء مدفوع مقدماً / إيراد مؤجل", OPENING: "افتتاحي", CLOSING: "إقفال", SALES: "مبيعات", SALES_RETURN: "مرتجع مبيعات", PURCHASE: "مشتريات", PURCHASE_RETURN: "مرتجع مشتريات", RECEIPT: "سند قبض", PAYMENT: "سند صرف", EXPENSE: "مصروف", POS: "نقاط بيع", POS_CLOSE: "إغلاق وردية", STOCK: "مخزون", DEPRECIATION: "إهلاك", ASSET: "أصول", VAT_SETTLEMENT: "تسوية ضريبة", REVERSAL: "قيد عكسي", CHEQUE: "شيكات", PAYROLL: "رواتب", DONATION: "سند قبض جمعية", CHARITY_DISB: "سند صرف جمعية", ZAKAT: "زكاة", WHT: "ضريبة استقطاع" };
 export const TAX_AR: Record<string, string> = { S: `خاضع ${CFG.vatRate}%`, Z: "نسبة صفر", X: "صادرات", E: "معفى", O: "خارج النطاق", IM: "استيراد (جمارك)", RC: "احتساب عكسي" };
 export const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 export const METHOD_AR: Record<string, string> = { CASH: "نقدي", CARD: "شبكة/بطاقة", BANK: "تحويل بنكي", CHEQUE: "شيك", CREDIT: "آجل" };
@@ -176,7 +177,10 @@ export function Field({ label, children, span2, span3, hint }: { label?: string;
   // the label names every control inside the field for screen readers (controls come from many components)
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!label || !ref.current) return; ref.current.querySelectorAll("input, select, textarea").forEach((el) => { if (!el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby")) el.setAttribute("aria-label", tr(label)); }); });
-  return <div ref={ref} className={"field" + (span2 ? " span2" : "") + (span3 ? " span3" : "")}>{label && <label>{label}</label>}{children}{hint && <span className="hint">{hint}</span>}</div>;
+  // a date field shows its Hijri (Umm al-Qura) date under it in the Saudi edition, unless the field has its own hint
+  const only: any = React.Children.count(children) === 1 ? React.Children.toArray(children)[0] : null;
+  const hDate = !hint && CFG.country === "SA" && only?.props?.type === "date" && only.props.value ? hijri(only.props.value) : "";
+  return <div ref={ref} className={"field" + (span2 ? " span2" : "") + (span3 ? " span3" : "")}>{label && <label>{label}</label>}{children}{hint ? <span className="hint">{hint}</span> : hDate && <span className="hint" data-hijri>{hDate}</span>}</div>;
 }
 
 export const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) => <input {...p} className={"input " + (p.className || "")} />;

@@ -323,7 +323,13 @@ function AdminErrors() {
             <tr className="clickable" onClick={() => setOpen(open === r.id ? null : r.id)}><td className="dt">{fmtDT(r.lastAt)}</td><td><span className={"badge " + (r.source === "server" ? "red" : "amber")}>{r.source === "server" ? "الخادم" : "المتصفح"}</span></td>
               <td dir="auto" style={{ maxWidth: 420, overflowWrap: "anywhere" }}>{r.message}{r.companyName && <div className="small muted">{r.companyName}</div>}</td><td className="small" dir="ltr">{r.method ? r.method + " " : ""}{r.path}</td><td className="n">{r.count}</td><td className="num small">{r.version}</td></tr>
             {open === r.id && r.stack && <tr><td colSpan={6}><pre className="code-box" dir="ltr" style={{ maxHeight: 260 }}>{r.stack}</pre></td></tr>}
-          </React.Fragment>)}</tbody></table></div>)}</div>
+          </React.Fragment>)}</tbody></table></div>)}
+        {data?.performance && <div className="mt" data-admin-perf>
+          <h4 style={{ margin: "8px 0" }}>سرعة الاستجابة</h4>
+          <div className="small muted mb">منذ آخر تشغيل للخادم ({fmtDT(data.performance.since)}): الوسيط {data.performance.medianMs} مللي ثانية، و95% من الطلبات أسرع من {data.performance.p95Ms} مللي ثانية (آخر {data.performance.requests} طلب). الطلب البطيء: {data.performance.slowMs} مللي ثانية فأكثر.</div>
+          <div className="table-wrap"><table className="tbl compact"><thead><tr><th>المسار</th><th className="n">الطلبات</th><th className="n">المتوسط</th><th className="n">95%</th><th className="n">الأقصى</th><th className="n">بطيئة</th></tr></thead>
+            <tbody>{data.performance.rows.map((r: any) => <tr key={r.route}><td className="small" dir="ltr">{r.route}</td><td className="n">{r.count}</td><td className="n">{r.avgMs}</td><td className="n">{r.p95Ms}</td><td className="n">{r.maxMs}</td><td className="n" style={r.slow ? { color: "var(--danger)", fontWeight: 700 } : undefined}>{r.slow}</td></tr>)}</tbody></table></div>
+        </div>}</div>
     </div>
   );
 }

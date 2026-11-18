@@ -8,6 +8,7 @@
 import { Db } from "../db/pool";
 import { IS_EG, CFG } from "../lib/country";
 import { isDate, today, r2 } from "../lib/core";
+import { BAND_AR } from "./ecl";
 
 const n = (v: any) => r2(Number(v || 0));
 
@@ -15,6 +16,8 @@ export async function financialNotes(t: Db, C: string, q: any) {
   const to = isDate(q.to) ? String(q.to) : today();
   const from = isDate(q.from) ? String(q.from) : `${to.slice(0, 4)}-01-01`;
   const co = await t.one(`SELECT name_ar, name_en, vat_number, cr_number, city, country FROM companies WHERE id=$1`, [C]);
+  // the latest allowance run up to the date (its entry not reversed) — note 5 then states how it was measured
+  const ecl = await t.maybe(`SELECT r.* FROM ecl_runs r LEFT JOIN journal_entries e ON e.id=r.entry_id WHERE r.company_id=$1 AND r.as_of <= $2 AND (e.id IS NULL OR e.reversed_by IS NULL) ORDER BY r.as_of DESC, r.created_at DESC LIMIT 1`, [C, to]);
   const acc = await t.rows(
     `SELECT a.id, a.code, a.name_ar, a.type, a.subtype, a.system_key,
         COALESCE(SUM(CASE WHEN e.date <= $3 THEN l.debit-l.credit END),0) bal,
@@ -73,7 +76,9 @@ export async function financialNotes(t: Db, C: string, q: any) {
         "العملات الأجنبية: تُسجَّل المعاملات بسعر الصرف في تاريخها، وتُثبت فروق الصرف عند السداد في قائمة الدخل.",
       ] },
       { no: 4, title: "النقد وما في حكمه", rows: cash, total: total(cash) },
-      { no: 5, title: "الذمم المدينة التجارية", rows: rows(sub("RECEIVABLE"), 1), total: total(rows(sub("RECEIVABLE"), 1)), ageing: await ageing("SALE"), todo: "تقدير مخصص الخسائر الائتمانية المتوقعة على الأرصدة المتأخرة — يُحدَّد من الإدارة." },
+      { no: 5, title: "الذمم المدينة التجارية", rows: rows(sub("RECEIVABLE"), 1), total: total(rows(sub("RECEIVABLE"), 1)), ageing: await ageing("SALE"), ...(ecl
+        ? { text: [`مخصص الخسائر الائتمانية المتوقعة محسوب بمصفوفة أعمار الديون كما في ${String(ecl.asOf instanceof Date ? ecl.asOf.toISOString() : ecl.asOf).slice(0, 10)}: ${n(ecl.required)} (${ecl.receivables > 0 ? r2((Number(ecl.required) / Number(ecl.receivables)) * 100) : 0}% من الذمم)، بنسب: ${Object.entries(ecl.rates || {}).map(([k, v]) => `${BAND_AR[k as keyof typeof BAND_AR] || k} ${v}%`).join("، ")}.`] }
+        : { todo: "تقدير مخصص الخسائر الائتمانية المتوقعة على الأرصدة المتأخرة — يُحدَّد من الإدارة (شاشة «مخصص الديون المشكوك فيها»)." }) },
       { no: 6, title: "المخزون", rows: inv.map((x: any) => ({ name: `${x.category} (${x.items} صنف)`, amount: n(x.value) })), total: n(inv.reduce((s: number, x: any) => s + Number(x.value), 0)) },
       { no: 7, title: "الممتلكات والمعدات", ppe, total: n(ppe.reduce((s, x) => s + x.netBook, 0)) },
       { no: 8, title: "الذمم الدائنة التجارية", rows: rows(sub("PAYABLE"), -1), total: total(rows(sub("PAYABLE"), -1)), ageing: await ageing("PURCHASE") },
