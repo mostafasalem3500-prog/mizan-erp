@@ -1,6 +1,7 @@
 /** Recurring templates: expenses, manual journals and sales invoices generated on a schedule. */
 import { Db, tx, pool, db } from "../db/pool";
 import { runAmortization, companiesWithDueAmortization } from "./amortization";
+import { runPeriodicReports } from "./periodic";
 import { beat } from "./monitor";
 import { bad, isDate, today, addDays, addMonths } from "../lib/core";
 import { createExpense } from "./expenses";
@@ -50,6 +51,8 @@ export function startRecurringScheduler() {
       for (const r of rows) await runDueForCompany(r.company_id, "النظام (قيد دوري)");
       // amortisation schedules set to post by themselves: each month as soon as it has ended
       for (const C of await companiesWithDueAmortization(db)) await tx((t) => runAmortization(t, C, "النظام (إطفاء شهري)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[amortization]", C, e.message));
+      // monthly / quarterly / annual written reports once the period has ended (a few establishments per pass)
+      await runPeriodicReports().catch((e) => console.error("[periodic-reports]", e.message));
     } catch (e) {
       console.error("[recurring]", e);
     }

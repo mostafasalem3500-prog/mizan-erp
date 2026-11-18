@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CUR } from "../shared/country";
-import { q, useFetch, money, Loading, Empty, DateRange, Select, ExportBtn, PrintBtn, today, monthStart, yearStart, useTabParam, useCompanyContext } from "../lib";
+import { q, useFetch, money, Loading, Empty, DateRange, Select, ExportBtn, PrintBtn, today, monthStart, yearStart, useTabParam, useCompanyContext, Picker, partnerFetcher } from "../lib";
 
 import { TargetCard } from "./Learn";
 const f0 = (v: any) => Number(v || 0).toLocaleString("en", { maximumFractionDigits: 0 });
@@ -81,9 +81,19 @@ export function InsightsPage() {
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   const [branchId, setBranchId] = useState("");
+  const [costCenterId, setCostCenterId] = useState("");
+  const [channel, setChannel] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [partner, setPartner] = useState<any>(null);
+  const [compare, setCompare] = useState("prev");
+  const [more, setMore] = useState(false);
   const [tab, setTab] = useTabParam("overview");
   const branches = useFetch<any[]>("/branches");
-  const { data: d, loading } = useFetch<any>(`/analytics/executive${q({ from, to, branchId })}`, [from, to, branchId]);
+  const centres = useFetch<any[]>("/cost-centers");
+  const cats = useFetch<any[]>("/categories");
+  const partnerId = partner?.id || "";
+  const { data: d, loading } = useFetch<any>(`/analytics/executive${q({ from, to, branchId, costCenterId, channel, categoryId, partnerId, compare: compare === "yoy" ? "yoy" : undefined })}`, [from, to, branchId, costCenterId, channel, categoryId, partnerId, compare]);
+  const nFilters = [costCenterId, channel, categoryId, partnerId].filter(Boolean).length;
   const alertsBy = useMemo(() => ({ danger: (d?.alerts || []).filter((a: any) => a.level === "danger").length, warn: (d?.alerts || []).filter((a: any) => a.level === "warn").length }), [d]);
   if (loading && !d) return <Loading />;
   if (!d) return <Empty text="تعذّر تحميل التحليل" />;
@@ -95,16 +105,28 @@ export function InsightsPage() {
         {PRESETS.map(([l, fn]) => { const [a, b] = fn(); return <button key={l} className={"btn sm" + (a === from && b === to ? " primary" : "")} onClick={() => { setFrom(a); setTo(b); }}>{l}</button>; })}
         <DateRange from={from} to={to} onChange={(a, b) => { setFrom(a); setTo(b); }} />
         {!me.lockedBranch && (branches.data?.length || 0) > 1 && <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} style={{ width: "auto" }}><option value="">كل الفروع</option>{branches.data!.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}
-        <div className="grow" /><span className="small muted">مقارنةً بـ <span className="num">{d.period.prevFrom} → {d.period.prevTo}</span> · المبالغ قبل الضريبة ({CUR()})</span><PrintBtn pdfName="لوحة الإدارة" />
-      </div></div>
+        <Select value={compare} onChange={(e) => setCompare(e.target.value)} style={{ width: "auto" }} aria-label="المقارنة" data-compare><option value="prev">مقارنة بالفترة السابقة</option><option value="yoy">مقارنة بنفس الفترة من العام الماضي</option></Select>
+        <button className={"btn sm" + (nFilters ? " primary" : "")} onClick={() => setMore(!more)} data-more-filters>⚙ فلاتر{nFilters ? ` (${nFilters})` : ""}</button>
+        <div className="grow" /><span className="small muted">مقارنةً بـ <span className="num">{d.period.prevFrom} → {d.period.prevTo}</span> · المبالغ قبل الضريبة ({CUR()})</span>
+        <Link className="btn sm" to={`/financial-report${q({ from, to, branchId })}`}>📝 التقرير المكتوب</Link><PrintBtn pdfName="لوحة الإدارة" />
+      </div>
+      {more && <div className="card-b row" style={{ gap: 8, paddingTop: 0 }} data-filters>
+        {(centres.data?.length || 0) > 0 && <Select value={costCenterId} onChange={(e) => setCostCenterId(e.target.value)} style={{ width: "auto" }} aria-label="مركز التكلفة / المشروع"><option value="">كل مراكز التكلفة والمشاريع</option>{centres.data!.map((c: any) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}</Select>}
+        <Select value={channel} onChange={(e) => setChannel(e.target.value)} style={{ width: "auto" }} aria-label="قناة البيع"><option value="">كل قنوات البيع</option>{Object.entries(CH).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
+        {(cats.data?.length || 0) > 0 && <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} style={{ width: "auto" }} aria-label="تصنيف الأصناف"><option value="">كل التصنيفات</option>{cats.data!.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>}
+        <div style={{ minWidth: 220 }}><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("CUSTOMER")} label={(p: any) => p.name} placeholder="كل العملاء" /></div>
+        {nFilters > 0 && <button className="btn sm ghost" onClick={() => { setCostCenterId(""); setChannel(""); setCategoryId(""); setPartner(null); }}>مسح الفلاتر</button>}
+        {d.docOnly && <span className="small muted" data-doc-only>مع فلتر العميل أو القناة أو التصنيف تُحسب المبيعات من المستندات؛ المصروفات والربح التشغيلي من الدفاتر لا تُقسَّم بهذه الفلاتر فتظهر «—».</span>}
+      </div>}
+      </div>
       <div className="tabs no-print">{TABS.map(([key, l]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{l}</button>)}</div>
 
       {tab === "overview" && <>
         <div className="kpis">
           <Kpi label="المبيعات" value={f0(k.sales)} delta={c.sales} sub={`${k.invoices} فاتورة`} tone="accent" />
           <Kpi label="مجمل الربح" value={f0(k.grossProfit)} delta={c.grossProfit} sub={`هامش ${k.margin}%`} />
-          <Kpi label="المصروفات" value={f0(k.expenses)} delta={c.expenses} goodUp={false} sub={`${k.expenseCount} سند`} />
-          <Kpi label="صافي الربح التشغيلي" value={<span className={k.netProfit < 0 ? "neg-val" : ""}>{f0(k.netProfit)}</span>} delta={c.netProfit} />
+          <Kpi label="المصروفات التشغيلية" value={k.expenses === null ? "—" : f0(k.expenses)} delta={k.expenses === null ? undefined : c.expenses} goodUp={false} sub={k.expenses === null ? "غير قابلة للتقسيم بالفلتر" : "من الدفاتر — تشمل الرواتب والإهلاك"} />
+          <Kpi label="صافي الربح التشغيلي" value={k.netProfit === null ? "—" : <span className={k.netProfit < 0 ? "neg-val" : ""}>{f0(k.netProfit)}</span>} delta={k.netProfit === null ? undefined : c.netProfit} sub={k.ledger ? `من الدفاتر · صافي الربح ${f0(k.ledger.net)}` : undefined} />
           <Kpi label="متوسط الفاتورة" value={f0(k.avgTicket)} delta={c.avgTicket} sub={`${k.customers} عميل`} />
           <Kpi label="المشتريات" value={f0(k.purchases)} delta={c.purchases} goodUp={false} sub={`${k.purchaseInvoices} فاتورة`} />
           <Kpi label="المحصّل من العملاء" value={f0(k.collected)} delta={c.collected} sub={`المدفوع للموردين ${f0(k.paid)}`} />
@@ -147,7 +169,7 @@ export function InsightsPage() {
       </>}
 
       {tab === "purchases" && <>
-        <div className="kpis"><Kpi label="المشتريات" value={f0(k.purchases)} delta={c.purchases} goodUp={false} sub={`${k.purchaseInvoices} فاتورة`} tone="accent" /><Kpi label="المدفوع للموردين" value={f0(k.paid)} delta={c.paid} goodUp={false} /><Kpi label="المصروفات" value={f0(k.expenses)} delta={c.expenses} goodUp={false} /><Kpi label="مستحقات الموردين" value={f0(d.payables.total)} sub={`متأخر ${f0(d.payables.overdue)}`} /></div>
+        <div className="kpis"><Kpi label="المشتريات" value={f0(k.purchases)} delta={c.purchases} goodUp={false} sub={`${k.purchaseInvoices} فاتورة`} tone="accent" /><Kpi label="المدفوع للموردين" value={f0(k.paid)} delta={c.paid} goodUp={false} /><Kpi label="المصروفات التشغيلية" value={k.expenses === null ? "—" : f0(k.expenses)} delta={k.expenses === null ? undefined : c.expenses} goodUp={false} /><Kpi label="مستحقات الموردين" value={f0(d.payables.total)} sub={`متأخر ${f0(d.payables.overdue)}`} /></div>
         <div className="card"><div className="card-h"><h3>المشتريات اليومية</h3></div><div className="card-b"><Trend data={d.daily} a="purchases" b="sales" la="المشتريات" lb="المبيعات" /></div></div>
         <div className="grid cols-2">
           <div className="card"><div className="card-h"><h3>أكبر الموردين</h3></div><div className="card-b"><Bars rows={d.topSuppliers} label={(r) => r.name} value={(r) => r.v} sub={(r) => `${r.n} فاتورة`} link={(r) => `/suppliers/${r.id}`} /></div></div>

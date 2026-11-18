@@ -83,6 +83,9 @@ const CountSheetPage = lz(() => import("./pages/Round20"), "CountSheetPage");
 const ZakatPage = lz(() => import("./pages/Round23"), "ZakatPage");
 const WhtPage = lz(() => import("./pages/Round23"), "WhtPage");
 const FinancialAnalysisPage = lz(() => import("./pages/Round25"), "FinancialAnalysisPage");
+const FinancialReportPage = lz(() => import("./pages/FinancialReport"), "FinancialReportPage");
+const PeriodicReportsPage = lz(() => import("./pages/FinancialReport"), "PeriodicReportsPage");
+const PeriodicReportPage = lz(() => import("./pages/FinancialReport"), "PeriodicReportPage");
 const FinalAccountsPage = lz(() => import("./pages/Round27"), "FinalAccountsPage");
 const EtaPage = lz(() => import("./pages/Egypt"), "EtaPage");
 const Form41Page = lz(() => import("./pages/Egypt"), "Form41Page");
@@ -232,6 +235,9 @@ export function App() {
                 <Route path="/tax/form41" element={<Form41Page />} />
                 <Route path="/tax/income-tax" element={<IncomeTaxPage />} />
                 <Route path="/analysis" element={<FinancialAnalysisPage />} />
+                <Route path="/financial-report" element={<FinancialReportPage />} />
+                <Route path="/periodic-reports" element={<PeriodicReportsPage />} />
+                <Route path="/periodic-reports/:id" element={<PeriodicReportPage />} />
                 <Route path="/final-accounts" element={<FinalAccountsPage />} />
                 <Route path="/price-lists" element={<PriceListsPage />} />
                 <Route path="/promotions" element={<PromotionsPage />} />

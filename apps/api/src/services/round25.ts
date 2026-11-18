@@ -8,7 +8,7 @@ import { r2, D, isDate, today, addDays } from "../lib/core";
 import { incomeStatement, balanceSheet, cashFlow } from "./reports";
 
 type Status = "good" | "ok" | "bad" | "na";
-interface Ratio { key: string; group: string; name: string; value: number | null; unit: "x" | "%" | "days" | "SAR" | "months"; formula: string; benchmark: string; status: Status; note: string }
+interface Ratio { key: string; group: string; name: string; value: number | null; unit: "x" | "%" | "days" | "money" | "months"; formula: string; benchmark: string; status: Status; note: string }
 
 const sec = (g: any, ...subtypes: string[]) => r2((g?.sections || []).filter((s: any) => subtypes.includes(s.subtype)).reduce((a: number, s: any) => a + s.total, 0));
 const div = (a: number, b: number) => (Math.abs(b) < 0.005 ? null : a / b);
@@ -61,7 +61,7 @@ export async function financialAnalysis(t: Db, companyId: string, q: any) {
   add({ key: "current", group: "السيولة", name: "نسبة التداول", value: cur === null ? null : r2(cur), unit: "x", formula: "الأصول المتداولة ÷ الخصوم المتداولة", benchmark: "1.5 – 3 جيد · أقل من 1 خطر", status: grade(cur, (x) => x >= 1.5, (x) => x >= 1), note: cur === null ? "لا توجد خصوم متداولة" : cur >= 1.5 ? "الأصول المتداولة تغطي الالتزامات قصيرة الأجل براحة" : cur >= 1 ? "تغطية مقبولة لكن هامش الأمان محدود" : "الالتزامات قصيرة الأجل أكبر من الأصول المتداولة — راقب السيولة" });
   add({ key: "quick", group: "السيولة", name: "نسبة السيولة السريعة", value: quick === null ? null : r2(quick), unit: "x", formula: "(الأصول المتداولة − المخزون) ÷ الخصوم المتداولة", benchmark: "1 فأكثر جيد", status: grade(quick, (x) => x >= 1, (x) => x >= 0.7), note: "القدرة على السداد دون الاعتماد على بيع المخزون" });
   add({ key: "cash", group: "السيولة", name: "نسبة النقدية", value: cashR === null ? null : r2(cashR), unit: "x", formula: "النقدية والبنوك ÷ الخصوم المتداولة", benchmark: "0.2 – 0.5 مقبول", status: grade(cashR, (x) => x >= 0.5, (x) => x >= 0.2), note: "أشد مقاييس السيولة تحفظاً" });
-  add({ key: "wc", group: "السيولة", name: "رأس المال العامل", value: r2(E.currentAssets - E.currentLiab), unit: "SAR", formula: "الأصول المتداولة − الخصوم المتداولة", benchmark: "موجب", status: E.currentAssets - E.currentLiab >= 0 ? "good" : "bad", note: "فائض الموارد قصيرة الأجل لتمويل التشغيل" });
+  add({ key: "wc", group: "السيولة", name: "رأس المال العامل", value: r2(E.currentAssets - E.currentLiab), unit: "money", formula: "الأصول المتداولة − الخصوم المتداولة", benchmark: "موجب", status: E.currentAssets - E.currentLiab >= 0 ? "good" : "bad", note: "فائض الموارد قصيرة الأجل لتمويل التشغيل" });
   // ── profitability
   const gm = pct(gp, netSales), om = pct(op, netSales), nm = pct(net, netSales);
   const roa = div(net * annual, avg("totalAssets")), roe = div(net * annual, avg("equity"));
@@ -161,7 +161,7 @@ export async function financialAnalysis(t: Db, companyId: string, q: any) {
   const weights: Record<string, number> = { "السيولة": 30, "الربحية": 30, "كفاءة النشاط": 20, "الرفع المالي": 20 };
   let score = 0, wsum = 0;
   for (const [grp, w] of Object.entries(weights)) {
-    const rs = R.filter((r) => r.group === grp && r.status !== "na" && r.unit !== "SAR");
+    const rs = R.filter((r) => r.group === grp && r.status !== "na" && r.unit !== "money");
     if (!rs.length) continue;
     score += (rs.reduce((a, r) => a + pts[r.status], 0) / rs.length) * w; wsum += w;
   }
@@ -217,9 +217,9 @@ export async function charityIndicators(t: Db, companyId: string, q: any) {
   const ind: Ratio[] = [
     { key: "program", group: "كفاءة الإنفاق", name: "نسبة الإنفاق على البرامج والمستفيدين", value: progR, unit: "%", formula: "مصروفات البرامج والمساعدات ÷ إجمالي المصروفات", benchmark: "65% فأكثر جيد", status: grade(progR, (x) => x >= 65, (x) => x >= 50), note: "مؤشر رئيسي لدى الجهات المانحة: كم يصل للمستفيدين من كل ريال" },
     { key: "admin", group: "كفاءة الإنفاق", name: "نسبة المصروفات الإدارية والعمومية", value: adminR, unit: "%", formula: "المصروفات الإدارية ÷ إجمالي المصروفات", benchmark: "أقل من 35%", status: grade(adminR, (x) => x <= 35, (x) => x <= 50), note: "الرواتب والإيجارات والمصروفات التشغيلية غير المباشرة" },
-    { key: "cpb", group: "كفاءة الإنفاق", name: "متوسط الدعم لكل مستفيد", value: people ? r2((Number(aid.v) + Number(inkind?.v || 0)) / people) : null, unit: "SAR", formula: "(المساعدات النقدية + العينية) ÷ عدد المستفيدين", benchmark: "حسب طبيعة البرامج", status: "na", note: `${people} مستفيد خُدموا في الفترة` },
+    { key: "cpb", group: "كفاءة الإنفاق", name: "متوسط الدعم لكل مستفيد", value: people ? r2((Number(aid.v) + Number(inkind?.v || 0)) / people) : null, unit: "money", formula: "(المساعدات النقدية + العينية) ÷ عدد المستفيدين", benchmark: "حسب طبيعة البرامج", status: "na", note: `${people} مستفيد خُدموا في الفترة` },
     { key: "retention", group: "تنمية الموارد", name: "معدل الاحتفاظ بالمتبرعين", value: prev.length ? r2((retained / prev.length) * 100) : null, unit: "%", formula: "متبرعو الفترة السابقة الذين تبرعوا مجدداً ÷ متبرعي الفترة السابقة", benchmark: "45% فأكثر جيد", status: grade(prev.length ? (retained / prev.length) * 100 : null, (x) => x >= 45, (x) => x >= 25), note: `${retained} من ${prev.length} متبرع عادوا · ${newDonors} متبرع جديد` },
-    { key: "avgGift", group: "تنمية الموارد", name: "متوسط التبرع", value: r2(gifts.avg), unit: "SAR", formula: "إجمالي التبرعات ÷ عدد السندات", benchmark: "—", status: "na", note: `${gifts.n} سند · أعلى تبرع ${r2(gifts.mx)} ر.س` },
+    { key: "avgGift", group: "تنمية الموارد", name: "متوسط التبرع", value: r2(gifts.avg), unit: "money", formula: "إجمالي التبرعات ÷ عدد السندات", benchmark: "—", status: "na", note: `${gifts.n} سند · أعلى تبرع ${r2(gifts.mx)} ر.س` },
     { key: "restricted", group: "تنمية الموارد", name: "نسبة الإيرادات المقيدة", value: ratio(restricted, totalRev), unit: "%", formula: "التبرعات المقيدة بمشاريع ÷ إجمالي الإيرادات", benchmark: "توازن بين المقيد والعام", status: "na", note: "الإيرادات المقيدة لا تُصرف إلا على مشاريعها" },
     { key: "coverage", group: "الاستدامة المالية", name: "تغطية الإيرادات للمصروفات", value: totalExp ? r2(totalRev / totalExp) : null, unit: "x", formula: "إجمالي التبرعات والمنح ÷ إجمالي المصروفات", benchmark: "1 فأكثر", status: grade(totalExp ? totalRev / totalExp : null, (x) => x >= 1, (x) => x >= 0.8), note: "هل تغطي الموارد المحصّلة الإنفاق في الفترة" },
     { key: "reserves", group: "الاستدامة المالية", name: "الاحتياطي النقدي", value: reserves, unit: "months", formula: "النقدية والبنوك ÷ متوسط المصروفات الشهرية", benchmark: "3 – 12 شهراً", status: grade(reserves, (x) => x >= 3 && x <= 12, (x) => x >= 1), note: reserves !== null && reserves > 12 ? "احتياطي مرتفع — يمكن توجيه جزء منه للبرامج" : "قدرة الجمعية على الاستمرار دون إيرادات جديدة" },

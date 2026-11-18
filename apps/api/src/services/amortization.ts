@@ -11,7 +11,7 @@
  * to the total exactly. Posting is idempotent per month (amortization_posts is unique on schedule + month).
  */
 import { Db } from "../db/pool";
-import { bad, conflict, isDate, today, addMonths, monthEnd, r2, num, D } from "../lib/core";
+import { bad, conflict, isDate, today, addMonths, monthEnd, r2, num, D, DEMO_LOADING } from "../lib/core";
 import { post, nextNumber, reverse } from "../accounting/engine";
 
 export type AmortInput = {
@@ -184,8 +184,9 @@ export async function deleteAmortization(t: Db, C: string, user: string, id: str
 }
 
 /** Companies with automatic schedules that have a month due — for the hourly scheduler. */
+/** Establishments the scheduler posts for — not while their demo data is loading (the load posts its own months; running both deadlocked). */
 export async function companiesWithDueAmortization(t: Db) {
-  const rows = await t.rows(`SELECT DISTINCT a.company_id FROM amortizations a JOIN companies c ON c.id=a.company_id WHERE a.status='ACTIVE' AND a.auto AND c.status='ACTIVE' AND (c.subscription_ends_at IS NULL OR c.subscription_ends_at > now())`);
+  const rows = await t.rows(`SELECT DISTINCT a.company_id FROM amortizations a JOIN companies c ON c.id=a.company_id WHERE a.status='ACTIVE' AND a.auto AND c.status='ACTIVE' AND (c.subscription_ends_at IS NULL OR c.subscription_ends_at > now()) AND NOT ${DEMO_LOADING}`);
   return rows.map((r) => r.companyId);
 }
 

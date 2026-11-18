@@ -6,6 +6,7 @@
  *   node tools/i18n/check.cjs --todo out.tsv  → also writes the missing texts as a file to translate (see add.cjs)
  *
  * Reads the screens (apps/api/web/src) and the server texts that reach the screen (messages, report and lesson texts).
+ * Text written by the server in both languages (T(arabic, english), e.g. the written financial report) needs no entry.
  * Left out on purpose: the associations edition (Arabic only), printed documents (files that use React's own JSX factory
  * keep the language of their print template), the assistant's Arabic language rules, demo data, internal checks, SQL
  * and e-mail HTML.
@@ -40,6 +41,8 @@ for (const f of files) {
   const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, f.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const rel = path.relative(ROOT, f);
   (function v(n) {
+    // T(arabic, english): text the server writes in both languages itself — only the English argument is read
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "T" && n.arguments.length === 2) { v(n.arguments[1]); return; }
     if (ts.isJsxText(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
       const c = split(ws(n.text))[1];
       if (c && AR.test(c) && !NOT_UI(c) && !strings.has(c)) strings.set(c, rel);

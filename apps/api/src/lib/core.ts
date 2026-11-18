@@ -117,3 +117,6 @@ export function paging(q: any) {
   const offset = Math.max(parseInt(q.offset || "0", 10) || 0, 0);
   return { limit, offset };
 }
+
+/** SQL condition (on companies c): a demo-data load is running — background jobs leave such an establishment alone until it finishes. */
+export const DEMO_LOADING = `(c.demo_job IS NOT NULL AND COALESCE((c.demo_job->>'done')::boolean,false)=false AND COALESCE((c.demo_job->>'error')::boolean,false)=false AND (c.demo_job->>'at')::timestamptz > now() - interval '15 minutes')`;

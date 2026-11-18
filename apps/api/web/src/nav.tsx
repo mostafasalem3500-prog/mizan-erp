@@ -119,6 +119,8 @@ export const NAV_TREE: NavGroup[] = [
   ] },
   { key: "reports", ic: "📊", label: "التقارير", items: [
     { to: "/insights", label: "لوحة الإدارة والتحليل", perm: "reports.read" },
+    { to: "/financial-report", label: "التقرير المالي المكتوب", perm: "reports.read" },
+    { to: "/periodic-reports", label: "التقارير المالية الدورية", perm: "reports.read", company: true },
     { to: "/insights?tab=alerts", label: "التنبيهات والملاحظات", perm: "reports.read" },
     { to: "/reports-center", label: "مركز التقارير (كل التقارير)", perm: "reports.read" },
     { to: "/digest", label: "تقارير الإدارة بالبريد", perm: "settings.read", company: true },

@@ -13,7 +13,7 @@ export function fmtVal(v: number | null, unit: string) {
   if (unit === "%") return `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
   if (unit === "days") return `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })} يوم`;
   if (unit === "months") return `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })} شهر`;
-  if (unit === CFG.currency) return `${money(v)} ${CUR()}`;
+  if (unit === "money" || unit === CFG.currency || unit === "SAR") return `${money(v)} ${CUR()}`;
   return v.toLocaleString("en-US", { maximumFractionDigits: 3 });
 }
 
@@ -38,7 +38,7 @@ export function LineChart({ data, k, label, color = "var(--primary)", unit = "" 
   );
 }
 
-function Gauge({ v }: { v: number | null }) {
+export function Gauge({ v }: { v: number | null }) {
   const val = v ?? 0, ang = Math.PI * (1 - val / 100);
   const col = v === null ? "#94a3b8" : val >= 70 ? "#16a34a" : val >= 45 ? "#d97706" : "#dc2626";
   return (

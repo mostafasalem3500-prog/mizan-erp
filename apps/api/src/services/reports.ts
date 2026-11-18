@@ -577,9 +577,11 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   const periodFrom = monthly ? periodTo.slice(0, 8) + "01" : `${endYear}-${String(endMonth - 2).padStart(2, "0")}-01`;
   const dueDate = monthEnd(addDays(periodTo, 1));
   const filed = await t.maybe(`SELECT id FROM vat_returns WHERE company_id=$1 AND period_to >= $2`, [companyId, periodTo]);
+  // a period before the establishment started (no posted entry in it) has no return to file
+  const vatActive = !!(await t.maybe(`SELECT 1 FROM journal_entries WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3 LIMIT 1`, [companyId, periodFrom, periodTo]));
   const daysToVat = Math.round((Date.parse(dueDate) - Date.parse(td)) / 86400000);
   const items: { level: "err" | "warn" | "info"; text: string; to: string; count?: number }[] = [];
-  if (!filed) items.push({ level: daysToVat < 0 ? "err" : daysToVat <= 15 ? "warn" : "info", text: `إقرار ضريبة القيمة المضافة عن الفترة ${periodFrom} — ${periodTo} ${daysToVat < 0 ? `متأخر ${-daysToVat} يوم` : `مستحق خلال ${daysToVat} يوم (${dueDate})`}`, to: "/vat" });
+  if (!filed && vatActive) items.push({ level: daysToVat < 0 ? "err" : daysToVat <= 15 ? "warn" : "info", text: `إقرار ضريبة القيمة المضافة عن الفترة ${periodFrom} — ${periodTo} ${daysToVat < 0 ? `متأخر ${-daysToVat} يوم` : `مستحق خلال ${daysToVat} يوم (${dueDate})`}`, to: "/vat" });
   if (overdue.c) items.push({ level: "err", text: `${overdue.c} فاتورة مبيعات متأخرة السداد بإجمالي ${r2(overdue.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}`, to: "/reports/aging", count: overdue.c });
   if (payables.c) items.push({ level: "warn", text: `${payables.c} فاتورة موردين تستحق خلال 7 أيام بإجمالي ${r2(payables.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}`, to: "/purchases/invoices", count: payables.c });
   if (cheques.c) items.push({ level: "warn", text: `${cheques.c} شيك يستحق خلال 7 أيام (${r2(cheques.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol})`, to: "/cheques", count: cheques.c });
@@ -613,7 +615,7 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
       const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
       if (!has && active && dl >= -60) items.push({ level: dl < 0 ? "err" : dl <= 30 ? "warn" : "info", text: `إقرار ضريبة الدخل للسنة ${lastFyEg.name} ${dl < 0 ? `متأخر ${-dl} يوم` : `يُقدَّم حتى ${due}`} — احسب المخصص وطبّق الخصم من المنبع`, to: "/tax/income-tax" });
     }
-    return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed } };
+    return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed, active: vatActive } };
   }
   // withholding tax: months with tax withheld but not yet remitted (due the 10th of the next month)
   const wht = await t.rows(
@@ -637,5 +639,5 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
     const dl = Math.round((Date.parse(due) - Date.parse(td)) / 86400000);
     if (!has && active && dl >= -60) items.push({ level: dl < 0 ? "err" : dl <= 30 ? "warn" : "info", text: `إقرار الزكاة للسنة المالية ${lastFy.name} ${dl < 0 ? `متأخر ${-dl} يوم` : `مستحق خلال ${dl} يوم (${due})`} — احسب الوعاء ورحّل المخصص`, to: "/zakat" });
   }
-  return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed } };
+  return { items, vat: { periodFrom, periodTo, dueDate, filed: !!filed, active: vatActive } };
 }

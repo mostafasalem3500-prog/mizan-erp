@@ -53,7 +53,9 @@ export async function seedDemoAccount() {
   const stale = c.demoLoaded && Number(c.demoJob?.version || 0) < DEMO_VERSION; // showcase dataset older than this build → refresh
   if ((!c.demoLoaded || stale || c.demoJob?.error) && !running) {
     console.log(stale ? "[demo-account] refreshing showcase dataset to v" + DEMO_VERSION : "[demo-account] loading demo dataset…");
-    (stale || c.demoJob?.error ? resetShowcaseCompany(companyId) : Promise.resolve())
+    // mark the load as running from the start, so the hourly jobs (amortisation, periodic reports) keep off this establishment until it is done
+    db.exec(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "تحديث البيانات التجريبية", pct: 1, at: new Date() })])
+      .then(() => (stale || c.demoJob?.error ? resetShowcaseCompany(companyId) : Promise.resolve()))
       .then(() => loadDemo(companyId, userId, "مستخدم تجريبي"))
       .then(() => showcaseSalla(companyId).catch((e) => console.error("[demo-account] salla sample", e)))
       .then(() => console.log("[demo-account] demo dataset loaded"))
