@@ -204,7 +204,7 @@ export function CashForecastPage() {
   const [week, setWeek] = useState<any>(null);
   const seq = useRef(0);
   useEffect(() => { const n = ++seq.current; api(`/reports/cash-forecast${q({ weeks, overdueRate: rate, cashSales: sales ? 1 : undefined })}`).then((x) => n === seq.current && setD(x)).catch(() => undefined); }, [weeks, rate, sales]);
-  const max = d ? Math.max(1, ...d.buckets.map((b: any) => Math.max(b.inflow, b.outflow, Math.abs(b.closing)))) : 1;
+  const max = d ? Math.max(1, ...d.buckets.map((b: any) => Math.max(b.inflow, b.outflow))) : 1; // bars compare the weeks' movements; the balance is the number under each bar
   return (
     <div className="grid" data-forecast>
       <div className="card"><div className="card-h"><div><h3>توقع التدفق النقدي</h3>
@@ -232,7 +232,7 @@ export function CashForecastPage() {
               <td className="n"><Money v={b.in.ar} blankZero /></td><td className="n"><Money v={b.in.cheques} blankZero /></td>{d.assumptions.cashSales && <td className="n"><Money v={b.in.cashSales} blankZero /></td>}
               <td className="n"><Money v={b.out.ap} blankZero /></td><td className="n"><Money v={b.out.cheques} blankZero /></td><td className="n"><Money v={b.out.payroll} blankZero /></td><td className="n"><Money v={b.out.leases} blankZero /></td><td className="n"><Money v={b.out.recurring} blankZero /></td><td className="n"><Money v={b.out.vat} blankZero /></td><td className="n"><b><Money v={b.closing} /></b></td></tr>)}</tbody></table></div>
           <details className="fold mt"><summary>الصناديق والبنوك ({d.accounts.length})</summary><div className="table-wrap"><table className="tbl compact"><tbody>{d.accounts.map((a: any) => <tr key={a.code}><td>{a.code} {a.name}</td><td className="n"><Money v={a.balance} /></td></tr>)}</tbody></table></div></details>
-          <div className="small muted mt">توقع من الدفاتر وليس وعداً: الرواتب بمتوسط آخر {d.assumptions.payrollRuns || 0} مسيرات، والمبالغ دون ضريبة دفعات الإيجار، والعملاء الذين لم يحلّ استحقاقهم يُفترض أنهم يسددون في موعدهم.</div>
+          <div className="small muted mt">توقع من الدفاتر وليس وعداً: {d.assumptions.payrollRuns > 0 ? <>الرواتب بمتوسط آخر {d.assumptions.payrollRuns} مسيرات، </> : <>لا مسيرات رواتب مرحّلة فلا رواتب في التوقع، </>}والمبالغ دون ضريبة دفعات الإيجار، والعملاء الذين لم يحلّ استحقاقهم يُفترض أنهم يسددون في موعدهم.</div>
         </>}</div></div>
       {week && <Modal title={`الأسبوع ${week.week}: ${fmtDate(week.from)} — ${fmtDate(week.to)}`} onClose={() => setWeek(null)} wide>
         <div className="grid c3"><div className="card kpi success"><div className="label">داخل</div><div className="value"><Money v={week.inflow} /></div></div><div className="card kpi accent"><div className="label">خارج</div><div className="value"><Money v={week.outflow} /></div></div><div className="card kpi"><div className="label">الرصيد آخر الأسبوع</div><div className="value"><Money v={week.closing} /></div></div></div>
