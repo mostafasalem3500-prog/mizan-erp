@@ -128,6 +128,8 @@ fc100=c('/reports/cash-forecast?weeks=13'); ok(near(fc100['buckets'][0]['in']['a
 
 # ── smart auditor ──
 dup=bill(sup[1]['id'],200,D(9),'S2-001')  # same supplier, same supplier invoice number
+pd=[i for g in c(f'/payment-runs/propose?dueUntil={dt}')['suppliers'] for i in g['invoices'] if i['invoiceId']==dup['id']]
+ok(pd and pd[0]['duplicateOf']==b3['number'],'payment proposal flags the second bill with the same supplier invoice number as a possible duplicate of the first')
 e1=c('/expenses',{'date':D(4),'accountId':K['UTILITIES']['id'],'description':'فاتورة الكهرباء','payee':'شركة الكهرباء','amount':800,'taxCode':'S','payAccountId':K['BANK']['id']})
 e2=c('/expenses',{'date':D(3),'accountId':K['UTILITIES']['id'],'description':'فاتورة الكهرباء','payee':'شركة الكهرباء','amount':800,'taxCode':'S','payAccountId':K['BANK']['id']})
 fri=d-datetime.timedelta(days=(d.weekday()-4)%7 or 7)  # a Friday in the past

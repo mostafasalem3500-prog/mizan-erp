@@ -126,7 +126,7 @@ export function PaymentRunsPage() {
   const [open, setOpen] = useState<string | null>(null);
   const { run, busy } = useAction();
   useEffect(() => { if (!accountId && cashBank.length) setAccountId((cashBank.find((a: any) => a.systemKey === "BANK") || cashBank[0]).id); }, [cashBank.length]);
-  const propose = () => run(async () => { const r = await api(`/payment-runs/propose${q({ dueUntil, partnerId: partner?.id })}`); setProp(r); setPick(Object.fromEntries(r.suppliers.flatMap((s: any) => s.invoices.map((i: any) => [i.invoiceId, i.amount])))); });
+  const propose = () => run(async () => { const r = await api(`/payment-runs/propose${q({ dueUntil, partnerId: partner?.id })}`); setProp(r); setPick(Object.fromEntries(r.suppliers.flatMap((s: any) => s.invoices.map((i: any) => [i.invoiceId, i.duplicateOf ? null : i.amount])))); }); // a possible duplicate starts unticked
   const chosen = prop ? prop.suppliers.flatMap((s: any) => s.invoices.filter((i: any) => pick[i.invoiceId] !== null && pick[i.invoiceId] !== undefined && Number(pick[i.invoiceId]) > 0).map((i: any) => ({ invoiceId: i.invoiceId, amount: Number(pick[i.invoiceId]) }))) : [];
   const total = chosen.reduce((a: number, l: any) => a + l.amount, 0);
   return (
@@ -140,13 +140,14 @@ export function PaymentRunsPage() {
             <Field label=" "><button className="btn" disabled={busy} data-propose onClick={propose}>اقترح الفواتير</button></Field>
           </div>
           {prop && (!prop.suppliers.length ? <Empty text="لا توجد فواتير موردين مستحقة حتى هذا التاريخ" /> : <>
+            {prop.duplicates > 0 && <div className="alert err small mt" data-dup-alert>{prop.duplicates === 1 ? "فاتورة واحدة تحمل" : `${prop.duplicates} فواتير تحمل`} رقم فاتورة مورد مسجلاً من قبل لنفس المورد — لم تُحدَّد للسداد. راجعها قبل أن تُدفع مرتين.</div>}
             {prop.foreignLeftOut > 0 && <div className="alert info small mt">{prop.foreignLeftOut} فاتورة بعملة أجنبية لم تُقترح — تُسدَّد بسند صرف بسعر يومها.</div>}
             {prop.suppliers.map((s: any) => <div key={s.partnerId} className="mt" data-prop-supplier>
               <div className="row" style={{ justifyContent: "space-between" }}><b>{s.partnerName}</b><span className="small">{s.wht && <span className="badge amber">ضريبة استقطاع تُخصم عند الصرف</span>} {s.openCredit > 0 && <span className="badge">إشعارات دائنة مفتوحة <Money v={s.openCredit} /></span>}</span></div>
               <div className="table-wrap"><table className="tbl compact"><thead><tr><th></th><th>الفاتورة</th><th>رقم المورد</th><th>الاستحقاق</th><th className="n">المتبقي</th><th className="n" style={{ width: 140 }}>يُسدَّد الآن</th></tr></thead>
                 <tbody>{s.invoices.map((i: any) => { const on = pick[i.invoiceId] !== null && pick[i.invoiceId] !== undefined; return <tr key={i.invoiceId} className={on ? "" : "muted"}>
                   <td><input type="checkbox" checked={on} aria-label={`سداد ${i.number}`} onChange={() => setPick({ ...pick, [i.invoiceId]: on ? null : i.amount })} /></td>
-                  <td><Link to={`/doc/${i.invoiceId}`} className="num">{i.number}</Link></td><td className="small">{i.supplierRef || "—"}</td>
+                  <td><Link to={`/doc/${i.invoiceId}`} className="num">{i.number}</Link>{i.duplicateOf && <div><span className="badge red" data-dup>مكررة محتملة — نفس الرقم في {i.duplicateOf}</span></div>}</td><td className="small">{i.supplierRef || "—"}</td>
                   <td className="dt">{fmtDate(i.dueDate)}{i.overdueDays > 0 && <span className="badge red"> متأخرة {i.overdueDays} يوم</span>}</td><td className="n"><Money v={i.amount} /></td>
                   <td className="n">{on ? <NumInput value={pick[i.invoiceId] as any} onChange={(e) => setPick({ ...pick, [i.invoiceId]: e.target.value as any })} aria-label={`مبلغ ${i.number}`} /> : "—"}</td></tr>; })}</tbody></table></div></div>)}
             <div className="form-grid mt">
@@ -189,7 +190,7 @@ function RunModal({ id, onClose }: { id: string; onClose: () => void }) {
         {d.suppliers.map((s: any) => <div key={s.partnerId} className="mt">
           <div className="row" style={{ justifyContent: "space-between" }}><b>{s.partnerName}</b><span className="num"><Money v={s.total} />{s.paymentNumber && <> · سند <b>{s.paymentNumber}</b>{s.wht > 0 && <> · استقطاع <Money v={s.wht} /> · صافي <Money v={s.netPaid} /></>}{s.paymentStatus === "CANCELLED" && <span className="badge red"> ملغى</span>}</>}</span></div>
           <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الفاتورة</th><th>رقم المورد</th><th>الاستحقاق</th><th className="n">المبلغ</th></tr></thead>
-            <tbody>{s.invoices.map((i: any) => <tr key={i.id}><td><Link to={`/doc/${i.invoiceId}`} className="num">{i.number}</Link></td><td className="small">{i.supplierRef || "—"}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.amount} /></td></tr>)}</tbody></table></div></div>)}
+            <tbody>{s.invoices.map((i: any) => <tr key={i.id}><td><Link to={`/doc/${i.invoiceId}`} className="num">{i.number}</Link>{i.duplicateOf && <div><span className="badge red" data-dup>مكررة محتملة — نفس الرقم في {i.duplicateOf}</span></div>}</td><td className="small">{i.supplierRef || "—"}</td><td className="dt">{fmtDate(i.dueDate)}</td><td className="n"><Money v={i.amount} /></td></tr>)}</tbody></table></div></div>)}
       </div>}
     </Modal>
   );

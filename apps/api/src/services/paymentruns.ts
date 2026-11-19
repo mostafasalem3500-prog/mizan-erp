@@ -20,7 +20,10 @@ export async function propose(t: Db, C: string, q: { dueUntil?: string; partnerI
   const dueUntil = isDate(q.dueUntil) ? String(q.dueUntil) : addDays(today(), 7);
   const rows = await t.rows(
     `SELECT i.id, i.number, i.supplier_ref, i.date, i.due_date, i.total, i.amount_paid, i.partner_id, p.name partner_name, p.is_non_resident, p.wht_type,
-            COALESCE((SELECT SUM(l.amount) FROM payment_run_lines l JOIN payment_runs r ON r.id=l.run_id WHERE l.invoice_id=i.id AND r.status IN ('DRAFT','APPROVED')),0) held
+            COALESCE((SELECT SUM(l.amount) FROM payment_run_lines l JOIN payment_runs r ON r.id=l.run_id WHERE l.invoice_id=i.id AND r.status IN ('DRAFT','APPROVED')),0) held,
+            -- an earlier posted bill of the same supplier with the same supplier invoice number: this one may be a duplicate
+            (SELECT d.number FROM invoices d WHERE d.company_id=i.company_id AND d.partner_id=i.partner_id AND d.id<>i.id AND d.direction='PURCHASE' AND d.kind='INVOICE' AND d.status='POSTED'
+               AND COALESCE(trim(i.supplier_ref),'')<>'' AND lower(trim(d.supplier_ref))=lower(trim(i.supplier_ref)) AND (d.created_at, d.id) < (i.created_at, i.id) ORDER BY d.created_at LIMIT 1) dup_of
        FROM invoices i JOIN partners p ON p.id=i.partner_id
       WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind IN ('INVOICE','DEBIT_NOTE') AND i.status='POSTED'
         AND i.total - i.amount_paid > 0.005 AND COALESCE(i.currency,$3)=$3 AND COALESCE(i.due_date, i.date) <= $2
@@ -37,12 +40,13 @@ export async function propose(t: Db, C: string, q: { dueUntil?: string; partnerI
     if (free <= 0) continue;
     const g = groups.get(r.partnerId) || { partnerId: r.partnerId, partnerName: r.partnerName, wht: !!(r.isNonResident && r.whtType), openCredit: credit.get(r.partnerId) || 0, invoices: [] as any[], total: 0 };
     const due = iso(r.dueDate || r.date);
-    g.invoices.push({ invoiceId: r.id, number: r.number, supplierRef: r.supplierRef, date: iso(r.date), dueDate: due, overdueDays: Math.max(0, Math.round((Date.parse(today()) - Date.parse(due)) / 86400000)), balance, held, amount: free });
+    g.invoices.push({ invoiceId: r.id, number: r.number, supplierRef: r.supplierRef, date: iso(r.date), dueDate: due, overdueDays: Math.max(0, Math.round((Date.parse(today()) - Date.parse(due)) / 86400000)), balance, held, amount: free, duplicateOf: r.dupOf || null });
     g.total = r2(g.total + free);
     groups.set(r.partnerId, g);
   }
   const suppliers = [...groups.values()].filter((g) => g.total >= num(q.minAmount));
-  return { dueUntil, suppliers, total: r2(suppliers.reduce((a, g) => a + g.total, 0)), count: suppliers.reduce((a, g) => a + g.invoices.length, 0), foreignLeftOut: fx.n };
+  const duplicates = suppliers.reduce((a, g) => a + g.invoices.filter((i: any) => i.duplicateOf).length, 0);
+  return { dueUntil, suppliers, total: r2(suppliers.reduce((a, g) => a + g.total, 0)), count: suppliers.reduce((a, g) => a + g.invoices.length, 0), foreignLeftOut: fx.n, duplicates };
 }
 
 async function cashAccount(t: Db, C: string, id: string) {
