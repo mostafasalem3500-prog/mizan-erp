@@ -42,9 +42,10 @@ with sync_playwright() as p:
             g = pg.query_selector_all('.sidebar .ch-group'); g[-1].click()
             # store page
             pg.goto(B + '/charity/store'); pg.wait_for_selector('text=ربط متجر التبرعات في سلة')
-            pg.click('text=إنشاء رابط الربط'); pg.wait_for_selector('input[readonly][dir=ltr]', timeout=10000)
+            if pg.query_selector('text=إنشاء رابط الربط'): pg.click('text=إنشاء رابط الربط')
+            pg.wait_for_selector('input[readonly][dir=ltr]', timeout=10000)
             url = pg.input_value('input[readonly][dir=ltr]')
-            ok('/api/hooks/salla/' in url, 'store page creates the webhook link: ' + url[-30:])
+            ok('/api/hooks/salla/' in url, 'store page shows the webhook link (demo store is connected): ' + url[-30:])
             pg.click('text=🧪 طلب تبرع تجريبي'); pg.wait_for_timeout(1500)
             ok('order.created' in pg.inner_text('body'), 'sample donation appears in the store events')
             ok('تحويلات سلة إلى البنك' in pg.inner_text('body'), 'store page has the Salla payouts section with the clearing balance')

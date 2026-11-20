@@ -36,7 +36,7 @@ async function config(t: Db, companyId: string) {
 }
 
 /** The week that ends on `end` (the configured last working day). */
-const weekOf = (d: string, endDay: number) => { const end = addDays(d, (endDay - dow(d) + 7) % 7); return { key: end, from: addDays(end, -6), to: end }; };
+export const weekOf = (d: string, endDay: number) => { const end = addDays(d, (endDay - dow(d) + 7) % 7); return { key: end, from: addDays(end, -6), to: end }; };
 
 async function cashBalances(t: Db, companyId: string, to: string) {
   return t.rows(
