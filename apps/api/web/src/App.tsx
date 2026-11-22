@@ -35,6 +35,9 @@ const ModifiersPage = lz(() => import("./pages/Round338"), "ModifiersPage");
 const PaymentRunsPage = lz(() => import("./pages/Round338"), "PaymentRunsPage");
 const CashForecastPage = lz(() => import("./pages/Round338"), "CashForecastPage");
 const AuditorPage = lz(() => import("./pages/Round338"), "AuditorPage");
+const RemittancesPage = lz(() => import("./pages/Round339"), "RemittancesPage");
+const EgCompliancePage = lz(() => import("./pages/Round339"), "EgCompliancePage");
+const SalaryTaxReportPage = lz(() => import("./pages/Round339"), "SalaryTaxReportPage");
 const DocumentsPage = lz(() => import("./pages/Documents"), "DocumentsPage");
 const DocumentView = lz(() => import("./pages/Documents"), "DocumentView");
 const PublicInvoice = lz(() => import("./pages/Documents"), "PublicInvoice");
@@ -234,6 +237,7 @@ export function App() {
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />
                 <Route path="/payroll" element={<PayrollPage />} />
+                <Route path="/payroll/remittances" element={<RemittancesPage />} />
                 <Route path="/payroll/:tab" element={<PayrollPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/vat" element={<VatPage />} />
@@ -242,6 +246,8 @@ export function App() {
                 <Route path="/eta" element={<EtaPage />} />
                 <Route path="/tax/form41" element={<Form41Page />} />
                 <Route path="/tax/income-tax" element={<IncomeTaxPage />} />
+                <Route path="/tax/eg-compliance" element={<EgCompliancePage />} />
+                <Route path="/tax/salary-tax-report" element={<SalaryTaxReportPage />} />
                 <Route path="/analysis" element={<FinancialAnalysisPage />} />
                 <Route path="/financial-report" element={<FinancialReportPage />} />
                 <Route path="/periodic-reports" element={<PeriodicReportsPage />} />

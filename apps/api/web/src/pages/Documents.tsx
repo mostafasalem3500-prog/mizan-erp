@@ -101,11 +101,11 @@ type Line = { key: number; promotionId?: string | null; promoPct?: number; promo
 const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S", uom: null });
 
 function calc(l: Line, incl: boolean) {
-  const rate = l.taxCode === "S" || l.taxCode === "IM" ? 15 : 0;
+  const rate = l.taxCode === "S" || l.taxCode === "IM" ? CFG.vatRate : 0;
   const gross = l.qty * l.unitPrice * (1 - l.discountPct / 100);
   let net = gross, vat = gross * rate / 100;
   if (incl && rate) { net = gross / (1 + rate / 100); vat = gross - net; }
-  return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, rcVat: l.taxCode === "RC" ? Math.round(gross * 15) / 100 : 0 };
+  return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, rcVat: l.taxCode === "RC" ? Math.round(gross * CFG.vatRate) / 100 : 0 };
 }
 
 export function DocEditor({ direction, kind, id, onClose, originId, prefill, revise }: { direction: "SALE" | "PURCHASE"; kind: string; id?: string; onClose: (saved?: boolean) => void; originId?: string; prefill?: any; revise?: { amountPaid: number; revision: number } }) {

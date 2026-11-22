@@ -169,7 +169,8 @@ export function IncomeTaxPage() {
   if (loading && !data) return <Loading />;
   if (!data) return <Empty />;
   const add = items.filter((i) => i.group === "ADD").reduce((a, i) => a + Number(i.amount || 0), 0), ded = items.filter((i) => i.group === "DEDUCT").reduce((a, i) => a + Number(i.amount || 0), 0);
-  const taxable = Math.max(0, data.profitBeforeTax + add - ded), tax = Math.round(taxable * data.rate * 100) / 100;
+  const sim = data.simplified?.enabled ? data.simplified : null;
+  const taxable = sim ? sim.turnover : Math.max(0, data.profitBeforeTax + add - ded), tax = sim ? sim.tax : Math.round(taxable * data.rate * 100) / 100;
   const p = data.posted;
   return (
     <div className="grid">
@@ -184,6 +185,10 @@ export function IncomeTaxPage() {
             <div><span>موعد تقديم الإقرار</span><b>{fmtDate(data.dueDate)}</b></div>
           </div>
           {p ? <div className="alert ok small">✓ مخصص ضريبة الدخل مرحّل: {p.number} — {money(p.zakat)} (المسدد {money(p.paid)}) {can("accounting.write") && Number(p.paid) < Number(p.zakat) && <><button className="btn sm primary" onClick={() => setSettle(true)}>تسوية وسداد</button> <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { if (confirmDlg("إلغاء المخصص وعكس قيده؟")) { await api(`/tax/income-tax/${p.id}/cancel`, { body: {} }); reload(); } })}>إلغاء</button></>}</div>
+            : sim ? <>
+              <div className="alert small">المنشأة مسجَّلة في <b>النظام الضريبي المبسط</b> (القانون 6 لسنة 2025): الضريبة {(sim.rate * 100).toFixed(2).replace(/\.?0+$/, "")}% من حجم الأعمال {money(sim.turnover)} = <b>{money(sim.tax)}</b>{!sim.eligible && " — حجم الأعمال تجاوز 20 مليون جنيه فلا ينطبق النظام المبسط على هذه السنة"}</div>
+              <div className="row mt"><div className="grow" />{can("accounting.write") && <button className="btn primary" disabled={busy || !(tax > 0) || !sim.eligible} onClick={() => run(async () => { if (!confirmDlg(`ترحيل ضريبة النظام المبسط ${money(tax)} لسنة ${year}؟`)) return; await api("/tax/income-tax", { body: { year } }); toast("تم ترحيل الضريبة", "ok"); reload(); })}>ترحيل الضريبة</button>}</div>
+            </>
             : <>
               <h4>التسويات الضريبية على الربح المحاسبي</h4>
               <div className="table-wrap"><table className="tbl compact"><thead><tr><th>النوع</th><th>البيان</th><th className="n">المبلغ</th><th /></tr></thead>

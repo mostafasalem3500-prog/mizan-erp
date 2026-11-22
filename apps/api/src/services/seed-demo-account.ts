@@ -8,6 +8,7 @@ import { bootstrapCompany } from "../routes/auth";
 import { loadDemo, DEMO_VERSION, resetShowcaseCompany } from "./demo";
 import { newSallaToken, processEvent, sampleOrder } from "./salla";
 import { createPayout } from "./payouts";
+import { IS_EG } from "../lib/country";
 
 /** Showcase only: connected Salla and Zid stores with processed orders and one platform payout, so the screens are not empty. */
 async function showcaseSalla(companyId: string) {
@@ -40,8 +41,11 @@ export async function seedDemoAccount() {
     const passwordHash = await bcrypt.hash(password, 10);
     const r = await tx(async (t) => {
       const u = existing?.id ? await t.one(`SELECT * FROM users WHERE id=$1`, [existing.id]) : await t.insert("users", { email, passwordHash, fullName: "مستخدم تجريبي" });
-      const c = await bootstrapCompany(t, { nameAr: "مؤسسة الأفق للتجارة (حساب تجريبي)", nameEn: "Al Ufuq Trading Est. (Demo)", vatNumber: "300000000000003", crNumber: "1010010000", city: "مكة المكرمة", email }, u.id, "PRO");
-      await t.exec(`UPDATE companies SET street='شارع الملك فهد', building_no='7845', district='العزيزية', postal_code='24243', phone='0541941602', max_users=10, subscription_ends_at=now() + interval '10 years', invoice_footer='شكراً لتعاملكم معنا — هذا حساب تجريبي لاستعراض النظام' WHERE id=$1`, [c.id]);
+      const c = IS_EG
+        ? await bootstrapCompany(t, { nameAr: "شركة النيل للتجارة (حساب تجريبي)", nameEn: "Al Nile Trading Co. (Demo)", vatNumber: "100200300", crNumber: "123456", city: "القاهرة", email }, u.id, "PRO")
+        : await bootstrapCompany(t, { nameAr: "مؤسسة الأفق للتجارة (حساب تجريبي)", nameEn: "Al Ufuq Trading Est. (Demo)", vatNumber: "300000000000003", crNumber: "1010010000", city: "مكة المكرمة", email }, u.id, "PRO");
+      if (IS_EG) await t.exec(`UPDATE companies SET street='شارع التحرير', building_no='12', district='الدقي', postal_code='12611', phone='01000000000', max_users=10, subscription_ends_at=now() + interval '10 years', invoice_footer='شكراً لتعاملكم معنا — هذا حساب تجريبي لاستعراض النظام' WHERE id=$1`, [c.id]);
+      else await t.exec(`UPDATE companies SET street='شارع الملك فهد', building_no='7845', district='العزيزية', postal_code='24243', phone='0541941602', max_users=10, subscription_ends_at=now() + interval '10 years', invoice_footer='شكراً لتعاملكم معنا — هذا حساب تجريبي لاستعراض النظام' WHERE id=$1`, [c.id]);
       return { userId: u.id, companyId: c.id };
     });
     userId = r.userId;
@@ -57,7 +61,7 @@ export async function seedDemoAccount() {
     db.exec(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "تحديث البيانات التجريبية", pct: 1, at: new Date() })])
       .then(() => (stale || c.demoJob?.error ? resetShowcaseCompany(companyId) : Promise.resolve()))
       .then(() => loadDemo(companyId, userId, "مستخدم تجريبي"))
-      .then(() => showcaseSalla(companyId).catch((e) => console.error("[demo-account] salla sample", e)))
+      .then(() => (IS_EG ? Promise.resolve() : showcaseSalla(companyId)).catch((e) => console.error("[demo-account] salla sample", e)))
       .then(() => console.log("[demo-account] demo dataset loaded"))
       .catch(async (e) => {
         console.error("[demo-account] failed", e);

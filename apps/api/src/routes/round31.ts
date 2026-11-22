@@ -99,7 +99,7 @@ r31.get("/payroll-items", perm("accounting.read"), h(async (req) => {
   if (q.employeeId) { params.push(String(q.employeeId)); w.push(`i.employee_id=$${params.length}`); }
   if (q.status === "OPEN" || q.status === "INCLUDED") { params.push(q.status); w.push(`i.status=$${params.length}`); }
   const rows = await db.rows(`SELECT i.*, e.name employee_name, e.code employee_code, r.period run_period, r.status run_status FROM payroll_items i JOIN employees e ON e.id=i.employee_id LEFT JOIN payroll_runs r ON r.id=i.run_id WHERE ${w.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT 1000`, params);
-  return { rows, kinds: pay.ITEM_KINDS, overtimeFactor: pay.OVERTIME_FACTOR };
+  return { rows, kinds: pay.ITEM_KINDS, overtimeFactor: pay.OVERTIME_FACTOR, overtimeRates: pay.OVERTIME_RATES };
 }));
 r31.post("/payroll-items/quote", perm("accounting.read"), h(async (req) => { const e = await db.one(`SELECT * FROM employees WHERE id=$1 AND company_id=$2`, [req.body?.employeeId, cid(req)], "الموظف غير موجود"); const wage = Number(e.basic) + Number(e.housing) + Number(e.transport) + Number(e.otherAllow); return { amount: pay.itemAmount(e, String(req.body?.kind), Number(req.body?.qty) || 0, Number(req.body?.factor) || null), wage, daily: Math.round((wage / 30) * 100) / 100, hourly: Math.round((wage / 240) * 100) / 100 }; }));
 r31.post("/payroll-items", perm("accounting.write"), h(async (req) => { const r = await tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "payroll", r.id, { kind: r.kind, amount: r.amount }); return r; }));

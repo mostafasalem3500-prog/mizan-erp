@@ -78,7 +78,8 @@ egr.post("/tax/income-tax/:id/settle", perm("accounting.write"), h(async (req) =
 egr.get("/tax/salary-tax", perm("accounting.read"), h(async (req) => {
   const monthly = Number(req.query.monthly || 0);
   if (!(monthly >= 0)) throw notFound();
-  const ins = Math.min(eg.EG_PAYROLL.insurance.maxWage, Math.max(eg.EG_PAYROLL.insurance.minWage, monthly)) * eg.EG_PAYROLL.insurance.employee;
+  const lim = eg.insuranceLimits(String(req.query.period || "") || undefined);
+  const ins = Math.min(lim.maxWage, Math.max(lim.minWage, monthly)) * eg.EG_PAYROLL.insurance.employee;
   const annual = Math.max(0, (monthly - ins) * 12 - eg.EG_PAYROLL.personalExemption);
   const d = eg.salaryTaxDetail(annual);
   return { monthly, insuranceEmployee: Math.round(ins * 100) / 100, annualTaxable: d.taxable, brackets: d.parts, annualTax: d.tax, monthlyTax: Math.round((d.tax / 12) * 100) / 100, rules: eg.EG_PAYROLL };

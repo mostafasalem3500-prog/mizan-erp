@@ -2,6 +2,7 @@
  * Demo dataset: six months of realistic trading activity, every document posted through
  * the real engine (so all reports reconcile), every row tagged is_demo=true → purgeable.
  */
+import { IS_EG } from "../lib/country";
 import { Db, db, tx, pool } from "../db/pool";
 import { r2, addDays, addMonths, monthEnd, today } from "../lib/core";
 import { post, nextNumber } from "../accounting/engine";
@@ -53,6 +54,28 @@ export const DEMO_VERSION = 16; // 16: association demo — budgets, supporting 
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
+}
+
+/** Egypt edition: the sample data was written for Saudi Arabia — rename cities, family names and wording, and turn the
+ *  15-digit Saudi tax numbers into 9-digit Egyptian registration numbers. Touches this establishment's rows only. */
+const EG_WORDS: [string, string][] = [["مكة المكرمة", "طنطا"], ["جدة", "الإسكندرية"], ["الرياض", "القاهرة"], ["الدمام", "المنصورة"], ["الطائف", "الجيزة"], ["مكة", "طنطا"], ["السعودية", "المصرية"], ["السعودي", "المصري"],
+  ["الخليج", "النيل"], ["العتيبي", "عبد الرحمن"], ["القحطاني", "السيد"], ["الزهراني", "حسن"], ["الشهري", "إبراهيم"], ["الغامدي", "محمود"], ["الدوسري", "مصطفى"], ["ريالاً", "جنيهاً"], ["ريال", "جنيه"]];
+async function egLocalizeDemo(t: Db, companyId: string) {
+  const cols = await t.rows(`SELECT table_name t, column_name c, data_type d FROM information_schema.columns WHERE table_schema='public'`, []);
+  const has = (tb: string, c: string) => cols.find((x: any) => x.t === tb && x.c === c);
+  const text: [string, string[]][] = [["partners", ["name", "city", "district", "street"]], ["invoices", ["partner_name", "notes"]], ["employees", ["name"]], ["branches", ["name", "city"]], ["warehouses", ["name"]],
+    ["cost_centers", ["name"]], ["expenses", ["payee", "description"]], ["journal_entries", ["memo"]], ["payments", ["notes"]], ["products", ["name"]]];
+  const nest = (c: string) => EG_WORDS.reduce((e, _w, i) => `replace(${e}, $${i * 2 + 2}, $${i * 2 + 3})`, c);
+  const params = EG_WORDS.flat();
+  for (const [tb, cs] of text) for (const c of cs) {
+    if (!has(tb, c) || !has(tb, "company_id")) continue;
+    await t.exec(`UPDATE ${tb} SET ${c}=${nest(c)} WHERE company_id=$1 AND ${c} IS NOT NULL AND ${c} <> ${nest(c)}`, [companyId, ...params]);
+  }
+  await t.exec(`UPDATE journal_lines l SET description=${nest("l.description")} FROM journal_entries e WHERE e.id=l.entry_id AND e.company_id=$1 AND l.description IS NOT NULL AND l.description <> ${nest("l.description")}`, [companyId, ...params]);
+  await t.exec(`UPDATE payroll_runs SET lines=(${nest("lines::text")})::jsonb WHERE company_id=$1`, [companyId, ...params]);
+  for (const [tb, c] of [["partners", "vat_number"], ["invoices", "partner_vat"], ["expenses", "supplier_vat"]] as const)
+    if (has(tb, c)) await t.exec(`UPDATE ${tb} SET ${c}=substr(${c}, 2, 9) WHERE company_id=$1 AND ${c} ~ '^3[0-9]{14}$'`, [companyId]);
+  await t.exec(`UPDATE employees SET nationality='EGYPTIAN', iban=CASE WHEN iban LIKE 'SA%' THEN 'EG' || substr(iban, 3) ELSE iban END WHERE company_id=$1 AND nationality='SAUDI'`, [companyId]);
 }
 
 export async function loadDemo(companyId: string, userId: string, userName: string) {
@@ -379,6 +402,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
   await tx(async (t) => {
     const q1From = months[0], q1To = monthEnd(months[2]);
     if (q1To < end) await fileVatReturn(t, companyId, userName, q1From, q1To, true);
+    if (IS_EG) await egLocalizeDemo(t, companyId);
     await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);
   });
 }

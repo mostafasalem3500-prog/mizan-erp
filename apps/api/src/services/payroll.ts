@@ -54,6 +54,10 @@ export const ITEM_KINDS: Record<string, { ar: string; side: "EARN" | "DEDUCT"; u
   ABSENCE: { ar: "غياب", side: "DEDUCT", unit: "days", bucket: "absence" }, LATE: { ar: "تأخير", side: "DEDUCT", unit: "hours", bucket: "deduction" }, PENALTY: { ar: "جزاء", side: "DEDUCT", unit: "days", bucket: "deduction" }, DEDUCTION: { ar: "خصم آخر", side: "DEDUCT", unit: null, bucket: "deduction" },
 };
 export const OVERTIME_FACTOR = IS_EG ? 1.35 : 1.5;
+/** What an overtime hour is paid at. Egypt (Labour Law 14/2025): +35% by day, +70% by night, double on the weekly rest day, triple on an official holiday. */
+export const OVERTIME_RATES: { factor: number; ar: string }[] = IS_EG
+  ? [{ factor: 1.35, ar: "ساعات نهارية (+35%)" }, { factor: 1.7, ar: "ساعات ليلية (+70%)" }, { factor: 2, ar: "يوم الراحة الأسبوعية (مثلا الأجر)" }, { factor: 3, ar: "عطلة رسمية (ثلاثة أمثال)" }]
+  : [{ factor: 1.5, ar: "ساعة إضافية (+50%)" }];
 /**
  * Amount of a transaction from the employee's wage. Month = 30 days of 8 hours.
  * Overtime (Saudi labour law art. 107): the hourly wage plus 50% of the basic hourly wage → hours × (wage + (factor − 1) × basic) / 240.
@@ -101,7 +105,7 @@ export async function buildLines(t: Db, companyId: string, period: string, emps:
     const mine = items.filter((i) => i.employeeId === e.id); const m = manual?.[e.id] || {};
     const bucket = (k: string) => r2(mine.filter((i) => ITEM_KINDS[i.kind]?.bucket === k).reduce((a, i) => a + Number(i.amount), 0) + num(m[k]));
     const adj = { bonus: bucket("bonus"), overtime: bucket("overtime"), deduction: bucket("deduction"), absence: bucket("absence"), loan: m.loan, note: m.note };
-    const line: any = (IS_EG ? computeLineEG : computeLine)(e, adj, loans[e.id] || []);
+    const line: any = IS_EG ? computeLineEG(e, adj, loans[e.id] || [], period) : computeLine(e, adj, loans[e.id] || []);
     line.items = mine.map((i) => ({ id: i.id, kind: i.kind, qty: i.qty === null ? null : Number(i.qty), factor: i.factor === null ? null : Number(i.factor), amount: Number(i.amount), note: i.note, date: String(i.date instanceof Date ? i.date.toISOString() : i.date).slice(0, 10) }));
     line.manual = { bonus: r2(num(m.bonus)), overtime: r2(num(m.overtime)), deduction: r2(num(m.deduction)), absence: r2(num(m.absence)), loan: m.loan === undefined || m.loan === null || m.loan === "" ? null : r2(num(m.loan)) };
     line.costCenterId = e.costCenterId || null; line.jobTitle = e.jobTitle || null; line.department = e.department || null;

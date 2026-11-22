@@ -10,8 +10,12 @@
 import { Db } from "../db/pool";
 import { bad, conflict, r2, r3, D, num, isDate, today, monthEnd, addDays } from "../lib/core";
 import { post, nextNumber, reverse } from "../accounting/engine";
+import { IS_EG } from "../lib/country";
 
-export const SETTLEMENT_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART80: "فصل وفق المادة 80 (بدون مكافأة)" };
+const SA_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART80: "فصل وفق المادة 80 (بدون مكافأة)" };
+/** Egypt (Labour Law 14/2025): no end-of-service gratuity for insured staff — the pension is paid by social insurance; a gratuity is due only for service after age 60. */
+const EG_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART80: "فصل بحكم المحكمة العمالية (خطأ جسيم)", RETIREMENT: "بلوغ سن التقاعد" };
+export const SETTLEMENT_REASONS: Record<string, string> = IS_EG ? EG_REASONS : SA_REASONS;
 
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000);
 export const yearsBetween = (a: string, b: string) => Math.max(0, daysBetween(a, b) / 365.25);
@@ -24,6 +28,7 @@ export function eosbFull(wage: number, years: number) {
 }
 /** Art. 85 (resignation): nothing under 2 years, one third 2–5, two thirds 5–10, full after 10. Art. 80: nothing. */
 export function eosbByReason(full: number, years: number, reason: string) {
+  if (IS_EG) return full; // Egypt: what is due after age 60 is due whatever the reason
   if (reason === "ART80") return 0;
   if (reason !== "RESIGNATION") return full;
   if (years < 2) return 0;
@@ -32,10 +37,35 @@ export function eosbByReason(full: number, years: number, reason: string) {
   return full;
 }
 
+const plusYears = (d: string, n: number) => { const h = new Date(d + "T00:00:00Z"); h.setUTCFullYear(h.getUTCFullYear() + n); return h.toISOString().slice(0, 10); };
+/** Egypt: half a month per year for the first five years after age 60 and a month for each later year; nothing before 60 (or with no birth date). */
+export function eosbOf(e: any, wage: number, years: number, asOf: string) {
+  if (!IS_EG) return eosbFull(wage, years);
+  const birth = e.birthDate ? String(e.birthDate).slice(0, 10) : null, hire = e.hireDate ? String(e.hireDate).slice(0, 10) : null;
+  if (!birth || !hire) return 0;
+  const start = plusYears(birth, 60) > hire ? plusYears(birth, 60) : hire;
+  return start >= asOf ? 0 : eosbFull(wage, yearsBetween(start, asOf));
+}
+/** Egypt (Labour Law 14/2025): 15 days in the first year of service, 21 from the second, 30 after ten years or from age 50. */
+function leaveAccruedEG(e: any, start: string, asOf: string) {
+  const lpy = Number(e.leaveDaysPerYear || 0), custom = lpy > 21 ? lpy : 0; // 21 is the stored default; only a better contract entitlement overrides the law
+  const hire = e.hireDate ? String(e.hireDate).slice(0, 10) : start;
+  const y1 = plusYears(hire, 1), y10 = plusYears(hire, 10), a50 = e.birthDate ? plusYears(String(e.birthDate).slice(0, 10), 50) : null;
+  const t30 = a50 && a50 < y10 ? a50 : y10;
+  const cuts = [start, ...[y1, t30].filter((d) => d > start && d < asOf).sort(), asOf];
+  let acc = 0;
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const from = cuts[i], rate = from >= t30 ? 30 : from >= y1 ? 21 : 15;
+    acc += Math.max(rate, custom) * yearsBetween(from, cuts[i + 1]);
+  }
+  return acc;
+}
+
 /** Accrued annual-leave days since leave_balance_date (or hire date), with the 30-day rate after 5 years of service. */
 export function leaveAccruedDays(e: any, asOf: string) {
   const start: string | null = e.leaveBalanceDate ? String(e.leaveBalanceDate).slice(0, 10) : e.hireDate ? String(e.hireDate).slice(0, 10) : null;
   if (!start || start >= asOf) return r3(e.leaveOpening || 0);
+  if (IS_EG) return r3(Number(e.leaveOpening || 0) + leaveAccruedEG(e, start, asOf));
   const custom = Number(e.leaveDaysPerYear || 21);
   const d1 = Math.max(21, custom), d2 = Math.max(30, custom);
   let y5: string | null = null;
@@ -68,7 +98,7 @@ export async function employeePosition(t: Db, companyId: string, e: any, asOf: s
   const wage = wageOf(e);
   const hire = e.hireDate ? String(e.hireDate).slice(0, 10) : null;
   const years = hire ? r3(yearsBetween(hire, asOf)) : 0;
-  const eosbDue = eosbFull(wage, years);
+  const eosbDue = eosbOf(e, wage, years, asOf);
   const eosbBal = await provisionBalance(t, companyId, e.id, "EOSB");
   const accrued = leaveAccruedDays(e, asOf);
   const taken = await leaveTakenDays(t, companyId, e.id, e, asOf);

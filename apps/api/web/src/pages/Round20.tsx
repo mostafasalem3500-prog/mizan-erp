@@ -157,7 +157,7 @@ function TransferModal({ init, accounts, onClose }: { init: any; accounts: any[]
   const [f, setF] = useState<any>({ fromAccountId: init.fromAccountId || accounts[0]?.id || "", toAccountId: accounts.find((a) => a.id !== (init.fromAccountId || accounts[0]?.id))?.id || "", amount: "", fee: "", feeVat: false, date: today(), reference: "", memo: "" });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e?.target ? (e.target.type === "checkbox" ? e.target.checked : e.target.value) : e });
   const from = accounts.find((a) => a.id === f.fromAccountId);
-  const fee = Number(f.fee || 0), vat = f.feeVat ? Math.round(fee * 15) / 100 : 0;
+  const fee = Number(f.fee || 0), vat = f.feeVat ? Math.round(fee * CFG.vatRate) / 100 : 0;
   return (
     <Modal title="تحويل بين الحسابات" onClose={() => onClose()} footer={<><button className="btn primary" disabled={busy} onClick={() => run(async () => { await api("/treasury/transfers", { body: f }); onClose(true); }, "تم التحويل وترحيل القيد")}>تحويل وترحيل</button><button className="btn" onClick={() => onClose()}>إلغاء</button></>}>
       <div className="grid c2">

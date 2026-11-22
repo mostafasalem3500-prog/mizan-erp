@@ -96,7 +96,8 @@ function EmployeeForm({ e, onClose }: { e: any; onClose: (s?: boolean) => void }
         <Field label="IBAN"><Input value={f.iban || ""} onChange={s("iban")} dir="ltr" placeholder="SA..." /></Field>
         <Field label="البنك"><Input value={f.bankName || ""} onChange={s("bankName")} /></Field>
         <Field label="التأمينات"><label className="check"><input type="checkbox" checked={!!f.gosi} onChange={s("gosi")} /> مسجل في التأمينات الاجتماعية</label></Field>
-        <Field label="أيام الإجازة السنوية" hint="21 يوماً، وتصبح 30 تلقائياً بعد 5 سنوات"><NumInput value={f.leaveDaysPerYear ?? 21} onChange={s("leaveDaysPerYear")} /></Field>
+        {EG && <Field label="تاريخ الميلاد" hint="للإجازة 30 يوماً من سن الخمسين ومكافأة ما بعد الستين"><Input type="date" value={f.birthDate ? String(f.birthDate).slice(0, 10) : ""} onChange={s("birthDate")} /></Field>}
+        <Field label="أيام الإجازة السنوية" hint={EG ? "القانون: 15 يوماً في السنة الأولى ثم 21، و30 بعد عشر سنوات أو سن الخمسين — اكتب رقماً أكبر من 21 فقط إن كان العقد يمنح أكثر" : "21 يوماً، وتصبح 30 تلقائياً بعد 5 سنوات"}><NumInput value={f.leaveDaysPerYear ?? 21} onChange={s("leaveDaysPerYear")} /></Field>
         <Field label="رصيد الإجازات الافتتاحي (يوم)" hint="الرصيد المتبقي كما في التاريخ المجاور"><NumInput value={f.leaveOpening ?? 0} onChange={s("leaveOpening")} /></Field>
         <Field label="تاريخ الرصيد الافتتاحي" hint="افتراضياً تاريخ التعيين — يبدأ احتساب الإجازات منه"><Input type="date" value={f.leaveBalanceDate ? String(f.leaveBalanceDate).slice(0, 10) : ""} onChange={s("leaveBalanceDate")} /></Field>
         {e.id && <Field label="الحالة"><label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> على رأس العمل</label></Field>}

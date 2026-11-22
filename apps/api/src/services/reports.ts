@@ -1,4 +1,5 @@
 /** Financial reports, all computed from journal_lines (single source of truth). */
+import { remitAlerts } from "./payremit";
 import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
 import { provisionTotals } from "./hr";
@@ -613,6 +614,7 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
+  for (const a of await remitAlerts(t, companyId)) items.push(a);
   if (co.plan === "TRIAL" && co.subscriptionEndsAt) { const dl = Math.round((new Date(co.subscriptionEndsAt).getTime() - Date.parse(td)) / 86400000); if (dl <= 7) items.push({ level: dl < 0 ? "err" : "warn", text: dl < 0 ? "انتهت الفترة التجريبية — فعّل الترخيص" : `تنتهي الفترة التجريبية خلال ${dl} يوم`, to: "/settings/license" }); }
   if (IS_EG) {
     // Egypt: Form 41 — quarters with deducted tax not yet remitted (due the end of the month after the quarter)

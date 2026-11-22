@@ -99,6 +99,8 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/payroll/loans", label: "السلف", perm: "accounting.read", company: true },
     { to: "/payroll/provisions", label: "مخصصات نهاية الخدمة والإجازات", perm: "accounting.read", company: true },
     { to: "/payroll/settlements", label: "التصفية النهائية", perm: "accounting.read", company: true },
+    { to: "/payroll/remittances", label: "توريد التأمينات واستقطاعات الرواتب", perm: "accounting.read", company: true },
+    { to: "/tax/salary-tax-report", label: "تقرير ضريبة المرتبات (نموذج 4 والتسوية)", perm: "accounting.read", eg: true, company: true },
     { to: "/reports-center?m=hr", label: "تقارير الرواتب التفصيلية", perm: "reports.read", company: true },
   ] },
   { key: "tax", ic: "٪", label: "الضرائب والزكاة", items: [
@@ -109,6 +111,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/tax/form41", label: "الخصم تحت حساب الضريبة (نموذج 41)", perm: "vat.read", eg: true, company: true },
     { to: "/zakat", label: "احتساب الزكاة الشرعية", perm: "accounting.read", sa: true, company: true },
     { to: "/tax/income-tax", label: "ضريبة الدخل (22.5%)", perm: "accounting.read", eg: true, company: true },
+    { to: "/tax/eg-compliance", label: "الالتزامات السنوية (مبسط · تكافلية · احتياطي)", perm: "accounting.read", eg: true, company: true },
   ] },
   { key: "final", ic: "📚", label: "الحسابات الختامية", items: [
     { to: "/final-accounts", label: "كل القوائم", perm: "reports.read", company: true },

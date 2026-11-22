@@ -33,11 +33,11 @@ export function PayrollItemsTab({ emps }: { emps: any[] }) {
           <tbody>{rows.map((r: any) => <tr key={r.id}><td className="dt">{fmtDate(r.date)}</td><td><b>{r.employeeName}</b><div className="small muted">{r.employeeCode}</div></td><td><span className={"badge " + (EARN.includes(r.kind) ? "green" : "red")}>{KIND_AR[r.kind]}</span></td><td className="n">{r.qty ? `${Number(r.qty)} ${UNIT[data.kinds[r.kind].unit] || ""}${r.kind === "OVERTIME" && r.factor ? ` ×${Number(r.factor)}` : ""}` : "—"}</td><td className={"n " + (EARN.includes(r.kind) ? "pos-val" : "neg-val")}><Money v={r.amount} />{r.manual && <span className="small muted" title="مبلغ مُدخل يدوياً"> ✎</span>}</td><td className="small">{r.note}</td><td>{r.status === "OPEN" ? <span className="badge amber">لم تدخل مسيراً</span> : <span className="badge">مسير {r.runPeriod}</span>}</td>
             <td className="row" style={{ gap: 4 }}>{W && r.status === "OPEN" && <><button className="btn sm" onClick={() => setEdit({ ...r, date: fmtDate(r.date), qty: r.qty === null ? "" : Number(r.qty), amount: r.manual ? Number(r.amount) : "" })}>تعديل</button><button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { if (!confirmDlg("حذف الحركة؟")) return; await api(`/payroll-items/${r.id}`, { method: "DELETE" }); reload(); })}>حذف</button></>}</td></tr>)}</tbody></table></div>}
       </div>
-      {edit && <ItemForm item={edit} emps={emps} kinds={data?.kinds || {}} factor={data?.overtimeFactor || 1.5} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
+      {edit && <ItemForm item={edit} emps={emps} kinds={data?.kinds || {}} factor={data?.overtimeFactor || 1.5} rates={data?.overtimeRates} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
     </div>
   );
 }
-function ItemForm({ item, emps, kinds, factor, onClose }: { item: any; emps: any[]; kinds: any; factor: number; onClose: (s?: boolean) => void }) {
+function ItemForm({ item, emps, kinds, factor, rates, onClose }: { item: any; emps: any[]; kinds: any; factor: number; rates?: any[]; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const [f, setF] = useState<any>({ employeeId: item.employeeId || "", kind: item.kind, date: item.date || today(), period: item.period || today().slice(0, 7), qty: item.qty ?? "", factor: item.factor ? Number(item.factor) : factor, amount: item.amount ?? "", note: item.note || "" });
   const [qt, setQt] = useState<any>(null);
@@ -53,7 +53,7 @@ function ItemForm({ item, emps, kinds, factor, onClose }: { item: any; emps: any
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value, period: e.target.value.slice(0, 7) })} /></Field>
         <Field label="يدخل مسير شهر"><Input type="month" value={f.period} onChange={s("period")} /></Field>
         {unit && <Field label={unit === "hours" ? "عدد الساعات" : "عدد الأيام"}><NumInput value={f.qty} onChange={s("qty")} /></Field>}
-        {f.kind === "OVERTIME" && <Field label="المعامل" hint="1.5 للساعة الإضافية"><Select value={String(f.factor)} onChange={s("factor")}>{[...new Set([factor, 1.25, 1.35, 1.5, 1.7, 2])].sort().map((x) => <option key={x} value={x}>× {x}</option>)}</Select></Field>}
+        {f.kind === "OVERTIME" && <Field label="المعامل" hint={rates?.length > 1 ? "حسب وقت الساعات الإضافية" : "1.5 للساعة الإضافية"}><Select value={String(f.factor)} onChange={s("factor")}>{rates?.length > 1 ? rates.map((x: any) => <option key={x.factor} value={x.factor}>× {x.factor} — {x.ar}</option>) : [...new Set([factor, 1.25, 1.35, 1.5, 1.7, 2])].sort().map((x) => <option key={x} value={x}>× {x}</option>)}</Select></Field>}
         <Field label={unit ? "مبلغ مختلف (اختياري)" : "المبلغ"} hint={unit ? "اتركه فارغاً ليُحتسب من الأجر" : undefined}><NumInput value={f.amount} onChange={s("amount")} placeholder={unit && qt?.amount ? money(qt.amount) : ""} /></Field>
         <Field label="ملاحظة / السبب" span3><Input value={f.note} onChange={s("note")} placeholder={f.kind === "PENALTY" ? "سبب الجزاء ورقم القرار" : ""} /></Field>
       </div>

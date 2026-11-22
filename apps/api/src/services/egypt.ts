@@ -116,6 +116,20 @@ export const EG_PAYROLL = {
   insurance: { employee: 0.11, employer: 0.1875, minWage: 2700, maxWage: 16700 },
   martyrs: 0.0005,
 };
+/** Insurable-wage limits by calendar year (NOSI raises them every January). A year not listed uses the latest one before it. */
+export const EG_INSURANCE_LIMITS: Record<number, { minWage: number; maxWage: number }> = {
+  2024: { minWage: 2000, maxWage: 12600 },
+  2025: { minWage: 2300, maxWage: 14500 },
+  2026: { minWage: 2700, maxWage: 16700 },
+  2027: { minWage: 3200, maxWage: 19300 },
+};
+export function insuranceLimits(period?: string) {
+  const y = Number(String(period || today()).slice(0, 4));
+  const years = Object.keys(EG_INSURANCE_LIMITS).map(Number).sort((a, b) => a - b);
+  let pick = years[0];
+  for (const k of years) if (k <= y) pick = k;
+  return { year: pick, ...EG_INSURANCE_LIMITS[pick] };
+}
 
 /** Annual salary tax on annual taxable income (after social insurance and the personal exemption). */
 export const annualSalaryTax = (taxable: number) => salaryTaxDetail(taxable).tax;
@@ -139,14 +153,14 @@ export function salaryTaxDetail(taxable: number) {
 }
 
 /** One employee's Egyptian payroll line. */
-export function computeLineEG(e: any, adj: any = {}, loans: { id: string; amount: number }[] = []) {
+export function computeLineEG(e: any, adj: any = {}, loans: { id: string; amount: number }[] = [], period?: string) {
   const basic = Number(e.basic), housing = Number(e.housing), transport = Number(e.transport), other = Number(e.otherAllow);
   const bonus = r2(num(adj.bonus)), overtime = r2(num(adj.overtime)), deduction = r2(num(adj.deduction)), absence = r2(num(adj.absence));
   const autoLoan = r2(loans.reduce((a, l) => a + l.amount, 0));
   const loan = adj.loan === undefined || adj.loan === null || adj.loan === "" ? autoLoan : Math.max(0, Math.min(autoLoan, r2(num(adj.loan))));
   let rem = loan; const loanItems = loans.map((l) => { const a = r2(Math.min(l.amount, rem)); rem = r2(rem - a); return { id: l.id, amount: a }; }).filter((l) => l.amount > 0);
   const gross = r2(D(basic).plus(housing).plus(transport).plus(other).plus(bonus).plus(overtime));
-  const I = EG_PAYROLL.insurance;
+  const I = { ...EG_PAYROLL.insurance, ...insuranceLimits(period) };
   const fixed = r2(basic + housing + transport + other);
   const insWage = e.gosi ? Math.min(I.maxWage, Math.max(I.minWage, fixed)) : 0;
   const gosiEmp = r2(insWage * I.employee), gosiEr = r2(insWage * I.employer);
@@ -156,6 +170,19 @@ export function computeLineEG(e: any, adj: any = {}, loans: { id: string; amount
   const martyrs = r2(D(gross).minus(deduction).minus(absence).times(EG_PAYROLL.martyrs));
   const net = r2(D(gross).minus(gosiEmp).minus(salaryTax).minus(martyrs).minus(deduction).minus(absence).minus(loan));
   return { employeeId: e.id, code: e.code, name: e.name, iban: e.iban, bankName: e.bankName, nationality: e.nationality, basic, housing, transport, other, bonus, overtime, deduction, absence, loan, loanItems, gross, gosiBase: insWage, gosiEmp, gosiEr, salaryTax, martyrs, taxableAnnual: Math.max(0, annual), net, note: adj.note || null };
+}
+
+// ─── simplified regime ───────────────────────────────────────────────────
+export const EG_SIMPLIFIED = {
+  maxTurnover: 20_000_000,
+  /** [turnover below, rate on the whole turnover] */
+  brackets: [[500_000, 0.004], [2_000_000, 0.005], [3_000_000, 0.0075], [10_000_000, 0.01], [20_000_000, 0.015]] as [number, number][],
+};
+export function simplifiedTax(turnover: number) {
+  const T = Math.max(0, r2(turnover));
+  const eligible = T <= EG_SIMPLIFIED.maxTurnover;
+  const b = EG_SIMPLIFIED.brackets.find(([limit]) => T < limit) || EG_SIMPLIFIED.brackets[EG_SIMPLIFIED.brackets.length - 1];
+  return { turnover: T, eligible, rate: b[1], tax: eligible ? r2(D(T).times(b[1])) : 0 };
 }
 
 // ─── corporate income tax (ضريبة الدخل على الأشخاص الاعتبارية) ─────────────
@@ -176,7 +203,10 @@ export async function incomeTaxCompute(t: Db, companyId: string, q: any) {
   const advances = await balanceOf(t, companyId, "INCOME_TAX_ADVANCE", to);
   const posted = await t.maybe(`SELECT z.*, j.number journal_number FROM zakat_assessments z LEFT JOIN journal_entries j ON j.id=z.journal_id WHERE z.company_id=$1 AND z.method='EG_CIT' AND z.period_from=$2 AND z.period_to=$3 AND z.status='POSTED'`, [companyId, from, to]);
   const history = await t.rows(`SELECT id, number, period_from, period_to, base, zakat tax, paid, status FROM zakat_assessments WHERE company_id=$1 AND method='EG_CIT' ORDER BY period_to DESC LIMIT 10`, [companyId]);
-  return { year, from, to, profitBeforeTax: is.beforeZakat, revenue: is.netSales, rate: EG_CIT_RATE, credits, advances, posted, history, dueDate: `${Number(year) + 1}-04-30` };
+  const co = await t.one(`SELECT eg_simplified FROM companies WHERE id=$1`, [companyId]);
+  // simplified regime (Law 6/2025): the tax is a percentage of the year's turnover, whatever the profit
+  const simplified = { enabled: !!co.egSimplified, ...simplifiedTax(r2(is.netSales + is.otherIncome.total)) };
+  return { year, from, to, profitBeforeTax: is.beforeZakat, revenue: is.netSales, rate: EG_CIT_RATE, credits, advances, posted, history, simplified, dueDate: `${Number(year) + 1}-04-30` };
 }
 
 export function incomeTaxSummary(profit: number, items: any[], rate = EG_CIT_RATE) {
@@ -190,12 +220,14 @@ export async function incomeTaxPost(t: Db, companyId: string, user: string, b: a
   const c = await incomeTaxCompute(t, companyId, { year: b.year });
   if (c.posted) throw conflict(`يوجد مخصص ضريبة دخل مرحّل لسنة ${c.year} (${c.posted.number}) — ألغِه أولاً`);
   const items = (Array.isArray(b.items) ? b.items : []).filter((i: any) => ["ADD", "DEDUCT"].includes(i.group) && num(i.amount) > 0).map((i: any) => ({ group: i.group, label: String(i.label || "تسوية").slice(0, 200), amount: r2(num(i.amount)) }));
-  const s = incomeTaxSummary(c.profitBeforeTax, items);
+  const sim = c.simplified.enabled;
+  if (sim && !c.simplified.eligible) throw bad(`حجم الأعمال ${c.simplified.turnover.toFixed(2)} تجاوز 20 مليون جنيه — النظام المبسط لا ينطبق على هذه السنة؛ أوقفه من الإعدادات واحسب الضريبة على الربح`);
+  const s = sim ? { profit: r2(c.profitBeforeTax), add: 0, deduct: 0, taxable: c.simplified.turnover, tax: c.simplified.tax } : incomeTaxSummary(c.profitBeforeTax, items);
   if (!(s.tax > 0)) throw bad("الضريبة المستحقة صفر (لا يوجد وعاء خاضع) — لا يوجد ما يُرحّل");
   const number = await nextNumber(t, companyId, "CIT", c.to);
-  const memo = `مخصص ضريبة الدخل لسنة ${c.year} (الوعاء ${s.taxable.toFixed(2)} × 22.5%) — ${number}`;
+  const memo = sim ? `ضريبة النظام المبسط لسنة ${c.year} (حجم الأعمال ${s.taxable.toFixed(2)} × ${(c.simplified.rate * 100).toFixed(2)}%) — ${number}` : `مخصص ضريبة الدخل لسنة ${c.year} (الوعاء ${s.taxable.toFixed(2)} × 22.5%) — ${number}`;
   const je = await post(t, companyId, { date: c.to, type: "INCOME_TAX", sourceType: "INCOME_TAX", reference: number, memo, createdBy: user, allowClosed: false, lines: [{ key: "INCOME_TAX", debit: s.tax, description: memo }, { key: "INCOME_TAX_PAYABLE", credit: s.tax, description: memo }] });
-  const row = await t.insert("zakat_assessments", { companyId, number, periodFrom: c.from, periodTo: c.to, method: "EG_CIT", rate: EG_CIT_RATE, items: JSON.stringify(items), adjustedProfit: s.profit, base: s.taxable, zakat: s.tax, journalId: je!.id, notes: b.notes || null, createdBy: user });
+  const row = await t.insert("zakat_assessments", { companyId, number, periodFrom: c.from, periodTo: c.to, method: "EG_CIT", rate: sim ? c.simplified.rate : EG_CIT_RATE, items: JSON.stringify(sim ? [] : items), adjustedProfit: s.profit, base: s.taxable, zakat: s.tax, journalId: je!.id, notes: b.notes || null, createdBy: user });
   await t.exec(`UPDATE journal_entries SET source_id=$2 WHERE id=$1`, [je!.id, row.id]);
   return { ...row, ...s };
 }
