@@ -485,6 +485,9 @@ export async function purgeDemo(companyId: string) {
     await purgeAssocDemo(t, companyId);
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM clearing_batches WHERE company_id=$1 AND (is_demo OR id IN (SELECT l.batch_id FROM clearing_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo))`, [companyId]);
+    // a payment run prepared on sample bills goes with them (its lines point at the bills)
+    await t.exec(`DELETE FROM payment_runs WHERE company_id=$1 AND id IN (SELECT l.run_id FROM payment_run_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo)`, [companyId]);
+    await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM estore_payouts WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM stock_lots WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);
     await t.exec(`UPDATE partners SET price_list_id=NULL WHERE company_id=$1 AND price_list_id IN (SELECT id FROM price_lists WHERE company_id=$1 AND is_demo)`, [companyId]);
