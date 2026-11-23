@@ -7,7 +7,7 @@ import { db, tx } from "../db/pool";
 import { bootstrapCompany } from "../routes/auth";
 import { loadDemo, DEMO_VERSION, resetShowcaseCompany } from "./demo";
 import { newSallaToken, processEvent, sampleOrder } from "./salla";
-import { createPayout } from "./payouts";
+import { clearingView, createBatch } from "./clearing";
 import { IS_EG } from "../lib/country";
 
 /** Showcase only: connected Salla and Zid stores with processed orders and one platform payout, so the screens are not empty. */
@@ -18,13 +18,12 @@ async function showcaseSalla(companyId: string) {
     if (!conn) conn = await db.insert("salla_connections", { companyId, platform, token: newSallaToken(), storeName: name, warehouseId: wh.id });
     for (const cod of orders) await processEvent(conn, await sampleOrder(companyId, { cod, warehouseId: conn.warehouseId, platform }), { eventHint: "order.create" });
   }
-  // the platform transfers the collected balance minus a 2.5% commission (+15% VAT on it)
-  const clr = await db.one(`SELECT a.id, COALESCE(SUM(l.debit-l.credit),0) bal FROM accounts a LEFT JOIN journal_lines l ON l.account_id=a.id WHERE a.company_id=$1 AND a.system_key='ESTORE_CLEARING' GROUP BY a.id`, [companyId]);
-  const gross = Math.round(Number(clr.bal) * 0.8 * 100) / 100;
-  if (gross > 10) {
-    const fees = Math.round(gross * 0.025 * 100) / 100, feeVat = Math.round(fees * 0.15 * 100) / 100;
+  // the platform transfers the first Salla orders, each with its commission (2.5% + 1, VAT on it); the last order and Zid's stay owed
+  const co = await db.one(`SELECT * FROM companies WHERE id=$1`, [companyId]);
+  const open = (await clearingView(db, co, "SALLA")).open;
+  if (open.length >= 2) {
     const bank = await db.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='BANK'`, [companyId]);
-    await tx((t) => createPayout(t, companyId, "مستخدم تجريبي", { platform: "SALLA", net: Math.round((gross - fees - feeVat) * 100) / 100, fees, feeVat, bankAccountId: bank.id, reference: "تحويل سلة الأسبوعي", isDemo: true }));
+    await tx((t) => createBatch(t, co, "مستخدم تجريبي", "SALLA", { bankAccountId: bank.id, reference: "تحويل سلة الأسبوعي", isDemo: true, lines: open.slice(0, open.length - 1).map((o: any) => ({ invoiceId: o.invoiceId, gross: o.open, fee: Math.round((o.open * 0.025 + 1) * 100) / 100 })) }));
   }
 }
 

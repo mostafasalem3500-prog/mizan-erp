@@ -2,8 +2,9 @@
  * Demo dataset: six months of realistic trading activity, every document posted through
  * the real engine (so all reports reconcile), every row tagged is_demo=true → purgeable.
  */
+import { reverseReturn } from "./round340";
 import { clearingView, createBatch } from "./clearing";
-import { IS_EG } from "../lib/country";
+import { IS_EG, BASE_CURRENCY } from "../lib/country";
 import { Db, db, tx, pool } from "../db/pool";
 import { r2, addDays, addMonths, monthEnd, today } from "../lib/core";
 import { post, nextNumber } from "../accounting/engine";
@@ -51,7 +52,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 17; // 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 18; // 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -84,6 +85,8 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
   if (!company) throw new Error("company");
   // a previous attempt may have been interrupted (server restart) — start clean
   await purgeDemo(companyId);
+  // the documents carry the staff number of who issued them: give the loader one when the establishment uses none yet
+  await db.exec(`UPDATE memberships SET staff_no='1001' WHERE company_id=$1 AND user_id=$2 AND staff_no IS NULL AND NOT EXISTS (SELECT 1 FROM memberships x WHERE x.company_id=$1 AND x.staff_no IS NOT NULL)`, [companyId, userId]);
   const c = { ...company, id: companyId, allowNegativeStock: false, pricesIncludeVat: false };
   const rand = rng(20260926);
   const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
@@ -412,8 +415,33 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
       for (const o of openCard) { const d = new Date(o.date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - d.getUTCDay()); (weeks[d.toISOString().slice(0, 10)] ||= []).push(o); }
       for (const wk of Object.keys(weeks).sort()) {
         const last = weeks[wk].reduce((a, o) => (o.date > a ? o.date : a), wk), dep = addDays(last, 2) > end ? end : addDays(last, 2);
-        try { await t.savepoint(() => createBatch(t, co, userName, "CARD", { date: dep, bankAccountId: bankAcc.id, reference: `إيداع مدى أسبوع ${wk}`, isDemo: true, lines: weeks[wk].map((o) => ({ invoiceId: o.invoiceId, gross: o.open })) })); } catch { /* a week whose returns exceed its sales waits for the next */ }
+        // example: the last statement carries one transaction the books do not have (shown under «in the statement, not in the system»)
+        const extra = wk === Object.keys(weeks).sort().pop() ? [{ ref: "RRN-770045", date: last, gross: 115 }] : [];
+        try { await t.savepoint(() => createBatch(t, co, userName, "CARD", { date: dep, bankAccountId: bankAcc.id, reference: `إيداع مدى أسبوع ${wk}`, isDemo: true, lines: [...weeks[wk].map((o) => ({ invoiceId: o.invoiceId, gross: o.open })), ...extra] })); } catch { /* a week whose returns exceed its sales waits for the next */ }
       }
+      // example: a return posted on the wrong invoice, then taken back by a debit note
+      try {
+        await t.savepoint(async () => {
+          const o = await t.maybe(`SELECT i.id, i.partner_id, i.warehouse_id, l.product_id, l.unit_price, l.tax_code, l.description FROM invoices i JOIN invoice_lines l ON l.invoice_id=i.id JOIN products p ON p.id=l.product_id
+            WHERE i.company_id=$1 AND i.is_demo AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.channel NOT IN ('POS','ZID','SALLA') AND i.external_ref IS NULL AND i.currency=$3 AND i.payment_status='UNPAID' AND i.date >= $2 AND p.type='STOCK' AND NOT p.track_lots AND l.qty >= 1
+              AND NOT EXISTS (SELECT 1 FROM invoices x WHERE x.origin_id=i.id) ORDER BY i.date DESC, i.number DESC LIMIT 1`, [companyId, end.slice(0, 8) + "01", BASE_CURRENCY]);
+          if (!o) return;
+          const cnD = await saveDraft(t, co, userName, { direction: "SALE", kind: "CREDIT_NOTE", date: end, partnerId: o.partnerId, warehouseId: o.warehouseId, originId: o.id, reason: "إرجاع (مثال: سُجّل على الفاتورة الخطأ)", isDemo: true, pricesIncludeVat: false, lines: [{ productId: o.productId, qty: 1, unitPrice: Number(o.unitPrice), discountPct: 0, taxCode: o.taxCode, description: o.description }] } as any);
+          const cn = await postInvoice(t, co, cnD.id, userName, {});
+          await reverseReturn(t, co, userName, cn.id, { reason: "مثال: المرتجع سُجّل على فاتورة عميل آخر", collect: "AR" });
+        });
+      } catch { /* the example is optional */ }
+      // example: an item with no recorded stock, sold at the till after the cashier confirmed — it stays below zero until its receipt is recorded
+      try {
+        await t.savepoint(async () => {
+          const whId = (await t.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [companyId])).id;
+          const p = await t.insert("products", { companyId, sku: "CB-DEMO", name: "كيبل شحن (مثال: بيع برصيد صفر)", type: "STOCK", unit: "حبة", salePrice: 15, purchasePrice: 6, taxCode: "S", isActive: true, isDemo: true });
+          const session = await openSession(t, companyId, { id: userId, name: userName }, 0, whId);
+          await t.exec(`UPDATE pos_sessions SET is_demo=true WHERE id=$1`, [session.id]);
+          await posSale(t, co, { id: userId, name: userName }, { sessionId: session.id, lines: [{ productId: p.id, qty: 2, unitPrice: 15 }], tenders: [{ method: "CASH", amount: null }], isDemo: true, date: end, allowOversell: true });
+          await closeSession(t, companyId, userName, session.id, Number((await t.one(`SELECT cash_sales FROM pos_sessions WHERE id=$1`, [session.id])).cashSales), true);
+        });
+      } catch { /* the example is optional */ }
     }
     if (IS_EG) await egLocalizeDemo(t, companyId);
     await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);

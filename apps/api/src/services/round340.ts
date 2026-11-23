@@ -28,7 +28,7 @@ export async function reverseReturn(t: Db, company: any, user: string, id: strin
   if (collect === "SAME" && !refunded) collect = "AR";
   const draft = await saveDraft(t, company, user, {
     direction: "SALE", kind: "DEBIT_NOTE", channel: cn.channel, date: today(), partnerId: cn.partnerId, warehouseId: cn.warehouseId, branchId: cn.branchId,
-    invoiceType: cn.invoiceType, originId: cn.originId, reason: `إلغاء المرتجع ${cn.number}: ${reason}`.slice(0, 300), pricesIncludeVat: false,
+    invoiceType: cn.invoiceType, originId: cn.originId, isDemo: !!cn.isDemo, reason: `إلغاء المرتجع ${cn.number}: ${reason}`.slice(0, 300), pricesIncludeVat: false,
     lines: cn.lines.map((l: any) => ({ productId: l.productId, accountId: l.productId ? undefined : l.accountId, description: l.description, qty: Number(l.qty), unitPrice: Number(l.unitPrice), discountPct: Number(l.discountPct), taxCode: l.taxCode, uomId: l.uomId || null, modifiers: l.modifiers || null })),
   } as any);
   const total = Number((await t.one(`SELECT total FROM invoices WHERE id=$1`, [draft.id])).total);

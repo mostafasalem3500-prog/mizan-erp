@@ -29,7 +29,7 @@ with sync_playwright() as pw:
     pg.locator('.pos .items .item', has_text='صنف تخطي الرصيد').first.click(); pg.wait_for_timeout(300)
     pg.click('button:has-text("الدفع")'); pg.wait_for_selector('.modal'); pg.locator('.modal .m-f .btn.primary, .modal button:has-text("تأكيد")').last.click(); pg.wait_for_selector('.thermal', timeout=20000)
     ok(any('الرصيد المسجل' in m for m in seen), 'zero stock: the cashier is asked to confirm before the sale goes on')
-    inv = [r for r in call('/invoices?direction=SALE&kind=INVOICE&limit=5')['rows'] if r.get('oversold')]
+    inv = [r for r in call('/invoices?direction=SALE&kind=INVOICE&limit=5')['rows'] if r.get('oversold') and r.get('issuerNo') == '2044']  # the sample data carries its own example under staff number 1001
     ok(len(inv) == 1 and inv[0]['issuerNo'] == '2044', 'after confirming the sale is posted, flagged, and carries the staff number')
     pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
     # ── who issued a return; reversing it ──
@@ -75,8 +75,8 @@ with sync_playwright() as pw:
     else: pg.keyboard.press('ArrowDown'); pg.keyboard.press('Enter')
     pg.wait_for_timeout(300); pg.click('[data-settle-save]'); pg.wait_for_timeout(2500)
     v2 = call('/clearing/CARD')
-    ok(len(v2['unmatched']) == 1 and len(v2['open']) == len(v1['open']) - 1, 'file: the known sale is settled, the unknown transaction is listed and not posted')
-    ok(pg.locator('[data-unmatched] tbody tr').count() == 1, 'and shown under "in the statement but not in the system"')
+    ok(len(v2['unmatched']) == len(v1['unmatched']) + 1 and len(v2['open']) == len(v1['open']) - 1, 'file: the known sale is settled, the unknown transaction is listed and not posted')
+    ok(pg.locator('[data-unmatched] tbody tr').count() == len(v2['unmatched']), 'and shown under "in the statement but not in the system"')
     # ── auditor: optional file on a justification ──
     pg.goto(B + '/auditor'); pg.wait_for_selector('[data-audit-score]', timeout=60000)
     if pg.locator('[data-dismiss]').count():
