@@ -35,7 +35,7 @@ export async function cashForecast(t: Db, company: any, q: { weeks?: number; ove
     t.rows(`SELECT number, pay_date, total FROM payment_runs WHERE company_id=$1 AND status='APPROVED'`, [C]),
     t.rows(`SELECT period, total_net, total_gosi_emp + total_gosi_er gosi FROM payroll_runs WHERE company_id=$1 AND status IN ('POSTED','PAID') ORDER BY period DESC LIMIT 3`, [C]),
     t.rows(`SELECT l.*, (SELECT COALESCE(array_agg(n),'{}') FROM lease_posts p WHERE p.lease_id=l.id AND p.kind='PAYMENT') paid FROM leases l WHERE l.company_id=$1 AND l.status='ACTIVE'`, [C]).catch(() => [] as any[]),
-    t.rows(`SELECT name, kind, frequency, next_date, end_date, payload FROM recurring_templates WHERE company_id=$1 AND is_active AND kind='EXPENSE' AND next_date <= $2`, [C, end]),
+    t.rows(`SELECT r.name, r.kind, r.frequency, r.next_date, r.end_date, r.payload, a.system_key acc_key, a.name_ar acc_name FROM recurring_templates r LEFT JOIN accounts a ON a.company_id=r.company_id AND a.id::text = r.payload->>'accountId' WHERE r.company_id=$1 AND r.is_active AND r.kind='EXPENSE' AND r.next_date <= $2`, [C, end]),
     t.one(`SELECT COALESCE(SUM(CASE WHEN a.system_key IN ('VAT_OUT','VAT_PAYABLE') THEN l.credit - l.debit WHEN a.system_key='VAT_IN' THEN l.credit - l.debit ELSE 0 END),0) net
              FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id AND e.status='POSTED' JOIN accounts a ON a.id=l.account_id WHERE e.company_id=$1 AND a.system_key IN ('VAT_OUT','VAT_PAYABLE','VAT_IN') AND e.date <= $2`, [C, start]),
     q.cashSales ? t.one(`SELECT COALESCE(SUM(total),0) s FROM invoices WHERE company_id=$1 AND direction='SALE' AND kind='INVOICE' AND status='POSTED' AND channel='POS' AND date BETWEEN $2 AND $3`, [C, addDays(start, -56), addDays(start, -1)]) : Promise.resolve(null),
@@ -74,11 +74,13 @@ export async function cashForecast(t: Db, company: any, q: { weeks?: number; ove
   }
   // recurring expenses: each future run inside the horizon
   const step: Record<string, (d: string) => string> = { WEEKLY: (d) => addDays(d, 7), MONTHLY: (d) => addMonths(d, 1), QUARTERLY: (d) => addMonths(d, 3), YEARLY: (d) => addMonths(d, 12) };
+  // a recurring expense on the rent account (or named rent) is rent: it goes in the rent column with the lease payments
+  const isRent = (r: any) => r.accKey === "RENT" || /ايجار|إيجار|أجرة|rent/i.test(`${r.accName || ""} ${r.name || ""}`);
   for (const r of recurring) {
     const p = r.payload || {}; const net = num(p.amount); if (!net) continue;
     const gross = r2(p.amountIncludesVat || ["E", "Z", "O", "X"].includes(p.taxCode) ? net : net * (1 + VAT_RATE / 100));
     let d = iso(r.nextDate); let guard = 0;
-    while (d <= end && guard++ < 60) { if (!r.endDate || d <= iso(r.endDate)) outs.push({ date: when(d), kind: "RECURRING", label: `${r.name} (مصروف دوري)`, amount: gross, to: "/recurring" }); d = step[r.frequency]?.(d) || addMonths(d, 1); }
+    while (d <= end && guard++ < 60) { if (!r.endDate || d <= iso(r.endDate)) outs.push(isRent(r) ? { date: when(d), kind: "RENT", label: `${r.name} (إيجار دوري)`, amount: gross, to: "/recurring" } : { date: when(d), kind: "RECURRING", label: `${r.name} (مصروف دوري)`, amount: gross, to: "/recurring" }); d = step[r.frequency]?.(d) || addMonths(d, 1); }
   }
   // VAT: what is owed today is paid at the next return deadline
   const vatNet = r2(Number(vat.net));
@@ -99,7 +101,7 @@ export async function cashForecast(t: Db, company: any, q: { weeks?: number; ove
     const sum = (xs: Item[], k?: string) => r2(xs.filter((x) => !k || x.kind === k).reduce((a, x) => a + x.amount, 0));
     const inflow = r2(sum(inn) + weeklySales), outflow = sum(out);
     return { week: w + 1, from, to, inflow, outflow, net: r2(inflow - outflow), in: { ar: r2(sum(inn, "AR") + sum(inn, "AR_OVERDUE")), cheques: sum(inn, "CHEQUE_IN"), cashSales: weeklySales },
-      out: { ap: r2(sum(out, "AP") + sum(out, "AP_OVERDUE") + sum(out, "RUN")), cheques: sum(out, "CHEQUE_OUT"), payroll: r2(sum(out, "PAYROLL") + sum(out, "GOSI")), leases: sum(out, "LEASE"), recurring: sum(out, "RECURRING"), vat: sum(out, "VAT") },
+      out: { ap: r2(sum(out, "AP") + sum(out, "AP_OVERDUE") + sum(out, "RUN")), cheques: sum(out, "CHEQUE_OUT"), payroll: r2(sum(out, "PAYROLL") + sum(out, "GOSI")), leases: r2(sum(out, "LEASE") + sum(out, "RENT")), recurring: sum(out, "RECURRING"), vat: sum(out, "VAT") },
       items: [...inn.map((x) => ({ ...x, dir: "IN" })), ...out.map((x) => ({ ...x, dir: "OUT" }))].sort((a, b) => b.amount - a.amount).slice(0, 25), opening: 0, closing: 0 };
   });
   let bal = opening;
@@ -112,10 +114,17 @@ export async function cashForecast(t: Db, company: any, q: { weeks?: number; ove
   if (overdueAr > 0) warnings.push(`الأسبوع الأول يفترض تحصيل ${Math.round(overdueAr * 100) / 100} من فواتير عملاء متأخرة (بنسبة ${Math.round(overdueRate * 100)}%) — غيّر النسبة إن كان التحصيل غير مؤكد.`);
   const overdueAp = r2(outs.filter((x) => x.kind === "AP_OVERDUE").reduce((a, x) => a + x.amount, 0));
   if (overdueAp > 0) warnings.push(`على المنشأة ${overdueAp} لموردين متأخرة السداد محسوبة في الأسبوع الأول.`);
+  // rent the books show every month but nobody told the forecast about: say so, with the average, instead of an empty column
+  const rentTemplates = recurring.filter(isRent).length;
+  const rentHist = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) v, COUNT(DISTINCT to_char(e.date,'YYYY-MM'))::int m FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+    WHERE a.company_id=$1 AND a.system_key='RENT' AND e.status='POSTED' AND e.type<>'CLOSING' AND e.date > ($2::date - interval '3 months') AND e.date <= $2`, [C, start]);
+  const rentMonthlyAvg = Number(rentHist.m) ? r2(Number(rentHist.v) / Number(rentHist.m)) : 0;
+  const rentMissing = !leases.length && !rentTemplates && rentMonthlyAvg > 0;
+  if (rentMissing) warnings.push(`سجّلت إيجاراً بمتوسط ${rentMonthlyAvg} شهرياً في آخر ثلاثة أشهر، لكنه غير معرَّف كمصروف دوري ولا كعقد إيجار، فعمود الإيجار فارغ — أضفه بزر «＋ إيجار دوري».`);
   return {
     from: start, to: end, weeks, opening, closing: bal, lowest: { week: low.week, from: low.from, closing: low.closing }, firstNegative: firstNegative ? { week: firstNegative.week, from: firstNegative.from, closing: firstNegative.closing } : null,
     totals: { inflow: r2(buckets.reduce((a, b) => a + b.inflow, 0)), outflow: r2(buckets.reduce((a, b) => a + b.outflow, 0)) },
-    accounts: accounts.map((a) => ({ code: a.code, name: a.nameAr, balance: r2(Number(a.b)) })), assumptions: { overdueRate: Math.round(overdueRate * 100), cashSales: !!q.cashSales, weeklySales, payrollRuns: payroll.length },
+    accounts: accounts.map((a) => ({ code: a.code, name: a.nameAr, balance: r2(Number(a.b)) })), assumptions: { overdueRate: Math.round(overdueRate * 100), cashSales: !!q.cashSales, weeklySales, payrollRuns: payroll.length, leases: leases.length, rentTemplates, recurringTemplates: recurring.length - rentTemplates, rentMonthlyAvg, rentMissing },
     buckets, warnings,
   };
 }

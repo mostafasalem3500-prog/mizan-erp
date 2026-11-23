@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { RecurringForm } from "./Round3";
 import { api, q, useFetch, useAction, Money, money, Loading, Empty, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, today, fmtDate, fmtDT, confirmDlg, useCompanyContext } from "../lib";
 
 const addDays = (s: string, n: number) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -203,8 +204,11 @@ export function CashForecastPage() {
   const [sales, setSales] = useState(false);
   const [d, setD] = useState<any>(null);
   const [week, setWeek] = useState<any>(null);
+  const [rec, setRec] = useState<false | "RENT" | "EXPENSE">(false);
+  const [tick, setTick] = useState(0);
+  const { can } = useCompanyContext();
   const seq = useRef(0);
-  useEffect(() => { const n = ++seq.current; api(`/reports/cash-forecast${q({ weeks, overdueRate: rate, cashSales: sales ? 1 : undefined })}`).then((x) => n === seq.current && setD(x)).catch(() => undefined); }, [weeks, rate, sales]);
+  useEffect(() => { const n = ++seq.current; api(`/reports/cash-forecast${q({ weeks, overdueRate: rate, cashSales: sales ? 1 : undefined })}`).then((x) => n === seq.current && setD(x)).catch(() => undefined); }, [weeks, rate, sales, tick]);
   const max = d ? Math.max(1, ...d.buckets.map((b: any) => Math.max(b.inflow, b.outflow))) : 1; // bars compare the weeks' movements; the balance is the number under each bar
   return (
     <div className="grid" data-forecast>
@@ -223,6 +227,7 @@ export function CashForecastPage() {
             <div className={"card kpi " + (d.lowest.closing < 0 ? "danger" : "")}><div className="label">أدنى رصيد</div><div className="value"><Money v={d.lowest.closing} /></div><div className="sub">الأسبوع {d.lowest.week} ({fmtDate(d.lowest.from)})</div></div>
           </div>
           {d.warnings.map((w: string, i: number) => <div key={i} className={"alert small mt " + (i === 0 && d.firstNegative ? "err" : "info")}>{w}</div>)}
+          {can("accounting.write") && <div className="row mt" data-fc-recurring><span className="small muted">{`الإيجار والمصروفات الثابتة تدخل التوقع حين تُعرَّف دورية (${d.assumptions.rentTemplates} إيجار دوري · ${d.assumptions.leases} عقد إيجار · ${d.assumptions.recurringTemplates} مصروف دوري):`}</span><button className="btn sm" data-fc-rent onClick={() => setRec("RENT")}>＋ إيجار دوري</button><button className="btn sm" data-fc-rexp onClick={() => setRec("EXPENSE")}>＋ مصروف دوري</button><Link className="btn sm ghost" to="/recurring">إدارة الدورية</Link></div>}
           <div className="fc-chart mt" role="img" aria-label="الرصيد المتوقع أسبوعاً بأسبوع" data-fc-chart>{d.buckets.map((b: any) => <button key={b.week} type="button" className="fc-col" onClick={() => setWeek(b)} title={`الأسبوع ${b.week}: داخل ${money(b.inflow)} — خارج ${money(b.outflow)} — الرصيد ${money(b.closing)}`}>
             <span className="fc-bars"><i className="in" style={{ height: `${(b.inflow / max) * 100}%` }} /><i className="out" style={{ height: `${(b.outflow / max) * 100}%` }} /></span>
             <span className={"fc-bal num" + (b.closing < 0 ? " neg" : "")}>{Math.round(b.closing).toLocaleString("en")}</span><span className="small muted">أ{b.week}</span></button>)}</div>
@@ -235,6 +240,7 @@ export function CashForecastPage() {
           <details className="fold mt"><summary>الصناديق والبنوك ({d.accounts.length})</summary><div className="table-wrap"><table className="tbl compact"><tbody>{d.accounts.map((a: any) => <tr key={a.code}><td>{a.code} {a.name}</td><td className="n"><Money v={a.balance} /></td></tr>)}</tbody></table></div></details>
           <div className="small muted mt">توقع من الدفاتر وليس وعداً: {d.assumptions.payrollRuns > 0 ? <>الرواتب بمتوسط آخر {d.assumptions.payrollRuns} مسيرات، </> : <>لا مسيرات رواتب مرحّلة فلا رواتب في التوقع، </>}والمبالغ دون ضريبة دفعات الإيجار، والعملاء الذين لم يحلّ استحقاقهم يُفترض أنهم يسددون في موعدهم.</div>
         </>}</div></div>
+      {rec && <RecurringForm preset={rec} amount={rec === "RENT" && d?.assumptions?.rentMissing ? d.assumptions.rentMonthlyAvg : undefined} onClose={(sv) => { setRec(false); if (sv) setTick((x) => x + 1); }} />}
       {week && <Modal title={`الأسبوع ${week.week}: ${fmtDate(week.from)} — ${fmtDate(week.to)}`} onClose={() => setWeek(null)} wide>
         <div className="grid c3"><div className="card kpi success"><div className="label">داخل</div><div className="value"><Money v={week.inflow} /></div></div><div className="card kpi accent"><div className="label">خارج</div><div className="value"><Money v={week.outflow} /></div></div><div className="card kpi"><div className="label">الرصيد آخر الأسبوع</div><div className="value"><Money v={week.closing} /></div></div></div>
         {!week.items.length ? <Empty text="لا حركات متوقعة في هذا الأسبوع" /> : <div className="table-wrap mt"><table className="tbl compact" data-week-items><thead><tr><th>التاريخ</th><th>البند</th><th className="n">داخل</th><th className="n">خارج</th></tr></thead>

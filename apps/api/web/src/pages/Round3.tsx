@@ -1,6 +1,7 @@
 import { CFG } from "../shared/country";
 import React, { useEffect, useState } from "react";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState, SearchBox, FilterInfo, useSorted, Th, matches, addMonths } from "../lib";
+import { Link } from "react-router-dom";
+import { useNewParam, useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, today, fmtDate, confirmDlg, JTYPE_AR, useLocalState, SearchBox, FilterInfo, useSorted, Th, matches, addMonths } from "../lib";
 import { PartnerStatement } from "./Statements";
 
 const addDays7 = () => { const d = new Date(today() + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 7); return d.toISOString().slice(0, 10); };
@@ -152,14 +153,15 @@ export function RecurringPage() {
   const { data, loading, reload } = useFetch("/recurring");
   const { run, busy } = useAction();
   const toast = useToast();
-  const [add, setAdd] = useState(false);
+  const [add, setAdd] = useState<false | true | "RENT" | "EXPENSE">(false);
+  useNewParam((v) => { if (can("accounting.write")) setAdd(v === "rent" ? "RENT" : v === "expense" ? "EXPENSE" : true); });
   const [text, setText] = useState("");
   const [kind, setKind] = useState("");
   const [st, setSt] = useState("");
   const rows = (data || []).filter((t: any) => matches(t, text, ["name", (x) => x.payload?.description, (x) => x.payload?.memo]) && (!kind || t.kind === kind) && (!st || (st === "due" ? t.isActive && t.nextDate <= today() : st === "on" ? t.isActive : !t.isActive)));
   return (
     <div className="card">
-      <div className="card-h"><div><h3>القيود والمستندات الدورية</h3><div className="small muted">إيجار شهري، رواتب، اشتراكات، فواتير عقود… تُنشأ تلقائياً في موعدها (كل ساعة يفحص النظام المستحق) أو بضغطة زر.</div></div><div className="row">{can("accounting.write") && <><button className="btn sm" disabled={busy} onClick={() => run(async () => { const r = await api("/recurring/run", { body: {} }); toast(r.length ? `تم تنفيذ ${r.length} عملية` : "لا يوجد مستحق اليوم", "ok"); reload(); })}>تنفيذ المستحق الآن</button><button className="btn primary sm" onClick={() => setAdd(true)}>＋ قالب جديد</button></>}</div></div>
+      <div className="card-h"><div><h3>القيود والمستندات الدورية</h3><div className="small muted">إيجار شهري، رواتب، اشتراكات، فواتير عقود… تُنشأ تلقائياً في موعدها (كل ساعة يفحص النظام المستحق) أو بضغطة زر.</div></div><div className="row">{can("accounting.write") && <><button className="btn sm" disabled={busy} onClick={() => run(async () => { const r = await api("/recurring/run", { body: {} }); toast(r.length ? `تم تنفيذ ${r.length} عملية` : "لا يوجد مستحق اليوم", "ok"); reload(); })}>تنفيذ المستحق الآن</button><button className="btn sm" data-new-rent onClick={() => setAdd("RENT")}>＋ إيجار دوري</button><button className="btn sm" data-new-rexp onClick={() => setAdd("EXPENSE")}>＋ مصروف دوري</button><button className="btn primary sm" onClick={() => setAdd(true)}>＋ قالب جديد</button></>}</div></div>
       <div className="card-b" style={{ paddingBottom: 0 }}><div className="toolbar">
         <SearchBox value={text} onChange={setText} placeholder="بحث باسم القالب" />
         <Select value={kind} onChange={(e) => setKind(e.target.value)}><option value="">كل الأنواع</option>{Object.entries(RKIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
@@ -169,16 +171,19 @@ export function RecurringPage() {
       {loading && !data ? <Loading /> : !rows.length ? <Empty text={data?.length ? "لا نتائج مطابقة" : "لا توجد قوالب دورية"} /> : <div className="table-wrap"><table className="tbl"><thead><tr><th>الاسم</th><th>النوع</th><th>التكرار</th><th>التنفيذ القادم</th><th>آخر تنفيذ</th><th className="n">عدد المرات</th><th className="n">المبلغ</th><th>الحالة</th><th /></tr></thead>
         <tbody>{rows.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td>{RKIND[t.kind]}</td><td>{FREQ[t.frequency]}</td><td className={t.isActive && t.nextDate <= today() ? "neg-val bold" : ""}>{fmtDate(t.nextDate)}</td><td className="dt">{fmtDate(t.lastRun) || "—"}</td><td className="n">{t.runs}</td><td className="n">{t.kind === "EXPENSE" ? <Money v={t.payload.amount} /> : t.kind === "JOURNAL" ? <Money v={(t.payload.lines || []).reduce((a: number, l: any) => a + Number(l.debit || 0), 0)} /> : ""}</td><td><Badge s={t.isActive ? "ACTIVE" : "CANCELLED"} map={{ ACTIVE: "نشط", CANCELLED: "موقوف" }} /></td>
           <td className="row" style={{ gap: 4 }}>{can("accounting.write") && <><button className="btn sm ghost" onClick={() => run(async () => { const r = await api(`/recurring/${t.id}/run-now`, { body: {} }); toast(`تم إنشاء ${r.number || "المستند"}`, "ok"); reload(); })}>تنفيذ الآن</button><button className="btn sm ghost" onClick={() => run(async () => { await api(`/recurring/${t.id}`, { method: "PUT", body: { isActive: !t.isActive } }); reload(); })}>{t.isActive ? "إيقاف" : "تفعيل"}</button><button className="btn sm ghost" onClick={() => run(async () => { if (confirmDlg("حذف القالب؟")) { await api(`/recurring/${t.id}`, { method: "DELETE" }); reload(); } })}>حذف</button></>}</td></tr>)}</tbody></table></div>}
-      {add && <RecurringForm onClose={(s) => { setAdd(false); if (s) reload(); }} />}
+      {add && <RecurringForm preset={add === true ? undefined : add} onClose={(s) => { setAdd(false); if (s) reload(); }} />}
     </div>
   );
 }
 
-function RecurringForm({ onClose }: { onClose: (s?: boolean) => void }) {
+/** preset RENT / EXPENSE: the short form for a recurring rent or expense (accounts pre-chosen, no template kind to pick). */
+export function RecurringForm({ onClose, preset, amount }: { onClose: (s?: boolean) => void; preset?: "RENT" | "EXPENSE"; amount?: number }) {
   const { run, busy } = useAction();
+  const base = useBase();
   const [kind, setKind] = useState("EXPENSE");
-  const [f, setF] = useState<any>({ name: "", frequency: "MONTHLY", nextDate: today().slice(0, 8) + "01", endDate: "" });
-  const [exp, setExp] = useState<any>({ description: "", payee: "", amount: "", taxCode: "S", amountIncludesVat: false });
+  useEffect(() => { if (!preset) return; api("/accounts").then((r) => { const by = (k: string) => r.rows.find((a: any) => a.systemKey === k && !a.isGroup) || null; setPay((p: any) => p || by("BANK")); if (preset === "RENT") setAccount((a: any) => a || by("RENT")); }).catch(() => undefined); }, [preset]);
+  const [f, setF] = useState<any>({ name: preset === "RENT" ? "إيجار شهري" : "", frequency: "MONTHLY", nextDate: today().slice(0, 8) + "01", endDate: "" });
+  const [exp, setExp] = useState<any>({ description: preset === "RENT" ? "إيجار" : "", payee: "", amount: amount ? String(amount) : "", taxCode: "S", amountIncludesVat: false });
   const [account, setAccount] = useState<any>(null);
   const [pay, setPay] = useState<any>(null);
   const [partner, setPartner] = useState<any>(null);
@@ -193,18 +198,19 @@ function RecurringForm({ onClose }: { onClose: (s?: boolean) => void }) {
     return { partnerId: partner?.id, lines: lines.filter((l) => l.description).map((l) => ({ description: l.description, qty: 1, unitPrice: Number(l.debit || 0), taxCode: "S" })) };
   };
   return (
-    <Modal wide title="قالب دوري جديد" onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy || !f.name} onClick={() => run(async () => { await api("/recurring", { body: { ...f, kind, endDate: f.endDate || null, payload: payload() } }); onClose(true); }, "تم حفظ القالب")}>حفظ</button></>}>
+    <Modal wide title={preset === "RENT" ? "إيجار دوري" : preset === "EXPENSE" ? "مصروف دوري" : "قالب دوري جديد"} onClose={() => onClose()} footer={<><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" data-recurring-save disabled={busy || !f.name || (kind === "EXPENSE" && (!account || !(Number(exp.amount) > 0) || (credit ? !partner : !pay)))} onClick={() => run(async () => { await api("/recurring", { body: { ...f, kind, endDate: f.endDate || null, payload: payload() } }); onClose(true); }, "تم حفظ القالب")}>حفظ</button></>}>
       <div className="form-grid">
         <Field label="اسم القالب" span2><Input autoFocus value={f.name} onChange={s("name")} placeholder="مثال: إيجار المعرض الشهري" /></Field>
-        <Field label="النوع"><Select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(RKIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+        {!preset && <Field label="النوع"><Select value={kind} onChange={(e) => setKind(e.target.value)}>{Object.entries(RKIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>}
         <Field label="التكرار"><Select value={f.frequency} onChange={s("frequency")}>{Object.entries(FREQ).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
         <Field label="أول تنفيذ"><Input type="date" value={f.nextDate} onChange={s("nextDate")} /></Field>
         <Field label="ينتهي في (اختياري)"><Input type="date" value={f.endDate} onChange={s("endDate")} /></Field>
       </div>
+      {preset && <div className="alert info small mt">{preset === "RENT" ? <>يُسجَّل الإيجار مصروفاً في موعده تلقائياً (من ح/ الإيجارات وضريبة المدخلات إلى ح/ البنك)، ويظهر في عمود الإيجار بتوقع التدفق النقدي. إيجار السكن معفى من الضريبة. عقد أطول من سنة بمبلغ جوهري يُعالَج كعقد إيجار (حق استخدام) من <Link to={`${base}/leases`}>عقود الإيجار</Link>.</> : "يُسجَّل المصروف في موعده تلقائياً بالحساب والمبلغ المحددين، ويظهر في توقع التدفق النقدي. المبالغ المتغيرة (كهرباء، وقود) سجّلها مصروفاً عادياً عند ورود فاتورتها."}</div>}
       <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "14px 0" }} />
       {kind === "EXPENSE" && <div className="form-grid">
         <Field label="حساب المصروف" span2><Picker value={account} onChange={setAccount} fetcher={accountFetcher((a) => a.type === "EXPENSE")} label={(a: any) => `${a.code} ${a.nameAr}`} /></Field>
-        <Field label="المبلغ"><NumInput value={exp.amount} onChange={se("amount")} /></Field>
+        <Field label="المبلغ" hint="قبل الضريبة"><NumInput data-recurring-amount value={exp.amount} onChange={se("amount")} /></Field>
         <Field label="الضريبة"><Select value={exp.taxCode} onChange={se("taxCode")}><option value="S">خاضع {CFG.vatRate}%</option><option value="E">معفى</option><option value="O">خارج النطاق</option></Select></Field>
         <Field label="البيان" span2><Input value={exp.description} onChange={se("description")} /></Field>
         <Field label="المستفيد"><Input value={exp.payee} onChange={se("payee")} /></Field>

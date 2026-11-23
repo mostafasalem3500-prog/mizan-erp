@@ -52,7 +52,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 18; // 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 19; // 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -419,6 +419,13 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         const extra = wk === Object.keys(weeks).sort().pop() ? [{ ref: "RRN-770045", date: last, gross: 115 }] : [];
         try { await t.savepoint(() => createBatch(t, co, userName, "CARD", { date: dep, bankAccountId: bankAcc.id, reference: `إيداع مدى أسبوع ${wk}`, isDemo: true, lines: [...weeks[wk].map((o) => ({ invoiceId: o.invoiceId, gross: o.open })), ...extra] })); } catch { /* a week whose returns exceed its sales waits for the next */ }
       }
+      // recurring rent and a fixed monthly subscription from next month on: they feed the cash-flow forecast (rent column) and post themselves when due
+      {
+        const next = addMonths(end.slice(0, 8) + "01", 1);
+        const acc = async (code: string) => (await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND code=$2`, [companyId, code])).id;
+        for (const [name, code, amount, payee, description] of [["إيجار المعرض والمستودع (شهري)", "5204", 5500, "مالك العقار", "إيجار المعرض والمستودع"], ["إيجار معرض الفرع (شهري)", "5204", 3200, "مالك عقار الفرع", "إيجار معرض الفرع"], ["اشتراك الإنترنت والاتصالات (شهري)", "5206", 450, "شركة الاتصالات", "اشتراك الإنترنت والاتصالات"]] as const)
+          await t.insert("recurring_templates", { companyId, kind: "EXPENSE", name, frequency: "MONTHLY", nextDate: next, payload: JSON.stringify({ accountId: await acc(code), amount, taxCode: "S", amountIncludesVat: false, payee, description, payAccountId: bankAcc.id, isDemo: true }), createdBy: userName, isDemo: true });
+      }
       // example: a return posted on the wrong invoice, then taken back by a debit note
       try {
         await t.savepoint(async () => {
@@ -464,7 +471,7 @@ export async function resetShowcaseCompany(companyId: string) {
     await t.exec(`DELETE FROM salla_events WHERE company_id=$1`, [companyId]);
     await t.exec(`DELETE FROM reminders WHERE company_id=$1`, [companyId]);
     await t.exec(`DELETE FROM bank_statement_lines WHERE company_id=$1`, [companyId]);
-    await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1`, [companyId]);
+    await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM cheques WHERE company_id=$1`, [companyId]);
   });
 }

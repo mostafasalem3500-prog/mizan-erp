@@ -21,6 +21,7 @@ export const NAV_TREE: NavGroup[] = [
   { key: "tasks", ic: "☑", label: "المهام والمتابعات", to: "/tasks", perm: "dashboard.read" },
   { key: "sales", ic: "🧾", label: "المبيعات", items: [
     { to: "/sales/invoices?new=INVOICE", label: "فاتورة مبيعات جديدة", perm: "sales.write", action: true },
+    { to: "/customers?new=1", label: "عميل جديد", perm: "partners.write", action: true },
     { to: "/sales/invoices", label: "فواتير المبيعات", perm: "sales.read" },
     { to: "/sales/quotations", label: "عروض الأسعار وأوامر البيع", perm: "sales.read" },
     { to: "/sales/credit-notes", label: "الإشعارات الدائنة والمرتجعات", perm: "sales.read" },
@@ -35,6 +36,7 @@ export const NAV_TREE: NavGroup[] = [
   ] },
   { key: "purchases", ic: "📦", label: "المشتريات", items: [
     { to: "/purchases/invoices?new=INVOICE", label: "فاتورة مشتريات جديدة", perm: "purchases.write", action: true },
+    { to: "/suppliers?new=1", label: "مورد جديد", perm: "partners.write", action: true },
     { to: "/purchases/invoices", label: "فواتير المشتريات", perm: "purchases.read" },
     { to: "/purchases/orders", label: "أوامر الشراء", perm: "purchases.read" },
     { to: "/purchases/returns", label: "مرتجعات المشتريات", perm: "purchases.read" },
@@ -46,6 +48,8 @@ export const NAV_TREE: NavGroup[] = [
   ] },
   { key: "expenses", ic: "🧮", label: "المصروفات", items: [
     { to: "/expenses?new=1", label: "تسجيل مصروف", perm: "expenses.write", action: true },
+    { to: "/recurring?new=rent", label: "إيجار دوري", perm: "accounting.write", action: true, company: true },
+    { to: "/recurring?new=expense", label: "مصروف دوري", perm: "accounting.write", action: true, company: true },
     { to: "/expenses", label: "سجل المصروفات", perm: "expenses.read" },
     { to: "/recurring", label: "المصروفات والقيود الدورية", perm: "accounting.read", company: true },
     { to: "/reports/expenses", label: "تحليل المصروفات", perm: "reports.read", company: true },
