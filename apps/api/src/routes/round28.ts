@@ -40,8 +40,8 @@ r28.get("/partners/:id/loyalty", perm("partners.read"), h(async (req) => tx((t) 
 r28.post("/partners/:id/loyalty/adjust", perm("settings.write"), h(async (req) => { const r = await tx((t) => ly.adjustPoints(t, req.company, p(req).id, req.body?.points, req.body?.note, actor(req))); await audit(req, "LOYALTY_ADJUST", "partner", p(req).id, { points: r.points, note: r.note }); return r; }));
 
 // ─── attachments ─────────────────────────────────────────────────────────
-const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"], archive: ["accounting"], ch_disb: ["payments"], ch_rcpt: ["payments"], ch_req: ["payments"] };
-const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations", ch_disb: "charity_disbursements", ch_rcpt: "charity_receipts", ch_req: "charity_requests" };
+const ENTITY_DOMAINS: Record<string, string[]> = { invoice: ["sales", "purchases"], payment: ["payments"], expense: ["expenses"], journal: ["accounting"], partner: ["partners"], asset: ["assets"], product: ["products"], ai: ["dashboard"], archive: ["accounting"], ch_disb: ["payments"], ch_rcpt: ["payments"], ch_req: ["payments"], audit: ["accounting"] };
+const TABLES: Record<string, string> = { invoice: "invoices", payment: "payments", expense: "expenses", journal: "journal_entries", partner: "partners", asset: "fixed_assets", product: "products", ai: "ai_conversations", ch_disb: "charity_disbursements", ch_rcpt: "charity_receipts", ch_req: "charity_requests", audit: "audit_dismissals" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIME_OK = /^(image\/(png|jpe?g|webp|gif)|application\/pdf|text\/plain|text\/csv|application\/(msword|vnd\.openxmlformats-officedocument\.[a-z.]+|vnd\.ms-excel|zip))$/;
 const MAX = 8 * 1024 * 1024;
@@ -144,7 +144,7 @@ r28.post("/digest/send", perm("settings.write"), h(async (req) => {
 }));
 
 const sha256 = (buf: Buffer) => crypto.createHash("sha256").update(buf).digest("hex");
-const ENTITY_LABEL: Record<string, string> = { invoice: "فاتورة", expense: "مصروف", payment: "سند", journal: "قيد", partner: "ملف عميل/مورد", product: "صنف", asset: "أصل ثابت", archive: "مستندات المنشأة", ch_disb: "سند صرف جمعية", ch_rcpt: "سند قبض جمعية", ch_req: "طلب صرف" };
+const ENTITY_LABEL: Record<string, string> = { invoice: "فاتورة", expense: "مصروف", payment: "سند", journal: "قيد", partner: "ملف عميل/مورد", product: "صنف", asset: "أصل ثابت", archive: "مستندات المنشأة", audit: "ملاحظة تدقيق مبرَّرة", ch_disb: "سند صرف جمعية", ch_rcpt: "سند قبض جمعية", ch_req: "طلب صرف" };
 /** The same bytes already filed in this company: where, so the user can tell a real duplicate from a deliberate second copy. */
 async function sameFile(companyId: string, sha: string) {
   const d = await db.maybe(`${ARCH_SELECT} WHERE a.company_id=$1 AND a.sha256=$2 AND a.entity<>'ai' ORDER BY a.created_at LIMIT 1`, [companyId, sha]);

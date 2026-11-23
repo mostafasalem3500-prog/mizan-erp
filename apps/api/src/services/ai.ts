@@ -25,6 +25,7 @@ import { callGemini, isGeminiKey, geminiModelOf, verifyGeminiKey } from "./aiGem
 import { financialAnalysis, comparePeriods, productInfo, vatPosition, hrSummary } from "./aiAnalyst";
 import { dailyReport, todoList } from "./daily";
 import { listCentres } from "./projects";
+import { clearingView, estoreProfit, SOURCES as CLEARING_SOURCES } from "./clearing";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = () => process.env.AI_MODEL || "claude-sonnet-5-5";
@@ -149,6 +150,28 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
   if (name === "books_check") { if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" }; return booksCheck(t, C); }
   if (name === "journal_audit") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض القيود" }; const r = await auditScan(t, company, { from: isDate(input.from) ? input.from : undefined, to: isDate(input.to) ? input.to : undefined }); return { from: r.from, to: r.to, score: r.score, counts: r.counts, findings: r.findings.slice(0, 8).map((f: any) => ({ severity: f.severity, title: f.title, detail: f.detail, to: f.to })) }; }
   if (name === "cash_forecast") { if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض النقدية" }; const r = await cashForecast(t, company, { weeks: num(input.weeks) || 13 }); return { opening: r.opening, closing: r.closing, lowest: r.lowest, firstNegative: r.firstNegative, totals: r.totals, warnings: r.warnings, weeks: r.buckets.map((b: any) => ({ week: b.week, from: b.from, inflow: b.inflow, outflow: b.outflow, closing: b.closing })) }; }
+  if (name === "clearing_status") {
+    if (!perms(auth, "payments.read")) return { error: "صلاحيتك لا تسمح بعرض التسويات" };
+    const out: any[] = [];
+    for (const s of Object.keys(CLEARING_SOURCES)) {
+      if (input.source && String(input.source).toUpperCase() !== s) continue;
+      if (s !== "CARD" && !(await t.maybe(`SELECT 1 FROM salla_connections WHERE company_id=$1 AND platform=$2`, [C, s]))) continue;
+      const v = await clearingView(t, company, s);
+      out.push({ source: s, name: v.sourceAr, openTotal: v.openTotal, openCount: v.open.length, late: v.late, ledger: v.ledger, unexplained: v.unexplained, unmatched: v.unmatched.length, fees: v.totals.fees, feePct: v.totals.feePct, rule: v.rule, oldest: v.open.slice(0, 5).map((o: any) => ({ number: o.number, date: o.date, amount: o.open, age: o.age })) });
+    }
+    return { sources: out };
+  }
+  if (name === "estore_profit") {
+    if (!perms(auth, "accounting.read")) return { error: "صلاحيتك لا تسمح بعرض الربحية" };
+    if (CFG.code === "EG") return { error: "ربط المتاجر الإلكترونية غير متاح في هذه النسخة" };
+    const r = await estoreProfit(t, company, { from: input.from, to: input.to, platform: input.platform });
+    return { from: r.from, to: r.to, totals: r.totals, worst: [...r.orders].sort((a: any, b: any) => a.profit - b.profit).slice(0, 5), best: r.products.slice(0, 5) };
+  }
+  if (name === "stock_gaps") {
+    if (!perms(auth, "inventory.read")) return { error: "صلاحيتك لا تسمح بعرض المخزون" };
+    const rows = await t.rows(`SELECT p.name, p.sku, COALESCE(SUM(b.qty),0) qty, p.reorder_level FROM products p LEFT JOIN stock_balances b ON b.product_id=p.id WHERE p.company_id=$1 AND p.type='STOCK' AND p.is_active GROUP BY p.id HAVING COALESCE(SUM(b.qty),0) <= GREATEST(COALESCE(p.reorder_level,0),0) ORDER BY 3, 1 LIMIT 60`, [C]);
+    return { negative: rows.filter((r: any) => Number(r.qty) < 0), out: rows.filter((r: any) => Number(r.qty) === 0), low: rows.filter((r: any) => Number(r.qty) > 0) };
+  }
   if (name === "business_query") {
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
     const to = isDate(input.to) ? input.to : today(); const from = isDate(input.from) ? input.from : to.slice(0, 8) + "01";

@@ -55,6 +55,13 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/cvp", label: "نقطة التعادل وهامش المساهمة", perm: "reports.read", company: true },
     { to: "/reports-center?m=expenses", label: "تقارير المصروفات التفصيلية", perm: "reports.read" },
   ] },
+  { key: "estore", ic: "🛍", label: "المتاجر الإلكترونية", items: [
+    { to: "/estore/profit", label: "ربحية الطلبات (لكل طلب ووحدة)", perm: "accounting.read", sa: true, company: true },
+    { to: "/estore/settlement", label: "تسوية المنصات مع البنك والعمولات", perm: "payments.read", sa: true, company: true },
+    { to: "/settings/salla", label: "ربط متجر سلة", perm: "settings.read", sa: true, company: true },
+    { to: "/settings/zid", label: "ربط متجر زد", perm: "settings.read", sa: true, company: true },
+    { to: "/reports-center?m=estore", label: "تقارير المتاجر التفصيلية", perm: "reports.read", sa: true, company: true },
+  ] },
   { key: "inventory", ic: "🏬", label: "المخزون", items: [
     { to: "/products", label: "الأصناف والخدمات", perm: "products.read" },
     { to: "/inventory", label: "تقييم المخزون", perm: "inventory.read" },
@@ -71,6 +78,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/treasury", label: "الخزائن والحسابات البنكية", perm: "payments.read" },
     { to: "/cheques", label: "الشيكات", perm: "payments.read", company: true },
     { to: "/bank", label: "التسوية البنكية", perm: "accounting.read", company: true },
+    { to: "/bank/card-settlement", label: "تسوية أجهزة الشبكة والبطاقات", perm: "payments.read", company: true },
     { to: "/cash-forecast", label: "توقع التدفق النقدي (13 أسبوعاً)", perm: "accounting.read", company: true },
     { to: "/payment-runs", label: "مقترح سداد الموردين", perm: "accounting.write", company: true },
     { to: "/insights?tab=money", label: "الذمم والسيولة المتوقعة", perm: "reports.read" },

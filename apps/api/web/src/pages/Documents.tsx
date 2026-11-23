@@ -13,6 +13,7 @@ import { amountToArabicWords } from "../shared/tafqeet";
 import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
 import { PartnerStatement } from "./Statements";
 import { InvoicePaper } from "./InvoicePaper";
+import { ReverseReturnModal } from "./Round340";
 import { resolveTpl, allTemplates, isRoll, SIZE_AR } from "../shared/printTemplates";
 
 const KIND_TITLE: Record<string, Record<string, string>> = {
@@ -74,14 +75,14 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
         </div>
         {loading && !data ? <Loading /> : !data?.rows.length ? <Empty /> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>الرقم</th><th>التاريخ</th><th>{direction === "SALE" ? "العميل" : "المورد"}</th><th>النوع</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>الحالة</th>{direction === "SALE" && kinds.includes("INVOICE") && <th>الهيئة</th>}</tr></thead>
+            <thead><tr><th>الرقم</th><th>التاريخ</th><th>{direction === "SALE" ? "العميل" : "المورد"}</th><th>النوع</th><th className="n">قبل الضريبة</th><th className="n">الضريبة</th><th className="n">الإجمالي</th><th className="n">المتبقي</th><th>الحالة</th><th>المستخدم</th>{direction === "SALE" && kinds.includes("INVOICE") && <th>الهيئة</th>}</tr></thead>
             <tbody>{data.rows.map((r: any) => (
               <tr key={r.id} className="clickable" onClick={() => r.status === "DRAFT" && (r.kind === "QUOTATION" || r.kind === "ORDER" || r.kind === "INVOICE") ? setEditor({ kind: r.kind, id: r.id }) : nav(`${base}/doc/${r.id}`)}>
                 <td><b>{r.number}</b>{r.channel === "POS" && <span className="badge gray" style={{ marginInlineStart: 4 }}>POS</span>}{r.channel === "SALLA" && <span className="badge teal" style={{ marginInlineStart: 4 }}>سلة</span>}{r.channel === "ZID" && <span className="badge teal" style={{ marginInlineStart: 4 }}>زد</span>}{r.channel === "API" && <span className="badge blue" style={{ marginInlineStart: 4 }}>API</span>}{r.branchName && multiBranch && <div className="small muted">{r.branchName}</div>}{r.isDemo && <span className="badge amber" style={{ marginInlineStart: 4 }}>تجريبي</span>}</td>
                 <td className="dt">{fmtDate(r.date)}</td><td>{r.partnerName}</td><td>{KIND_AR[r.kind]}</td>
                 <td className="n"><Money v={r.taxable} /></td><td className="n"><Money v={r.vatTotal} /></td><td className="n"><b><Money v={r.total} /></b></td>
                 <td className="n">{r.kind === "INVOICE" && r.status === "POSTED" ? <Money v={Number(r.total) - Number(r.amountPaid)} blankZero /> : ""}</td>
-                <td><Badge s={r.status} /> {r.kind === "INVOICE" && r.status === "POSTED" && <Badge s={r.paymentStatus} />}</td>
+                <td><Badge s={r.status} /> {r.kind === "INVOICE" && r.status === "POSTED" && <Badge s={r.paymentStatus} />}{r.reversedBy && <span className="badge red">أُلغي</span>}{r.oversold && <span className="badge amber" title="بيع مع تخطي رصيد المخزون">تخطي رصيد</span>}</td><td className="small" data-issuer>{r.createdBy}{r.issuerNo && <span className="muted num"> #{r.issuerNo}</span>}</td>
                 {direction === "SALE" && kinds.includes("INVOICE") && <td>{CFG.country === "EG" ? <EtaBadge s={r.etaStatus} /> : r.zatcaStatus && <Badge s={r.zatcaStatus} map={ZATCA_AR} />}</td>}
               </tr>))}
             </tbody>
@@ -298,6 +299,7 @@ export function DocumentView() {
   const [prev, setPrev] = useState<any>(null);
   const [qr, setQr] = useState("");
   const [layout, setLayout] = useState<string>(""); // "" = the establishment's default template
+  const [revRet, setRevRet] = useState(false);
   const [cn, setCn] = useState<any>(null);
   const [pay, setPay] = useState(false);
   const [landed, setLanded] = useState(false);
@@ -331,8 +333,10 @@ export function DocumentView() {
       <div className="row no-print">
         <button className="btn sm" onClick={() => nav(-1)}>← رجوع</button>
         <h2>{title} {d.number}</h2>
-        <Badge s={d.status} />{d.kind === "INVOICE" && d.status === "POSTED" && <Badge s={d.paymentStatus} />}{Number(d.revision) > 0 && <span className="badge" style={{ background: "#fff4e0", color: "#9a5b00" }} title="عُدّلت بعد الترحيل — راجع سجل التعديلات">معدّلة ×{d.revision}</span>}{d.zatcaStatus && <Badge s={d.zatcaStatus} map={ZATCA_AR} />}
+        <Badge s={d.status} />{d.kind === "INVOICE" && d.status === "POSTED" && <Badge s={d.paymentStatus} />}{d.reversedBy && <span className="badge red">أُلغي بإشعار مدين</span>}{d.oversold && <span className="badge amber">بيع مع تخطي رصيد المخزون</span>}{Number(d.revision) > 0 && <span className="badge" style={{ background: "#fff4e0", color: "#9a5b00" }} title="عُدّلت بعد الترحيل — راجع سجل التعديلات">معدّلة ×{d.revision}</span>}{d.zatcaStatus && <Badge s={d.zatcaStatus} map={ZATCA_AR} />}
+        {d.createdBy && <span className="small muted" data-doc-issuer>👤 {d.createdBy}{d.issuerNo ? ` #${d.issuerNo}` : ""}</span>}
         <div className="grow" />
+        {isSale && d.kind === "CREDIT_NOTE" && d.status === "POSTED" && !d.reversedBy && can("accounting.write") && <button className="btn sm danger" data-reverse-return onClick={() => setRevRet(true)}>↩ إلغاء المرتجع</button>}
         {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" onClick={() => { if (d.status === "DRAFT") return setEdit(true); if (!isSale && d.kind === "INVOICE") api(`/invoices/${d.id}/revision-check`).then(setRev).catch(() => setRev(null)); else setRev(null); setFix(true); }}>✏ تعديل</button>}
         {can(isSale ? "sales.write" : "purchases.write") && d.kind !== "CREDIT_NOTE" && d.kind !== "DEBIT_NOTE" && <button className="btn sm" disabled={busy} onClick={() => copy()}>⧉ نسخ</button>}
         {d.kind === "QUOTATION" && d.status === "DRAFT" && can(isSale ? "sales.write" : "purchases.write") && <button className="btn primary sm" disabled={busy} onClick={() => convert("INVOICE")}>تحويل لفاتورة ←</button>}
@@ -381,6 +385,8 @@ export function DocumentView() {
         </div>
       </div>
       <Attachments entity="invoice" id={d.id} canWrite={can(d.direction === "SALE" ? "sales.write" : "purchases.write")} />
+      {revRet && <ReverseReturnModal doc={d} onClose={(dn) => { setRevRet(false); if (dn) { reload(); nav(`${base}/doc/${dn.id}`); } }} />}
+      {d.reversal && <div className="alert warn small no-print">أُلغي هذا المرتجع بالإشعار المدين <Link to={`${base}/doc/${d.reversal.id}`}>{d.reversal.number}</Link> بتاريخ {fmtDate(d.reversal.date)} — {d.reversal.createdBy}</div>}
       {cn && <DocEditor direction={d.direction} kind="CREDIT_NOTE" id={cn.id} originId={d.id} onClose={(s) => { setCn(null); if (s) reload(); }} />}
       {pay && <QuickPayment doc={d} onClose={(s) => { setPay(false); if (s) reload(); }} />}
       {landed && <LandedCostModal doc={d} onClose={(s) => { setLanded(false); if (s) reload(); }} />}

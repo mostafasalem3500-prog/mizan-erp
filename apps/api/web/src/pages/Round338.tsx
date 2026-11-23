@@ -274,7 +274,7 @@ export function AuditorPage() {
           {!list.length ? <div className="alert ok mt">لا توجد ملاحظات في هذه الفترة{kind ? " من هذا النوع" : ""}.</div> : <div className="table-wrap mt"><table className="tbl" data-findings>
             <thead><tr><th>الأهمية</th><th>الملاحظة</th><th>التاريخ</th><th className="n">المبلغ</th><th></th></tr></thead>
             <tbody>{list.map((f: any) => <tr key={f.kind + f.ref} className={f.dismissed ? "muted" : ""}><td><span className={"badge " + SEV[f.severity][1]}>{SEV[f.severity][0]}</span></td>
-              <td><b>{f.title}</b><div className="small">{f.detail}</div><div className="small muted">{f.why}</div>{f.dismissed && <div className="small">✔ مبرَّرة: {f.dismissed.note} — {f.dismissed.dismissedBy}</div>}</td>
+              <td><b>{f.title}</b><div className="small">{f.detail}</div><div className="small muted">{f.why}</div>{f.dismissed && <div className="small">✔ مبرَّرة: {f.dismissed.note} — {f.dismissed.dismissedBy}{(f.dismissed.files || []).map((a: any) => <button key={a.id} className="btn sm ghost" data-dismiss-att title={a.name} onClick={async () => { const r: any = await api(`/attachments/file/${a.id}`, { raw: true }); const b = await r.blob(); window.open(URL.createObjectURL(b), "_blank"); }}>📎 {a.name}</button>)}</div>}</td>
               <td className="dt">{f.date ? fmtDate(f.date) : ""}</td><td className="n">{f.amount !== undefined ? <Money v={f.amount} /> : ""}</td>
               <td className="nowrap">{f.to && <Link className="btn sm ghost" to={f.to}>فتح</Link>}{f.dismissed ? <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { await api("/auditor/undismiss", { body: { kind: f.kind, ref: f.ref } }); await load(); })}>إعادة</button> : <button className="btn sm ghost" data-dismiss onClick={() => setWhy(f)}>مبرَّرة</button>}</td></tr>)}</tbody></table></div>}
           {d.benford.n >= 30 && <details className="fold mt" data-benford><summary>توزيع الأرقام الأولى — قانون بنفورد ({d.benford.n} مبلغاً، متوسط الانحراف {d.benford.mad})</summary>
@@ -288,10 +288,12 @@ export function AuditorPage() {
 }
 function DismissModal({ f, onClose, onDone }: { f: any; onClose: () => void; onDone: () => void }) {
   const [note, setNote] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const { run, busy } = useAction();
-  return <Modal title="ملاحظة مبرَّرة" onClose={onClose} narrow footer={<><button className="btn ghost" onClick={onClose}>إلغاء</button><button className="btn primary" disabled={busy || note.trim().length < 3} data-dismiss-save onClick={() => run(async () => { await api("/auditor/dismiss", { body: { kind: f.kind, ref: f.ref, note } }); onDone(); }, "حُفظت")}>حفظ</button></>}>
+  return <Modal title="ملاحظة مبرَّرة" onClose={onClose} narrow footer={<><button className="btn ghost" onClick={onClose}>إلغاء</button><button className="btn primary" disabled={busy || note.trim().length < 3} data-dismiss-save onClick={() => run(async () => { const r = await api("/auditor/dismiss", { body: { kind: f.kind, ref: f.ref, note } }); if (file && r?.id) { if (file.size > 8 * 1024 * 1024) throw new Error("الملف أكبر من 8 ميجابايت"); const data: string = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(file); }); await api(`/attachments/audit/${r.id}`, { body: { name: file.name, mime: file.type || "application/octet-stream", data } }); } onDone(); }, "حُفظت")}>حفظ</button></>}>
     <div className="small mb"><b>{f.title}</b> — {f.detail}</div>
     <Field label="ما الذي تحققت منه؟"><Input value={note} onChange={(e) => setNote(e.target.value)} autoFocus placeholder="مثال: فاتورتان مختلفتان، راجعت المستند الأصلي" data-dismiss-note /></Field>
+    <Field label="مستند مؤيد (اختياري)" hint="صورة أو PDF يثبت ما تحققت منه — ليس شرطاً"><input type="file" data-dismiss-file accept="image/*,application/pdf,.xlsx,.docx,.csv,.txt" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
   </Modal>;
 }
 

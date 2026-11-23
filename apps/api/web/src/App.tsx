@@ -35,6 +35,8 @@ const ModifiersPage = lz(() => import("./pages/Round338"), "ModifiersPage");
 const PaymentRunsPage = lz(() => import("./pages/Round338"), "PaymentRunsPage");
 const CashForecastPage = lz(() => import("./pages/Round338"), "CashForecastPage");
 const AuditorPage = lz(() => import("./pages/Round338"), "AuditorPage");
+const ClearingPage = lz(() => import("./pages/Round340"), "ClearingPage");
+const EstoreProfitPage = lz(() => import("./pages/Round340"), "EstoreProfitPage");
 const RemittancesPage = lz(() => import("./pages/Round339"), "RemittancesPage");
 const EgCompliancePage = lz(() => import("./pages/Round339"), "EgCompliancePage");
 const SalaryTaxReportPage = lz(() => import("./pages/Round339"), "SalaryTaxReportPage");
@@ -247,6 +249,9 @@ export function App() {
                 <Route path="/tax/form41" element={<Form41Page />} />
                 <Route path="/tax/income-tax" element={<IncomeTaxPage />} />
                 <Route path="/tax/eg-compliance" element={<EgCompliancePage />} />
+                <Route path="/bank/card-settlement" element={<ClearingPage fixed="CARD" />} />
+                <Route path="/estore/settlement" element={<ClearingPage />} />
+                <Route path="/estore/profit" element={<EstoreProfitPage />} />
                 <Route path="/tax/salary-tax-report" element={<SalaryTaxReportPage />} />
                 <Route path="/analysis" element={<FinancialAnalysisPage />} />
                 <Route path="/financial-report" element={<FinancialReportPage />} />

@@ -80,7 +80,7 @@ export async function auditScan(t: Db, company: any, q: { from?: string; to?: st
              WHERE a.company_id=$1 AND a.is_cash_bank AND NOT a.is_group AND e.date <= $2 GROUP BY a.id HAVING SUM(l.debit - l.credit) < -0.01`, [C, to]),
     t.rows(`SELECT total v FROM invoices WHERE company_id=$1 AND direction='PURCHASE' AND kind='INVOICE' AND status='POSTED' AND date BETWEEN $2 AND $3
             UNION ALL SELECT total FROM expenses WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3`, P),
-    t.rows(`SELECT kind, ref, note, dismissed_by, dismissed_at FROM audit_dismissals WHERE company_id=$1`, [C]),
+    t.rows(`SELECT d.id, d.kind, d.ref, d.note, d.dismissed_by, d.dismissed_at, (SELECT json_agg(json_build_object('id', a.id, 'name', a.name)) FROM attachments a WHERE a.company_id=d.company_id AND a.entity='audit' AND a.entity_id=d.id) files FROM audit_dismissals d WHERE d.company_id=$1`, [C]),
   ]);
 
   const out: Finding[] = [];
@@ -123,8 +123,8 @@ export async function dismiss(t: Db, C: string, user: string, b: any) {
   const kind = String(b?.kind || ""), ref = String(b?.ref || "").slice(0, 120), note = String(b?.note || "").trim().slice(0, 300);
   if (!KINDS[kind] || !ref) throw bad("الملاحظة غير معروفة");
   if (note.length < 3) throw bad("اكتب سبب اعتبار الملاحظة مبرَّرة");
-  await t.exec(`INSERT INTO audit_dismissals (company_id, kind, ref, note, dismissed_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (company_id, kind, ref) DO UPDATE SET note=EXCLUDED.note, dismissed_by=EXCLUDED.dismissed_by, dismissed_at=now()`, [C, kind, ref, note, user]);
-  return { ok: true };
+  const row = await t.one(`INSERT INTO audit_dismissals (company_id, kind, ref, note, dismissed_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (company_id, kind, ref) DO UPDATE SET note=EXCLUDED.note, dismissed_by=EXCLUDED.dismissed_by, dismissed_at=now() RETURNING id`, [C, kind, ref, note, user]);
+  return { ok: true, id: row.id };
 }
 export async function undismiss(t: Db, C: string, b: any) {
   await t.exec(`DELETE FROM audit_dismissals WHERE company_id=$1 AND kind=$2 AND ref=$3`, [C, String(b?.kind || ""), String(b?.ref || "")]);

@@ -384,7 +384,7 @@ master.put(
   }),
 );
 
-master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, m.branch_id, m.restrict_branch, (SELECT name FROM branches b WHERE b.id=m.branch_id) branch_name, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
+master.get("/users", perm("users.read"), h(async (req) => db.rows(`SELECT m.id, m.role, m.is_active, m.created_at, m.branch_id, m.restrict_branch, m.staff_no, (SELECT name FROM branches b WHERE b.id=m.branch_id) branch_name, u.id AS user_id, u.email, u.full_name, u.phone, u.last_login_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 ORDER BY m.created_at`, [cid(req)])));
 
 master.post(
   "/users",

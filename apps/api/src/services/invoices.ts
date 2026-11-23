@@ -236,7 +236,7 @@ export async function getInvoice(t: Db, companyId: string, id: string) {
 }
 
 /** Posts an INVOICE / CREDIT_NOTE / DEBIT_NOTE: numbering, stock, journal, ZATCA stamp. */
-export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean; issuedAt?: Date; keepNumber?: string } = {}) {
+export async function postInvoice(t: Db, company: any, id: string, user: string, opts: { tenders?: { method: string; amount: number; accountId?: string }[]; posSessionId?: string; overrideCreditLimit?: boolean; issuedAt?: Date; keepNumber?: string; allowOversell?: boolean; reversesReturn?: boolean } = {}) {
   const companyId = company.id;
   const inv = await t.one(`SELECT * FROM invoices WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المستند غير موجود");
   if (inv.status !== "DRAFT") throw conflict("المستند مرحل مسبقاً");
@@ -260,6 +260,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   const ref = number;
   const jl: Line[] = [];
   let costTotal = 0;
+  const oversold: string[] = [];
 
   const origin = inv.originId ? await t.maybe(`SELECT * FROM invoices WHERE id=$1`, [inv.originId]) : null;
   const originLines = origin ? await t.rows(`SELECT * FROM invoice_lines WHERE invoice_id=$1`, [origin.id]) : [];
@@ -278,7 +279,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     // cannot return more than was invoiced (net of previous returns)
     const prev = await t.rows(
       `SELECT l.product_id, SUM(l.qty * l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
-       WHERE i.origin_id=$1 AND i.kind='CREDIT_NOTE' AND i.status='POSTED' AND l.product_id IS NOT NULL GROUP BY l.product_id`,
+       WHERE i.origin_id=$1 AND i.kind='CREDIT_NOTE' AND i.status='POSTED' AND i.reversed_by IS NULL AND l.product_id IS NOT NULL GROUP BY l.product_id`,
       [origin.id],
     );
     for (const l of lines.filter((x) => x.productId)) {
@@ -286,7 +287,7 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
       const already = Number(prev.find((p) => p.productId === l.productId)?.q || 0);
       if (Number(l.qty) * Number(l.factor || 1) > sold - already + 1e-9) throw bad(`كمية المرتجع للصنف «${l.description}» تتجاوز المتبقي في الفاتورة الأصلية (${r3(sold - already)} ${l.ptype ? "وحدة" : ""})`);
     }
-    const prevTotal = await t.one(`SELECT COALESCE(SUM(total),0) s FROM invoices WHERE origin_id=$1 AND kind='CREDIT_NOTE' AND status='POSTED'`, [origin.id]);
+    const prevTotal = await t.one(`SELECT COALESCE(SUM(total),0) s FROM invoices WHERE origin_id=$1 AND kind='CREDIT_NOTE' AND status='POSTED' AND reversed_by IS NULL`, [origin.id]);
     if (Number(inv.total) > Number(origin.total) - Number(prevTotal.s) + 0.001) throw bad("قيمة الإشعار الدائن تتجاوز المتبقي من الفاتورة الأصلية");
   }
 
@@ -297,7 +298,11 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     const base = { productId: l.productId, warehouseId: inv.warehouseId, qty: q, date: inv.date, sourceId: inv.id, reference: ref, isDemo: inv.isDemo };
     let cost = 0;
     if (isSale && !isReturn) {
-      cost = await stockOut(t, companyId, { ...base, sourceType: inv.channel === "POS" ? "POS" : "SALE", allowNegative: company.allowNegativeStock, fallbackCost: Number(l.purchasePrice), productName: l.pname });
+      if (opts.allowOversell && !company.allowNegativeStock) {
+        const have = await t.maybe(`SELECT qty FROM stock_balances WHERE company_id=$1 AND product_id=$2 AND warehouse_id=$3`, [companyId, l.productId, inv.warehouseId]);
+        if (q > Number(have?.qty || 0) + 1e-9) oversold.push(`${l.pname} (المتاح ${r3(Number(have?.qty || 0))}، المباع ${q})`);
+      }
+      cost = await stockOut(t, companyId, { ...base, sourceType: inv.channel === "POS" ? "POS" : "SALE", allowNegative: company.allowNegativeStock || !!opts.allowOversell, fallbackCost: Number(l.purchasePrice), productName: l.pname });
     } else if (isSale && isReturn) {
       const ol = originLines.find((o) => o.productId === l.productId);
       const unit = ol ? Number(ol.unitCost) : await avgCost(t, companyId, l.productId, inv.warehouseId);
@@ -344,7 +349,8 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
       } else jl.push({ key: "AR", credit: inv.total, partnerId, description: desc });
     }
     for (const l of lines) {
-      const acc = isReturn && !l.accountId ? { key: "SALES_RETURNS" } : revenue(l);
+      // a debit note that takes a return back credits the returns account, so the return nets to zero where it was booked
+      const acc = (isReturn || opts.reversesReturn) && !l.accountId ? { key: "SALES_RETURNS" } : revenue(l);
       if (s > 0) jl.push({ ...acc, credit: Number(l.netAmount), description: l.description });
       else jl.push({ ...acc, debit: Number(l.netAmount), description: l.description });
     }
@@ -411,7 +417,10 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
     number, status: "POSTED", journalId: entry?.id || null, costTotal, amountPaid,
     paymentStatus: amountPaid >= Number(inv.total) ? "PAID" : "UNPAID", issuedAt: opts.issuedAt || new Date(), updatedAt: new Date(),
     tenders: opts.tenders || null, posSessionId: opts.posSessionId || null,
+    issuerNo: (await t.maybe(`SELECT m.staff_no FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.company_id=$1 AND u.full_name=$2 AND m.staff_no IS NOT NULL LIMIT 1`, [companyId, user]))?.staffNo || null,
+    oversold: oversold.length > 0,
   });
+  if (oversold.length) await t.insert("audit_logs", { companyId, userName: user, action: "OVERSELL", entity: "invoice", entityId: id, details: JSON.stringify({ number, items: oversold }) });
 
   // credit note automatically settles the original invoice's open balance
   if (isReturn && origin && !opts.tenders?.length) {

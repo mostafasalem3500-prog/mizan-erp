@@ -74,6 +74,7 @@ export function InvoicePaper({ d, qr, tpl, docTitle }: { d: any; qr: string; tpl
       </table>
       <div className="row mt tp-foot" style={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <div className="small muted" style={{ maxWidth: 380 }}>
+          {d.createdBy && <div data-paper-issuer>{L("أصدرها")}: {d.createdBy}{d.issuerNo ? <span className="num"> — {L("رقم الموظف")} {d.issuerNo}</span> : ""}</div>}
           {o.notes && d.notes && <div>{L("ملاحظات")}: {d.notes}</div>}
           {o.terms && (o.termsText || c.invoiceTerms) && <div style={{ whiteSpace: "pre-wrap" }}>{o.termsText || c.invoiceTerms}</div>}
           {d.tenders?.length > 0 && <div>طريقة الدفع: {d.tenders.map((t: any) => `${METHOD_AR[t.method] || t.method} ${money(t.amount)}`).join(" + ")}</div>}
@@ -110,7 +111,7 @@ function RollPaper({ d, qr, tpl, docTitle }: { d: any; qr: string; tpl: Tpl; doc
       <div>التاريخ: <span className="num">{fmtDT(d.issuedAt)}</span>{showHijri(o) && <> · <span className="num">{hijri(d.date, "short", "ar")}</span></>}</div>
       {d.partnerName && d.partnerName !== "عميل نقدي" && <div>العميل: {d.partnerName}{o.customerContact && d.partner?.phone ? <span className="num"> · {d.partner.phone}</span> : ""}</div>}
       {(d.tableName || d.orderNo) && <div>{d.tableName ? <>الطاولة: <b>{d.tableName}</b> · </> : ""}طلب #{d.orderNo}{d.orderType ? ` · ${({ DINE_IN: "محلي", TAKEAWAY: "سفري", DELIVERY: "توصيل" } as any)[d.orderType] || ""}` : ""}</div>}
-      {o.cashier && d.createdBy && <div>الكاشير: {d.createdBy}</div>}
+      {o.cashier && d.createdBy && <div>الكاشير: {d.createdBy}{d.issuerNo ? <span className="num"> — رقم الموظف {d.issuerNo}</span> : ""}</div>}
       <table style={{ marginTop: 6 }}><thead><tr><th style={{ textAlign: "start" }}>الصنف</th><th>الكمية</th><th>الإجمالي</th></tr></thead>
         <tbody>{d.lines.map((l: any) => <tr key={l.id}><td>{l.description}{l.uom && <span style={{ fontSize: "0.82em" }}> ({l.uom})</span>}{o.colSku && l.sku && !narrow && <span className="num" style={{ fontSize: "0.82em" }}> {l.sku}</span>}{o.unitPrice && <div style={{ fontSize: "0.82em" }} className="num">{money(l.unitPrice)} × {Number(l.qty)}{o.colTax && !narrow && Number(l.vatAmount) > 0 ? ` · ضريبة ${money(l.vatAmount)}` : ""}</div>}</td><td className="c num">{Number(l.qty)}</td><td className="c num">{money(l.total)}</td></tr>)}</tbody></table>
       <div style={{ marginTop: 6 }}>

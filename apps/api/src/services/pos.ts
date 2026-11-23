@@ -35,6 +35,7 @@ export interface PosSaleInput {
   redeemPoints?: number; // loyalty points the customer uses on this ticket
   orderId?: string; // restaurant order being paid (service charge comes from its type)
   waiveServiceCharge?: boolean;
+  allowOversell?: boolean; // the cashier confirmed selling more than the recorded stock
 }
 
 async function walkInCustomer(t: Db, companyId: string) {
@@ -105,7 +106,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   const inv = await t.one(`SELECT total FROM invoices WHERE id=$1`, [draft.id]);
   const total = Number(inv.total);
   const fixed = (s.tenders || []).filter((x) => x.amount !== null && x.amount !== undefined).reduce((a, x) => a + num(x.amount), 0);
-  const tenders = (s.tenders || []).map((x) => ({ method: x.method, amount: x.amount === null || x.amount === undefined ? r2(total - fixed) : r2(num(x.amount)) })).filter((x) => x.amount > 0);
+  const tenders = (s.tenders || []).map((x: any) => ({ method: x.method, amount: x.amount === null || x.amount === undefined ? r2(total - fixed) : r2(num(x.amount)), ...(x.ref && x.method !== "CASH" ? { ref: String(x.ref).trim().slice(0, 40) } : {}) })).filter((x) => x.amount > 0);
   const paid = r2(tenders.reduce((a, x) => a + x.amount, 0));
   const credit = tenders.find((x) => x.method === "CREDIT");
   let cashChange = 0;
@@ -121,12 +122,14 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
     cashChange = r2(paid - total);
     cash.amount = r2(cash.amount - cashChange);
   }
+  // selling past the recorded stock: only when the establishment lets the cashier confirm it (default), never silently
+  const allowOversell = !!s.allowOversell && company.accounting?.pos?.oversell !== "BLOCK";
   let postTenders: any[] | undefined = tenders.filter((x) => x.method !== "CREDIT");
   const creditAmount = credit ? r2(total - postTenders.reduce((a, x) => a + x.amount, 0)) : 0;
   let posted: any;
   if (credit) {
     // mixed: post invoice on AR then a receipt for the paid part
-    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id, issuedAt });
+    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id, issuedAt, allowOversell });
     if (postTenders.length) {
       const { createPayment } = require("./payments") as typeof import("./payments");
       const cashAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='POS_CASH'`, [companyId]);
@@ -137,7 +140,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
       await t.exec(`UPDATE invoices SET tenders=$2, pos_session_id=$3 WHERE id=$1`, [posted.id, JSON.stringify([...postTenders, { method: "CREDIT", amount: creditAmount }]), session.id]);
     }
   } else {
-    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id, issuedAt });
+    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id, issuedAt, allowOversell });
   }
   const cashPart = r2(postTenders.filter((x) => x.method === "CASH").reduce((a, x) => a + x.amount, 0));
   const cardPart = r2(postTenders.filter((x) => x.method !== "CASH").reduce((a, x) => a + x.amount, 0));

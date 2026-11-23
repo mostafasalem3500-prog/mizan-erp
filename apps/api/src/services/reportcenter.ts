@@ -621,7 +621,9 @@ IMPL["vat.detail"] = async (t, companyId, q) => {
       UNION ALL
       SELECT x.date, x.number, 'INPUT', CASE WHEN x.tax_code='RC' THEN 'احتساب عكسي — مدخلات' ELSE 'مصروف' END, COALESCE(NULLIF(x.payee,''), pr.name), x.supplier_vat, x.tax_code, x.amount, CASE WHEN x.tax_code='RC' THEN x.amount*${VAT_F} ELSE x.vat_amount END, NULL, x.partner_id FROM expenses x LEFT JOIN partners pr ON pr.id=x.partner_id WHERE x.company_id=$1 AND x.status='POSTED' AND x.date BETWEEN $2 AND $3${BX}
       UNION ALL
-      SELECT p.date, p.number, 'INPUT', 'عمولة منصة', p.platform, NULL, 'S', p.fees, p.fee_vat, NULL, NULL FROM estore_payouts p WHERE p.company_id=$1 AND p.status='POSTED' AND p.date BETWEEN $2 AND $3)
+      SELECT p.date, p.number, 'INPUT', 'عمولة منصة', p.platform, NULL, 'S', p.fees, p.fee_vat, NULL, NULL FROM estore_payouts p WHERE p.company_id=$1 AND p.status='POSTED' AND p.date BETWEEN $2 AND $3
+      UNION ALL
+      SELECT cb.date, cb.number, 'INPUT', CASE WHEN cb.source='CARD' THEN 'عمولة بنك على الشبكة' ELSE 'عمولة منصة' END, cb.source, NULL, 'S', cb.fees, cb.fee_vat, NULL, NULL FROM clearing_batches cb WHERE cb.company_id=$1 AND cb.status='POSTED' AND cb.fee_vat > 0 AND cb.date BETWEEN $2 AND $3)
     SELECT * FROM u WHERE 1=1${P}${q.vatSide ? ` AND side='${q.vatSide === "INPUT" ? "INPUT" : "OUTPUT"}'` : ""}${list(q.taxCode).length ? ` AND tax_code = ANY('{${list(q.taxCode).join(",")}}'::text[])` : ""}${q.q ? ` AND (number ILIKE $4 OR partner ILIKE $4 OR vat_no ILIKE $4)` : ""} ORDER BY date, number`, q.q ? [companyId, from, to, `%${q.q}%`] : [companyId, from, to]);
   const g = q.groupBy || "none";
   const TC: Record<string, string> = { S: `خاضع ${VAT_RATE}%`, Z: "نسبة صفر", X: "صادرات", E: "معفى", O: "خارج النطاق", IM: "استيراد", RC: "احتساب عكسي" };

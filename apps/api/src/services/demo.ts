@@ -2,6 +2,7 @@
  * Demo dataset: six months of realistic trading activity, every document posted through
  * the real engine (so all reports reconcile), every row tagged is_demo=true → purgeable.
  */
+import { clearingView, createBatch } from "./clearing";
 import { IS_EG } from "../lib/country";
 import { Db, db, tx, pool } from "../db/pool";
 import { r2, addDays, addMonths, monthEnd, today } from "../lib/core";
@@ -50,7 +51,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 16; // 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 17; // 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -402,6 +403,18 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
   await tx(async (t) => {
     const q1From = months[0], q1To = monthEnd(months[2]);
     if (q1To < end) await fileVatReturn(t, companyId, userName, q1From, q1To, true);
+    // the bank deposits each week's card sales a couple of days later, less its fee — the last days stay in clearing
+    {
+      const bankAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='BANK'`, [companyId]);
+      const co = await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]);
+      const openCard = (await clearingView(t, co, "CARD")).open.filter((o: any) => o.age > 3);
+      const weeks: Record<string, any[]> = {};
+      for (const o of openCard) { const d = new Date(o.date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - d.getUTCDay()); (weeks[d.toISOString().slice(0, 10)] ||= []).push(o); }
+      for (const wk of Object.keys(weeks).sort()) {
+        const last = weeks[wk].reduce((a, o) => (o.date > a ? o.date : a), wk), dep = addDays(last, 2) > end ? end : addDays(last, 2);
+        try { await t.savepoint(() => createBatch(t, co, userName, "CARD", { date: dep, bankAccountId: bankAcc.id, reference: `إيداع مدى أسبوع ${wk}`, isDemo: true, lines: weeks[wk].map((o) => ({ invoiceId: o.invoiceId, gross: o.open })) })); } catch { /* a week whose returns exceed its sales waits for the next */ }
+      }
+    }
     if (IS_EG) await egLocalizeDemo(t, companyId);
     await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);
   });
@@ -436,6 +449,7 @@ export async function purgeDemo(companyId: string) {
     const demoProducts = (await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo`, [companyId])).map((p) => p.id);
     await purgeAssocDemo(t, companyId);
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM clearing_batches WHERE company_id=$1 AND (is_demo OR id IN (SELECT l.batch_id FROM clearing_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo))`, [companyId]);
     await t.exec(`DELETE FROM estore_payouts WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM stock_lots WHERE company_id=$1 AND (is_demo OR product_id = ANY($2))`, [companyId, demoProducts]);
     await t.exec(`UPDATE partners SET price_list_id=NULL WHERE company_id=$1 AND price_list_id IN (SELECT id FROM price_lists WHERE company_id=$1 AND is_demo)`, [companyId]);

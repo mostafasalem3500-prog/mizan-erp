@@ -21,6 +21,9 @@ export function PosPage() {
   const { me, can } = useCompanyContext();
   const { run, busy } = useAction();
   const sess = useFetch("/pos/session");
+  // zero-stock items the cashier already confirmed selling in this ticket
+  const oversellOk = React.useRef<Record<string, boolean>>({});
+  const canOversell = me.company?.accounting?.pos?.oversell !== "BLOCK";
   const cats = useFetch("/categories");
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("all");
@@ -229,7 +232,7 @@ export function PosPage() {
           {list.map((p: any) => {
             const out = p.type === "STOCK" && Number(p.qty) <= 0 && !me.company.allowNegativeStock;
             return (
-              <div key={p.id} className={"item" + (out && !imgMode ? " out" : "") + (imgMode ? " sel-mode" + (imgSel[p.id] ? " sel" : "") : "")} onClick={() => (imgMode ? setImgSel((x) => ({ ...x, [p.id]: !x[p.id] })) : !out && add(p))}>
+              <div key={p.id} className={"item" + (out && !imgMode ? " out" : "") + (imgMode ? " sel-mode" + (imgSel[p.id] ? " sel" : "") : "")} title={out && !imgMode ? (canOversell ? "الرصيد المسجل صفر — اضغط للبيع بعد التأكيد" : "الرصيد صفر") : undefined} onClick={() => { if (imgMode) return setImgSel((x) => ({ ...x, [p.id]: !x[p.id] })); if (!out) return add(p); if (!canOversell) return toast(`الرصيد المسجل للصنف «${p.name}» صفر، والمنشأة تمنع البيع بلا رصيد`, "err"); if (oversellOk.current[p.id] || confirmDlg(`الرصيد المسجل للصنف «${p.name}» صفر.\n\nهل البضاعة موجودة فعلاً أمامك وتريد بيعها؟ سيُسجَّل التخطي باسمك ويظهر الصنف بالسالب حتى يُسجَّل الوارد.`)) { oversellOk.current[p.id] = true; add(p); } }}>
                 {imgMode && <input type="checkbox" className="sel-ck" checked={!!imgSel[p.id]} readOnly />}
                 <div className="img" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor } : {}}>{p.image ? <img src={p.image} alt="" loading="lazy" /> : EMOJI[p.category] || "📦"}</div>
                 {imgMode && <button className="btn sm img-edit" title="صورة هذا الصنف" onClick={(e) => { e.stopPropagation(); setImgEdit([p]); }}>{p.image ? "✎ تغيير" : "＋ صورة"}</button>}
@@ -286,9 +289,10 @@ export function PosPage() {
         <div className="pay"><button className="btn primary lg block" disabled={!cart.length || busy} onClick={() => setPayOpen(true)}>الدفع (F5)</button></div>
       </div>
       {payOpen && <PayModal total={totals.total} partner={partner} loyalty={loyalty} online={online} onClose={() => setPayOpen(false)} onPay={(tenders, redeemPoints) => run(async () => {
-        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: Math.round((l.unitPrice - (l.modsPrice || 0)) * 100) / 100, discountPct: l.discountPct, uomId: l.uom?.id || null, ...(l.mods?.length ? { modifiers: l.mods.map((m) => m.optionId) } : {}) })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString(), ...(order ? { orderId: order.id, waiveServiceCharge: waiveSvc || undefined, paidLines: splitting ? cart.map((l) => ({ key: lineKey(l), qty: l.qty })) : undefined } : {}) };
+        const body = { sessionId: session.id, partnerId: partner?.id || null, discountPct: ticketDisc, redeemPoints: redeemPoints || undefined, lines: cart.map((l) => ({ productId: l.product.id, qty: l.qty, unitPrice: Math.round((l.unitPrice - (l.modsPrice || 0)) * 100) / 100, discountPct: l.discountPct, uomId: l.uom?.id || null, ...(l.mods?.length ? { modifiers: l.mods.map((m) => m.optionId) } : {}) })), tenders, clientRef: crypto.randomUUID(), issuedAt: new Date().toISOString(), ...(cart.some((l) => oversellOk.current[l.product.id]) ? { allowOversell: true } : {}), ...(order ? { orderId: order.id, waiveServiceCharge: waiveSvc || undefined, paidLines: splitting ? cart.map((l) => ({ key: lineKey(l), qty: l.qty })) : undefined } : {}) };
         const paidOrder = order, wasSplit = splitting;
         const finish = (inv: any) => {
+          oversellOk.current = {};
           setPayOpen(false); setCart([]); setPartner(null); setTicketDisc(0); setWaiveSvc(false); setDone(paidOrder && !inv.tableName ? { ...inv, tableName: paidOrder.tableName, orderType: paidOrder.type, orderNo: paidOrder.number } : inv);
           if (!paidOrder) return;
           setSplitting(false);
@@ -298,7 +302,15 @@ export function PosPage() {
         };
         if (!navigator.onLine) { setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("لا يوجد اتصال — حُفظت العملية وستُرحّل تلقائياً عند عودة الاتصال", "info"); return; }
         try {
-          const inv = await api("/pos/sale", { body });
+          let inv: any;
+          try { inv = await api("/pos/sale", { body }); }
+          catch (e: any) {
+            // not enough recorded stock: the cashier may confirm and sell anyway (unless the establishment blocks it)
+            if (e.code !== "INSUFFICIENT_STOCK" || me.company?.accounting?.pos?.oversell === "BLOCK") throw e;
+            if (!confirmDlg(`${e.message}\n\nالرصيد المسجل لا يكفي. هل البضاعة موجودة فعلاً أمامك وتريد إتمام البيع؟ سيُسجَّل التخطي باسمك ويظهر الصنف بالسالب حتى يُسجَّل الوارد.`)) throw e;
+            inv = await api("/pos/sale", { body: { ...body, allowOversell: true } });
+            toast("تم البيع مع تخطي الرصيد — بلّغ المحاسب لتسجيل الوارد", "info");
+          }
           finish(inv); sess.reload(); products.reload();
         } catch (e: any) {
           if (e.code !== "OFFLINE") throw e;
@@ -345,12 +357,14 @@ function PayModal({ total: gross, partner, loyalty, online, onClose, onPay }: { 
   const change = method === "CASH" ? Math.max(0, cashN - total) : method === "MIXED" ? Math.max(0, cashN + cardN - total) : 0;
   const short = method === "MIXED" && card !== "" ? Math.max(0, total - cashN - cardN) : 0;
   // «remainder» tenders (amount null) let the server settle the exact total, so a rounding cent never blocks the sale
+  const [ref, setRef] = useState("");
+  const cardRef = ref.trim() ? { ref: ref.trim() } : {};
   const submit = () => {
     if (!ptsOk) return;
     const r = pts > 0 ? pts : undefined;
     if (method === "CASH") onPay([{ method: "CASH", amount: cashN > total ? cashN : null }], r);
-    else if (method === "CARD") onPay([{ method: "CARD", amount: null }], r);
-    else if (method === "MIXED") { if (short > 0) return; onPay(cashN >= total ? [{ method: "CASH", amount: cashN }] : [{ method: "CASH", amount: cashN }, { method: "CARD", amount: null }], r); }
+    else if (method === "CARD") onPay([{ method: "CARD", amount: null, ...cardRef }], r);
+    else if (method === "MIXED") { if (short > 0) return; onPay(cashN >= total ? [{ method: "CASH", amount: cashN }] : [{ method: "CASH", amount: cashN }, { method: "CARD", amount: null, ...cardRef }], r); }
     else onPay([{ method: "CREDIT", amount: null }], r);
   };
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Enter" && !(e.target as HTMLElement)?.dataset?.pts) { e.preventDefault(); submit(); } }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); });
@@ -373,6 +387,7 @@ function PayModal({ total: gross, partner, loyalty, online, onClose, onPay }: { 
         {method === "CASH" && <div className="row" style={{ gap: 6 }}>{quick.map((v) => <button key={v} className="btn sm" onClick={() => setCash(String(v))}>{money(v)}</button>)}</div>}
         {method === "MIXED" && <Field label="مبلغ الشبكة / البطاقة"><NumInput value={card} onChange={(e) => setCard(e.target.value)} placeholder={money(Math.max(0, total - cashN))} style={{ fontSize: 22, textAlign: "center" }} /></Field>}
         {method === "CARD" && <div className="alert info">سيُسجل المبلغ كاملاً على حساب تسوية مدى/البطاقات.</div>}
+        {(method === "CARD" || method === "MIXED") && <Field label="رقم العملية على جهاز الشبكة (اختياري)" hint="رقم الموافقة أو المرجع من إيصال الجهاز — تُطابَق به العملية مع كشف البنك"><Input data-pts="1" data-card-ref value={ref} onChange={(e) => setRef(e.target.value)} dir="ltr" maxLength={40} /></Field>}
         {method === "CREDIT" && (partner ? <div className="alert warn">سيُسجل المبلغ على حساب العميل <b>{partner.name}</b> (آجل) ويُسدد لاحقاً بسند قبض.</div> : <div className="alert err">البيع الآجل يتطلب اختيار عميل مسجل أولاً.</div>)}
         {change > 0 && <div className="alert ok" style={{ fontSize: 18, textAlign: "center" }}>الباقي للعميل: <b className="num">{money(change)}</b></div>}
         {short > 0 && <div className="alert err">المتبقي غير المدفوع: <b className="num">{money(short)}</b></div>}

@@ -5,7 +5,7 @@
  * downstream — preview of the real entry, confirmation, posting — is shared. When a request is beyond it, it returns
  * `escalate` and the caller may hand the turn to the advanced model.
  */
-import { EXPENSE_KINDS, GUIDES, TOPICS, ABOUT, PROBLEMS, LESSON_KEYS, ExpenseKind } from "./aiKnowledge";
+import { EXPENSE_KINDS, GUIDES, TOPICS, ABOUT, PROBLEMS, LESSON_KEYS, FAQ, ExpenseKind } from "./aiKnowledge";
 import { LESSONS } from "../shared/lessons";
 
 export type LocalCtx = { accounts: any[]; cash: any[]; today: string; vatRate: number; currency: string; subscription?: { active: boolean; readOnly: boolean; daysLeft: number | null; reason?: string; plan?: string; maxUsers?: number; desktop?: boolean; device?: string | null } };
@@ -347,6 +347,44 @@ function auditAnswer(r: any, cur: string): string {
   out.push("الملاحظة ليست خطأً بالضرورة؛ راجعها، وما تأكدت منه علّمه «مبرَّرة» في [المدقق الذكي](/auditor).");
   return out.join("\n\n");
 }
+function clearingAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const m = (v: number) => `${money(v)} ${cur}`;
+  if (!r.sources?.length) return "لا توجد قنوات تسوية مفعّلة.";
+  const out: string[] = [];
+  for (const s of r.sources) {
+    const to = s.source === "CARD" ? "/bank/card-settlement" : `/estore/settlement?s=${s.source}`;
+    if (!s.openCount) { out.push(`**${s.name}:** لا شيء معلّق — كل العمليات وصلت البنك ✓`); continue; }
+    out.push(`**${s.name}:** ${s.openCount} عملية لم تصل البنك بإجمالي **${m(s.openTotal)}**${s.late.n ? `، منها ${s.late.n} متأخرة بـ ${m(s.late.total)}` : ""}. [افتح التسوية](${to})`);
+    if (s.oldest?.length) out.push(s.oldest.map((o: any) => `- ${o.number} بتاريخ ${o.date}: ${m(o.amount)} (منذ ${o.age} يوم)`).join("\n"));
+    if (s.unmatched) out.push(`⛔ ${s.unmatched} عملية في كشف التسوية بلا بيع مسجل في النظام.`);
+    if (Math.abs(s.unexplained) > 0.01) out.push(`⚠ فرق ${m(s.unexplained)} بين العمليات المفتوحة ورصيد حساب التسوية — حركة على الحساب خارج البيع والتسوية.`);
+    if (s.fees) out.push(`العمولات الفعلية حتى الآن ${m(s.fees)} (${s.feePct}% من المسوّى).`);
+  }
+  return out.join("\n");
+}
+function estoreAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const m = (v: number) => `${money(v)} ${cur}`, T = r.totals || {};
+  if (!T.orders) return `لا توجد طلبات متاجر إلكترونية بين ${r.from} و${r.to}.`;
+  const out = [`**ربحية المتاجر الإلكترونية** (${r.from} إلى ${r.to}): ${T.orders} طلباً، الإيراد ${m(T.revenue)} − التكلفة ${m(T.cogs)} − عمولات المنصات ${m(T.fee)} = **صافي ${m(T.profit)}** (هامش ${T.margin}%).`];
+  if (T.estimated) out.push(`${T.estimated} طلب بعمولة مقدَّرة لأنه لم يُسوَّ مع كشف المنصة بعد.`);
+  if (T.losing) out.push(`⚠ ${T.losing} طلب خاسر. الأسوأ:\n${(r.worst || []).filter((o: any) => o.profit < 0).map((o: any) => `- ${o.number}: ${m(o.profit)}`).join("\n")}`);
+  if (r.best?.length) out.push(`الأربح للوحدة: ${r.best.slice(0, 3).map((p: any) => `${p.name} (${m(p.profitPerUnit)} للوحدة)`).join("، ")}.`);
+  out.push("[التفصيل لكل طلب ووحدة](/estore/profit)");
+  return out.join("\n");
+}
+function gapsAnswer(r: any): string {
+  if (r.error) return r.error;
+  const li = (a: any[]) => a.slice(0, 12).map((x: any) => `- ${x.name}${x.sku ? ` (${x.sku})` : ""}: ${Number(x.qty)}`).join("\n");
+  const out: string[] = [];
+  if (r.negative?.length) out.push(`**رصيدها بالسالب (${r.negative.length})** — بيعت قبل تسجيل الوارد، سجّل فاتورة الشراء أو الجرد:\n${li(r.negative)}`);
+  if (r.out?.length) out.push(`**نفدت (${r.out.length}):**\n${li(r.out)}`);
+  if (r.low?.length) out.push(`**عند حد إعادة الطلب (${r.low.length}):**\n${li(r.low)}`);
+  if (!out.length) return "لا يوجد صنف نافد أو تحت حد إعادة الطلب ✓";
+  out.push("[إعادة الطلب وإنشاء أوامر الشراء](/reorder)");
+  return out.join("\n\n");
+}
 function forecastAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const m = (v: number) => `${money(v)} ${cur}`;
@@ -545,6 +583,9 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "books_check") return say(checkAnswer(res), NEXT.check);
     if (prev.name === "journal_audit") return say(auditAnswer(res, ctx.currency), ["افحص الدفاتر", "توقع السيولة للأسابيع القادمة"]);
     if (prev.name === "cash_forecast") return say(forecastAnswer(res, ctx.currency), ["من لم يسدد؟", "كم علينا للموردين؟", "دقق القيود"]);
+    if (prev.name === "clearing_status") return say(clearingAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "ربحية طلبات المتاجر", "افحص الدفاتر"]);
+    if (prev.name === "estore_profit") return say(estoreAnswer(res, ctx.currency), ["كم لم يصل من المنصات؟", "أرباح هذا الشهر"]);
+    if (prev.name === "stock_gaps") return say(gapsAnswer(res), ["كيف أعمل جرد", "إعادة الطلب"]);
     if (prev.name === "business_query") return say(dataAnswer(res, ctx.currency), NEXT[res.metric] || NEXT.summary);
     if (prev.name === "partner_balance") return say(partnerAnswer(res, ctx.currency), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `رصيد ${prev.input.role === "SUPPLIER" ? "المورد" : "العميل"} ${x}`) : undefined);
     if (prev.name === "financial_analysis") return say(analysisAnswer(res, ctx.currency, prev.input.label), NEXT.analysis);
@@ -590,6 +631,15 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   // «افتح … / أين شاشة …»: the screen itself, as a link
   { const nv = n.match(/^(?:افتح|افتحي|اذهب (?:الي|الى|ل)|انتقل (?:الي|الى|ل)|خذني (?:الي|الى|ل)|وديني (?:ل|علي|على)|اين (?:اجد|شاشه|صفحه)|وين (?:الاقي|شاشه|صفحه)|اريد فتح|ابغي افتح) ?(?:شاشه|صفحه|قائمه)? ?(.+?)\s*[؟?]?$/);
     if (nv && nv[1].length > 2 && !a.amount) { const hits = screensFor(nv[1], ctx.vatRate === 14); if (hits.length) return say(hits.length === 1 ? `[افتح ${hits[0].label}](${hits[0].to})` : `أقرب الشاشات لما طلبت:\n${hits.map((x) => `- [${x.label}](${x.to})`).join("\n")}`); } }
+  // live figures of the clearing accounts, e-store profit and stock gaps; then the direct answers
+  if (!a.amount && !wantsRecord(n)) {
+    if (/(كم|ايش|وش|ما|اللي|التي|لم|ما ) ?.{0,25}(ما وصل|لم يصل|لم تصل|ما نزل|ما سمع|معلق|معلقه|باقي) .{0,20}(الشبكه|شبكه|مدي|مدى|البنك|المنصه|المنصات|سله|زد)|(مبيعات|عمليات) (ال)?(شبكه|مدي|مدى) .{0,25}(ما وصل|لم تصل|معلق|البنك)|(مستحق|مستحقات|فلوس|فلوسي) .{0,12}(عند|لدي|لدى) (سله|زد|المنصه|المنصات)|كم لم يصل/.test(n))
+      return call("clearing_status", /سله/.test(n) ? { source: "SALLA" } : /(^| )زد( |$)/.test(n) ? { source: "ZID" } : /شبكه|مدي|مدى/.test(n) ? { source: "CARD" } : {});
+    if (/(ربح|ربحيه|ارباح|خساره|مكسب) .{0,15}(طلبات|طلب|متجر|المتاجر|سله|زد|المنصه|الاونلاين)|(طلبات|متجر) .{0,15}(خاسره|رابحه)/.test(n)) { const per = parsePeriod(n, ctx.today); return call("estore_profit", { ...(per.explicit ? { from: per.from, to: per.to } : {}), ...(/سله/.test(n) ? { platform: "SALLA" } : /(^| )زد( |$)/.test(n) ? { platform: "ZID" } : {}) }); }
+    if (/(اصناف|منتجات|بضاعه|صنف) .{0,20}(خلصت|خلص|نفدت|نفد|انتهت|بالسالب|سالب|رصيدها صفر)|(وش|ايش|ما) (اللي|الذي) (خلص|نفد)/.test(n)) return call("stock_gaps", {});
+    const fq = FAQ.find((f) => !(f.sa && ctx.vatRate === 14) && !(f.eg && ctx.vatRate !== 14) && hit(f.keys, a.raw, n));
+    if (fq) return say(`**${fq.title}**\n\n${fq.text}`);
+  }
   // the establishment's own figures, a named partner's balance, and a health check of the books
   if (!wantsRecord(n)) {
     const pm = n.match(/(?:رصيد|مديونيه|مستحقات|كم (?:على|علي|ل|عند)|كشف حساب|حساب) ?(?:ال)?(عميل|مورد) (.+?)(?=\s*(?:؟|\?|$| الان| حاليا| اليوم))/);
@@ -621,7 +671,7 @@ ${pr.text}
       const im = n.match(/(?:صنف|الصنف|منتج|المنتج|ماده|الماده|سلعه|السلعه) (.+?)(?=\s*(?:؟|\?|$| هذا | هذه | خلال | في شهر | الشهر | اليوم| امس| الان| اخر | منذ | هذا$| السنه| الاسبوع))/);
       if (im && im[1].trim().length > 1 && /(كم|ما |مبيعات|بعنا|مخزون|رصيد|كميه|سعر|تكلفه|ربح|متوفر|باقي|تحرك|حركه|معلومات|بيانات|تفاصيل)/.test(n) && !/(اكثر|اعلي|افضل|اكبر) /.test(n)) return call("product_info", { query: im[1].trim().replace(/^(اسمه|رقم|رمز|كود) /, ""), from: per.from, to: per.to, label: per.label });
       // VAT position
-      if (/(كم|مبلغ|صافي|مقدار|قيمه|احسب|ما ) ?.*(ضريبه القيمه المضافه|الضريبه المستحقه|ضريبه المخرجات|ضريبه المدخلات|(ال)?ضريبه (علينا|المطلوب|التي|اللي))|كم (علينا|ندفع|سندفع|ادفع) (من )?(ال)?(ضريبه|للضريبه|للهيئه|للزكاه والضريبه)|موقف(نا)? (ال)?ضريبي|(الضريبه|ضريبه) (هذا |ه)?(الربع|الشهر) كم/.test(n)) {
+      if (/كم (علي|عليا|باقي علي) (من )?(ال)?ضريب|(كم|مبلغ|صافي|مقدار|قيمه|احسب|ما ) ?.*(ضريبه القيمه المضافه|الضريبه المستحقه|ضريبه المخرجات|ضريبه المدخلات|(ال)?ضريبه (علينا|المطلوب|التي|اللي))|كم (علينا|ندفع|سندفع|ادفع) (من )?(ال)?(ضريبه|للضريبه|للهيئه|للزكاه والضريبه)|موقف(نا)? (ال)?ضريبي|(الضريبه|ضريبه) (هذا |ه)?(الربع|الشهر) كم/.test(n)) {
         const q0 = Math.floor((+ctx.today.slice(5, 7) - 1) / 3) * 3 + 1;
         return call("vat_position", per.explicit ? { from: per.from, to: per.to, label: per.label } : eg ? { from: per.from, to: per.to, label: "هذا الشهر" } : { from: iso(+ctx.today.slice(0, 4), q0, 1), to: ctx.today, label: "هذا الربع" });
       }

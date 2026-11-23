@@ -1,5 +1,6 @@
 /** Financial reports, all computed from journal_lines (single source of truth). */
 import { remitAlerts } from "./payremit";
+import { clearingAlerts } from "./clearing";
 import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
 import { provisionTotals } from "./hr";
@@ -404,6 +405,9 @@ export async function vatReturn(t: Db, companyId: string, q: any) {
   // e-store platform commissions (Salla/Zid payouts) carry deductible input VAT
   const payoutFees = await t.rows(`SELECT 'S' tax_code, COALESCE(SUM(fees),0) net, COALESCE(SUM(fee_vat),0) vat FROM estore_payouts WHERE company_id=$1 AND status='POSTED' AND fee_vat > 0 AND date BETWEEN $2 AND $3`, [companyId, from, to]);
   exp.push(...payoutFees.filter((r) => Number(r.vat) > 0));
+  // fees of card-terminal and platform settlements (clearing batches): the bank's / platform's tax invoice, deductible input VAT
+  const clearingFees = await t.rows(`SELECT 'S' tax_code, COALESCE(SUM(fees),0) net, COALESCE(SUM(fee_vat),0) vat FROM clearing_batches WHERE company_id=$1 AND status='POSTED' AND fee_vat > 0 AND date BETWEEN $2 AND $3`, [companyId, from, to]);
+  exp.push(...clearingFees.filter((r) => Number(r.vat) > 0));
   const assets = await t.rows(
     `SELECT COALESCE(SUM(l.debit - l.credit),0) vat FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
      WHERE a.company_id=$1 AND a.system_key='VAT_IN' AND e.type='ASSET' AND e.status='POSTED' AND e.date BETWEEN $2 AND $3`, [companyId, from, to]);
@@ -615,6 +619,9 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
   for (const a of await remitAlerts(t, companyId)) items.push(a);
+  for (const a of await clearingAlerts(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]))) items.push(a);
+  const negStock = await n(`SELECT COUNT(DISTINCT b.product_id)::int c FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 AND b.qty < -0.0005 AND p.is_active`, [companyId]);
+  if (negStock.c) items.push({ level: "warn", text: `${negStock.c} صنف رصيده بالسالب (بيع قبل تسجيل الوارد) — سجّل فاتورة الشراء أو الجرد لتصحيح الكمية والتكلفة`, to: "/inventory", count: negStock.c });
   if (co.plan === "TRIAL" && co.subscriptionEndsAt) { const dl = Math.round((new Date(co.subscriptionEndsAt).getTime() - Date.parse(td)) / 86400000); if (dl <= 7) items.push({ level: dl < 0 ? "err" : "warn", text: dl < 0 ? "انتهت الفترة التجريبية — فعّل الترخيص" : `تنتهي الفترة التجريبية خلال ${dl} يوم`, to: "/settings/license" }); }
   if (IS_EG) {
     // Egypt: Form 41 — quarters with deducted tax not yet remitted (due the end of the month after the quarter)
