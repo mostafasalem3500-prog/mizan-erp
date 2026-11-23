@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ميزان بكفّتين — رمز التطبيق -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#C9A227" android:pathData="M52,30h4v44h-4z" />
+    <path android:fillColor="#C9A227" android:pathData="M32,36h44v4h-44z" />
+    <path android:fillColor="#C9A227" android:pathData="M42,74h24v4h-24z" />
+    <path android:fillColor="#C9A227" android:pathData="M54,26m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#F3E7B8" android:pathData="M24,56h20a10,8 0,0 1,-20 0z" />
+    <path android:fillColor="#F3E7B8" android:pathData="M64,56h20a10,8 0,0 1,-20 0z" />
+    <path android:strokeColor="#C9A227" android:strokeWidth="1.6" android:pathData="M34,40L25,56M34,40L43,56M74,40L65,56M74,40L83,56" />
+</vector>

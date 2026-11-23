@@ -6,3 +6,12 @@ apps/api/web/dist/
 apps/desktop/release/
 apps/desktop/server/
 __pycache__/
+
+# ميزان لايت (أندرويد)
+apps/lite/android/app/src/main/assets/
+apps/lite/android/.gradle/
+apps/lite/android/app/build/
+apps/lite/android/build/
+apps/lite/preview/
+apps/lite/shots/
+apps/lite/*.apk

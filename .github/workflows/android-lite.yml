@@ -1,0 +1,101 @@
+# بناء ملف APK لنسخة «ميزان لايت» (apps/lite) بأدوات أندرويد الرسمية.
+#
+# التوقيع: مخزن المفاتيح المشفَّر في apps/lite/android/keystore/mizan-lite.p12، وكلمة مروره في السر
+#   LITE_KEYSTORE_PASSWORD  (Settings ← Secrets and variables ← Actions).
+# بدون السر يُبنى الملف بتوقيع تجريبي متغيّر: يصلح للتجربة فقط، ولا يُثبَّت فوقه تحديث لاحق.
+#
+# النشر: كل بناء يُحدّث الإصدار التجريبي المتجدد «lite-test». ومع release=true وتوفر السر يُنشر lite-vX.Y.Z.
+# كل إصدارات لايت تُنشر بـ --latest=false حتى لا يتعطل التحديث التلقائي لنسخة سطح المكتب.
+name: Android Lite
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'نشر كإصدار رسمي lite-vX.Y.Z (يتطلب سر التوقيع)'
+        type: boolean
+        default: false
+  push:
+    branches-ignore: [main]
+    paths: ['apps/lite/**', '.github/workflows/android-lite.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-lite
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/lite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Test the accounting engine and bundle the app
+        run: |
+          npm install --no-audit --no-fund
+          node test/engine.test.js
+          node build.js
+          V=$(node -p "require('./package.json').version")
+          grep -q "VERSION = '$V'" src/core.js || { echo "::error::رقم الإصدار في package.json لا يطابق src/core.js"; exit 1; }
+          echo "LITE_VERSION=$V" >> "$GITHUB_ENV"
+      - name: Signing key
+        env:
+          KSP: ${{ secrets.LITE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KSP" ]; then
+            echo "LITE_KEYSTORE_FILE=$PWD/android/keystore/mizan-lite.p12" >> "$GITHUB_ENV"
+            echo "LITE_SIGNED=1" >> "$GITHUB_ENV"
+          else
+            echo "LITE_SIGNED=0" >> "$GITHUB_ENV"
+            echo "::warning::السر LITE_KEYSTORE_PASSWORD غير مضبوط — الملف بتوقيع تجريبي للتجربة فقط"
+          fi
+      - name: Build APK
+        env:
+          LITE_KEYSTORE_PASSWORD: ${{ secrets.LITE_KEYSTORE_PASSWORD }}
+          LITE_KEY_PASSWORD: ${{ secrets.LITE_KEYSTORE_PASSWORD }}
+          LITE_KEY_ALIAS: mizanlite
+        run: |
+          cd android
+          gradle --no-daemon assembleRelease -PliteVersionName="$LITE_VERSION" -PliteVersionCode="${{ github.run_number }}"
+          SUFFIX=""; [ "$LITE_SIGNED" = "1" ] || SUFFIX="-test"
+          APK="mizan-lite-$LITE_VERSION$SUFFIX.apk"
+          cp app/build/outputs/apk/release/app-release.apk "../$APK"
+          echo "LITE_APK=$APK" >> "$GITHUB_ENV"
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --verbose --print-certs "../$APK" | head -12
+          "$ANDROID_HOME/build-tools/$BT/aapt2" dump badging "../$APK" | head -6
+          ls -la "../$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mizan-lite-apk
+          path: apps/lite/mizan-lite-*.apk
+      - name: Publish rolling test build (lite-test)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete lite-test --yes --cleanup-tag >/dev/null 2>&1 || true
+          NOTE="بناء تجريبي متجدد لميزان لايت — الإصدار $LITE_VERSION (تشغيل ${{ github.run_number }}، الفرع ${{ github.ref_name }})."
+          [ "$LITE_SIGNED" = "1" ] && NOTE="$NOTE موقّع بالمفتاح الرسمي." || NOTE="$NOTE توقيع تجريبي: للتجربة فقط."
+          cp "$LITE_APK" mizan-lite-build.apk
+          gh release create lite-test mizan-lite-build.apk --target "${{ github.sha }}" --title "ميزان لايت — بناء تجريبي" --notes "$NOTE" --prerelease --latest=false
+      - name: Publish official release (lite-vX.Y.Z)
+        if: ${{ inputs.release && env.LITE_SIGNED == '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "lite-v$LITE_VERSION" "$LITE_APK" --target "${{ github.sha }}" --title "ميزان لايت $LITE_VERSION" --notes "نسخة الأساسيات لأجهزة أندرويد (أندرويد 5.0 فأحدث). نزّل $LITE_APK وثبّته." --latest=false

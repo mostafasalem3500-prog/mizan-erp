@@ -1,0 +1,8 @@
+{
+  "name": "mizan-lite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ميزان لايت — نسخة الأساسيات (نقطة بيع ومحاسبة) لأجهزة أندرويد، تعمل بلا إنترنت",
+  "scripts": { "build": "node build.js", "test": "node test/engine.test.js" },
+  "devDependencies": { "qrcode-generator": "1.4.4", "@fontsource/tajawal": "^5.0.0" }
+}

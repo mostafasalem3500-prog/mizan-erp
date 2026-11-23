@@ -1,0 +1,33 @@
+plugins { id 'com.android.application' }
+
+// مفتاح التوقيع يُقرأ من متغيرات البيئة (أسرار GitHub). بدونها يُوقَّع بمفتاح debug للتجربة فقط.
+def ksFile = System.getenv('LITE_KEYSTORE_FILE')
+
+android {
+    namespace 'sa.mizanerp.lite'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'sa.mizanerp.lite'
+        minSdk 21
+        targetSdk 34
+        versionCode((project.findProperty('liteVersionCode') ?: '1') as Integer)
+        versionName(project.findProperty('liteVersionName') ?: '1.0.0')
+    }
+    signingConfigs {
+        release {
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv('LITE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('LITE_KEY_ALIAS')
+                keyPassword System.getenv('LITE_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig ksFile ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+}

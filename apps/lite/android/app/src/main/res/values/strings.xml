@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ميزان لايت</string>
+    <color name="navy">#14274E</color>
+    <color name="gold">#C9A227</color>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/navy</item>
+        <item name="android:navigationBarColor">@color/navy</item>
+        <item name="android:colorAccent">@color/gold</item>
+        <item name="android:windowBackground">@color/navy</item>
+    </style>
+</resources>
