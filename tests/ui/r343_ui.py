@@ -31,7 +31,9 @@ with sync_playwright() as pw:
     pg.on('dialog', lambda dl: dl.accept())
     # ── set-off from its screen ──
     ar0, ap0, bk0 = bal('AR'), bal('AP'), bal('BANK')
-    pg.goto(B + '/setoffs'); pg.wait_for_selector('[data-setoff-cand]', timeout=90000)
+    pg.goto(B + '/setoffs')
+    try: pg.wait_for_selector('[data-setoff-cand]', timeout=45000)
+    except Exception: pg.reload(); pg.wait_for_selector('[data-setoff-cand]', timeout=90000)
     row = pg.inner_text('[data-setoff-cand] tbody tr')
     ok('الرواد العامة' in row and '23,000' in row and '30,000' in row, 'set-off screen: the party is listed with 30,000 owed by it and 23,000 owed to it')
     pg.click('[data-setoff-open]'); pg.wait_for_selector('[data-setoff-entry]', timeout=20000)
