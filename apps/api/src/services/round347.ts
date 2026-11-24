@@ -14,6 +14,7 @@ import { incomeStatement } from "./reports";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const iso = (d: any) => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
 export const TZ = IS_EG ? "Africa/Cairo" : "Asia/Riyadh";
+// document dates are set on Riyadh time in both editions (lib/core today()): a recorded time counts when it falls on that date
 /** SQL: the given category ids and every sub category below them. */
 export const CAT_TREE = (param = "?") => `(WITH RECURSIVE ct AS (SELECT id FROM product_categories WHERE id = ANY(${param}::uuid[]) UNION SELECT c.id FROM product_categories c JOIN ct ON c.parent_id=ct.id) SELECT id FROM ct)`;
 const SIGN = "CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END";
@@ -143,7 +144,7 @@ export async function pulse(t: Db, C: string, q: { period?: string; branchId?: s
   const [cc, cp] = await Promise.all([coll(P.from, P.to), coll(P.pFrom, P.pTo)]);
   const hourly = P.key === "today";
   const series = await t.rows(hourly
-    ? `SELECT CASE WHEN (i.issued_at AT TIME ZONE '${TZ}')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END k, SUM(i.taxable*COALESCE(i.exchange_rate,1)*${SIGN}) net FROM invoices i WHERE ${SALES} AND i.date=$2 ${B ? "AND i.branch_id=$3" : ""} GROUP BY 1 ORDER BY 1`
+    ? `SELECT CASE WHEN (i.issued_at AT TIME ZONE 'Asia/Riyadh')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END k, SUM(i.taxable*COALESCE(i.exchange_rate,1)*${SIGN}) net FROM invoices i WHERE ${SALES} AND i.date=$2 ${B ? "AND i.branch_id=$3" : ""} GROUP BY 1 ORDER BY 1`
     : `SELECT i.date::text k, SUM(i.taxable*COALESCE(i.exchange_rate,1)*${SIGN}) net FROM invoices i WHERE ${SALES} AND i.date BETWEEN $2 AND $3 ${B ? "AND i.branch_id=$4" : ""} GROUP BY 1 ORDER BY 1`,
     hourly ? (B ? [C, P.from, B] : [C, P.from]) : (B ? [C, P.from, P.to, B] : [C, P.from, P.to]));
   const sm = new Map(series.map((r: any) => [String(r.k), Number(r.net)]));
@@ -171,7 +172,7 @@ export async function pulse(t: Db, C: string, q: { period?: string; branchId?: s
 export async function heatmap(t: Db, C: string, q: { days?: number; branchId?: string | null }) {
   const days = Math.min(365, Math.max(7, Math.round(num(q.days) || 28)));
   const B = q.branchId && UUID.test(q.branchId) ? q.branchId : null;
-  const rows = await t.rows(`SELECT EXTRACT(DOW FROM i.date)::int d, CASE WHEN (i.issued_at AT TIME ZONE '${TZ}')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END h, COUNT(*) FILTER (WHERE i.kind='INVOICE')::int n, SUM(i.taxable*COALESCE(i.exchange_rate,1)*${SIGN}) net
+  const rows = await t.rows(`SELECT EXTRACT(DOW FROM i.date)::int d, CASE WHEN (i.issued_at AT TIME ZONE 'Asia/Riyadh')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END h, COUNT(*) FILTER (WHERE i.kind='INVOICE')::int n, SUM(i.taxable*COALESCE(i.exchange_rate,1)*${SIGN}) net
       FROM invoices i WHERE ${SALES} AND i.date > CURRENT_DATE - $2::int ${B ? "AND i.branch_id=$3" : ""} GROUP BY 1,2`, B ? [C, days, B] : [C, days]);
   const all = rows.map((r: any) => ({ day: r.d, hour: r.h, docs: r.n, net: r2(Number(r.net)) }));
   const cells = all.filter((c) => c.hour !== null && c.hour !== undefined);
@@ -189,7 +190,7 @@ export async function heatmap(t: Db, C: string, q: { days?: number; branchId?: s
 const DIMS: Record<string, [string, string]> = {
   category: ["التصنيف", "COALESCE(pc.name,'بلا تصنيف')"], product: ["الصنف", "COALESCE(p.name, l.description)"], customer: ["العميل", "COALESCE(i.partner_name,'عميل نقدي')"],
   day: ["اليوم", "i.date::text"], month: ["الشهر", "to_char(i.date,'YYYY-MM')"], weekday: ["يوم الأسبوع", `EXTRACT(DOW FROM i.date)::int`],
-  hour: ["الساعة", `CASE WHEN (i.issued_at AT TIME ZONE '${TZ}')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END`], branch: ["الفرع", "COALESCE(b.name,'—')"], channel: ["القناة", "COALESCE(i.channel,'—')"], cashier: ["الموظف", "COALESCE(i.created_by,'—')"],
+  hour: ["الساعة", `CASE WHEN (i.issued_at AT TIME ZONE 'Asia/Riyadh')::date = i.date THEN EXTRACT(HOUR FROM i.issued_at AT TIME ZONE '${TZ}')::int END`], branch: ["الفرع", "COALESCE(b.name,'—')"], channel: ["القناة", "COALESCE(i.channel,'—')"], cashier: ["الموظف", "COALESCE(i.created_by,'—')"],
 };
 const WD = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 const CH: Record<string, string> = { POS: "نقطة البيع", SALLA: "سلة", ZID: "زد", API: "المتجر (API)", MANUAL: "فاتورة" };
