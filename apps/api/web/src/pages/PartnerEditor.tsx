@@ -128,7 +128,7 @@ export function PartnerEditor({ role, p, onClose }: { role: string; p: any; onCl
 
         <Sec>شروط التعامل</Sec>
         <Field label="أيام السداد (0 = نقدي)"><NumInput value={f.paymentTerms} onChange={s("paymentTerms")} /></Field>
-        <Field label="حد الائتمان"><NumInput value={f.creditLimit} onChange={s("creditLimit")} /></Field>
+        <Field label="حد الائتمان" hint={isCustomer && isSupplier ? "يُحتسب على الصافي: ما عليه كعميل ناقص ما له عندنا كمورد" : undefined}><NumInput value={f.creditLimit} onChange={s("creditLimit")} /></Field>
         <Field label="عملة التعامل" hint="الفواتير والسندات لهذا الطرف تُنشأ بها افتراضياً"><Select value={f.currency || CFG.currency} onChange={s("currency")}>{(currencies || [{ code: CFG.currency, nameAr: CFG.currencyAr }]).filter((c: any) => c.isActive !== false).map((c: any) => <option key={c.code} value={c.code}>{c.code} — {c.nameAr}</option>)}</Select></Field>
         <Field label="قائمة الأسعار" hint="تُطبَّق في فواتير البيع ونقطة البيع"><Select value={f.priceListId || ""} onChange={s("priceListId")}><option value="">— السعر الأساسي —</option>{(priceLists || []).filter((l: any) => l.isActive).map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select></Field>
         <Field label="التصنيف"><div className="row"><label className="check"><input type="checkbox" checked={!!f.isCustomer} onChange={s("isCustomer")} /> عميل</label><label className="check"><input type="checkbox" checked={!!f.isSupplier} onChange={s("isSupplier")} /> مورد</label>{p.id && <label className="check"><input type="checkbox" checked={!!f.isActive} onChange={s("isActive")} /> نشط</label>}</div></Field>

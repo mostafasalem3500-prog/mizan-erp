@@ -269,9 +269,16 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   if (isSale && inv.kind === "INVOICE" && !opts.tenders?.length && inv.partnerId && !opts.overrideCreditLimit) {
     const partner = await t.one(`SELECT credit_limit, name FROM partners WHERE id=$1`, [inv.partnerId]);
     if (Number(partner.creditLimit) > 0) {
-      const bal = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key='AR' AND e.status='POSTED'`, [companyId, inv.partnerId]);
-      const after = r2(D(bal.b).plus(inv.total));
-      if (after > Number(partner.creditLimit) + 0.001) throw new AppError(409, `تجاوز حد الائتمان للعميل «${partner.name}»: الرصيد بعد الفاتورة ${after.toFixed(2)} والحد ${Number(partner.creditLimit).toFixed(2)}. يمكن للمالك/المدير الترحيل مع التجاوز.`, "CREDIT_LIMIT", { balance: Number(bal.b), after, limit: Number(partner.creditLimit) });
+      // exposure = what the customer owes us, less what we owe the same party as a supplier (unless the company turned netting off)
+      const bal = await t.one(`SELECT COALESCE(SUM(l.debit-l.credit) FILTER (WHERE a.system_key='AR'),0) b, COALESCE(SUM(l.credit-l.debit) FILTER (WHERE a.system_key='AP'),0) ap FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE l.company_id=$1 AND l.partner_id=$2 AND a.system_key IN ('AR','AP') AND e.status='POSTED'`, [companyId, inv.partnerId]);
+      const co = await t.one(`SELECT COALESCE(accounting->>'creditNetting','NET') m FROM companies WHERE id=$1`, [companyId]);
+      const payable = co.m === "GROSS" ? 0 : Math.max(0, r2(bal.ap));
+      const gross = r2(D(bal.b).plus(D(inv.total).times(inv.exchangeRate || 1)));
+      const after = r2(gross - payable);
+      const lim = Number(partner.creditLimit);
+      if (after > lim + 0.001) throw new AppError(409, payable > 0
+        ? `تجاوز حد الائتمان للعميل «${partner.name}»: عليه بعد الفاتورة ${gross.toFixed(2)} وله عندنا كمورد ${payable.toFixed(2)}، فالصافي ${after.toFixed(2)} والحد ${lim.toFixed(2)}. يمكن للمالك/المدير الترحيل مع التجاوز.`
+        : `تجاوز حد الائتمان للعميل «${partner.name}»: الرصيد بعد الفاتورة ${after.toFixed(2)} والحد ${lim.toFixed(2)}. يمكن للمالك/المدير الترحيل مع التجاوز.`, "CREDIT_LIMIT", { balance: Number(bal.b), payable, gross, after, limit: lim });
     }
   }
 

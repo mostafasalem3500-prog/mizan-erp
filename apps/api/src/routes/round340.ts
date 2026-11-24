@@ -29,6 +29,12 @@ r340.post("/invoices/:id/reverse-return", perm("accounting.write"), h(async (req
   return r;
 }));
 r340.put("/users/:id/staff-no", perm("users.write"), h(async (req) => { const r = await tx((t) => r3.setStaffNo(t, cid(req), p(req).id, req.body?.staffNo)); await audit(req, "UPDATE", "user", p(req).id, { staffNo: r.staffNo }); return r; }));
+r340.put("/credit-netting", perm("settings.write"), h(async (req) => {
+  const v = req.body?.mode === "GROSS" ? "GROSS" : "NET";
+  await db.exec(`UPDATE companies SET accounting = jsonb_set(COALESCE(accounting,'{}'::jsonb), '{creditNetting}', to_jsonb($2::text)) WHERE id=$1`, [cid(req), v]);
+  await audit(req, "UPDATE", "settings", cid(req), { creditNetting: v });
+  return { mode: v };
+}));
 r340.put("/pos/oversell", perm("settings.write"), h(async (req) => {
   const v = req.body?.mode === "BLOCK" ? "BLOCK" : "ASK";
   await db.exec(`UPDATE companies SET accounting = jsonb_set(jsonb_set(COALESCE(accounting,'{}'::jsonb), '{pos}', COALESCE(accounting->'pos','{}'::jsonb)), '{pos,oversell}', to_jsonb($2::text)) WHERE id=$1`, [cid(req), v]);

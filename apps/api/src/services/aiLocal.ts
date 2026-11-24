@@ -404,7 +404,11 @@ function partnerAnswer(r: any, cur: string): string {
   if (r.isCustomer || r.receivable) lines.push(r.receivable > 0.005 ? `**${r.name}** مدين لنا بـ **${money(r.receivable)} ${cur}**.` : r.receivable < -0.005 ? `**${r.name}** له رصيد دائن **${money(-r.receivable)} ${cur}** (دفع مقدماً أو أكثر مما عليه).` : `**${r.name}**: لا رصيد عليه كعميل.`);
   if (r.isSupplier || r.payable) lines.push(r.payable > 0.005 ? `علينا له كمورد **${money(r.payable)} ${cur}**.` : r.payable < -0.005 ? `له عندنا رصيد مدين كمورد ${money(-r.payable)} (دفعنا أكثر مما علينا).` : r.isSupplier ? "لا رصيد له كمورد." : "");
   if (r.openCount) lines.push(`فواتير مفتوحة: ${r.openCount} بإجمالي ${money(r.openTotal)}${r.overdue > 0 ? `، منها **متأخر ${money(r.overdue)}**` : ""}:\n${r.open.map((o: any) => `- ${o.number} — تستحق ${o.due} — ${money(o.rest)}`).join("\n")}`);
-  if (r.creditLimit > 0 && r.receivable > r.creditLimit) lines.push(`⚠ تجاوز حد الائتمان (${money(r.creditLimit)}).`);
+  if (r.creditLimit > 0) {
+    const off = r.netting && r.payable > 0 ? r.payable : 0, net = r.receivable - off;
+    if (off && r.receivable > 0.005) lines.push(`بعد المقاصة مع ما له كمورد: الصافي عليه **${money(Math.max(0, net))} ${cur}**${net < 0 ? ` (والباقي له ${money(-net)})` : ""}.`);
+    lines.push(net > r.creditLimit ? `⚠ تجاوز حد الائتمان (${money(r.creditLimit)}).` : `حد الائتمان ${money(r.creditLimit)} — المتاح للبيع الآجل **${money(r.creditLimit - net)} ${cur}**.`);
+  }
   lines.push(`[فتح الملف وكشف الحساب](/${r.isSupplier && !r.isCustomer ? "suppliers" : "customers"}/${r.id})`);
   return lines.filter(Boolean).join("\n");
 }
