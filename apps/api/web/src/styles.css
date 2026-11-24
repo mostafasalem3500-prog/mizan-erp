@@ -118,10 +118,13 @@ textarea.input { min-height: 70px; resize: vertical; }
 .hint { font-size: 12px; color: var(--muted); }
 
 /* tables */
-.table-wrap { overflow: auto; }
+/* long tables scroll inside their frame so the column headings stay in view all the way down */
+.table-wrap { overflow: auto; max-height: calc(100vh - 150px); }
+.modal .table-wrap { max-height: 60vh; }
+@media print { .table-wrap { max-height: none !important; overflow: visible !important; } .tbl thead { display: table-header-group; } .tbl th { position: static; } .tbl tr { break-inside: avoid; } }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tbl th, .tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: start; vertical-align: middle; }
-.tbl th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 12.5px; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+.tbl th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 12.5px; white-space: nowrap; position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--border); }
 .tbl tr:hover td { background: #fafcfc; }
 .tbl tr.clickable { cursor: pointer; }
 .tbl td.n, .tbl th.n { text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }

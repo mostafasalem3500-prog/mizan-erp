@@ -8,8 +8,9 @@
  */
 import { Db } from "../db/pool";
 import { bad, conflict, num, r2, r3, isDate, today } from "../lib/core";
-import { nextNumber, post, reverse } from "../accounting/engine";
-import { applySettlement } from "./invoices";
+import { nextNumber, post, reverse, assertOpenDate } from "../accounting/engine";
+import { stockIn, stockOut } from "../accounting/stock";
+import { applySettlement, saveDraft, postInvoice } from "./invoices";
 import { BASE } from "./currency";
 import { getRun } from "./paymentruns";
 
@@ -106,26 +107,87 @@ export async function setoffGuardOnReverse(t: Db, C: string, entryId: string) {
   if (s) throw conflict(`هذا قيد المقاصة ${s.number}: ألغِها من شاشة «مقاصة عميل/مورد» ليُعاد فتح فواتيرها`);
 }
 
-// ───────────────────────── recipes ─────────────────────────
+// ───────────────────────── recipes, preparations and production batches ─────────────────────────
+/**
+ * Three kinds of item meet here:
+ *  • a raw material — a stock item bought from suppliers;
+ *  • a preparation (تحضيرة) — a stock item made in the kitchen from a recipe: the recipe lists what goes into ONE BATCH
+ *    and the batch yields `output` units (cooked shawarma: 12 kg of marinated meat in, 7.8 kg out);
+ *  • a dish — a non-stock item sold to the guest, whose recipe is per ONE unit sold.
+ * A preparation is costed one of two ways, chosen per preparation:
+ *  • BATCH (الطبخة / التصنيع): a production batch takes the ingredients out of stock and puts the preparation in at
+ *    their cost; sales then take the preparation from stock. Real yield shows in the unit cost.
+ *  • DIRECT (الخصم المباشر): nothing is produced into stock; a sale is exploded through the preparation down to the
+ *    raw materials by the standard yield and takes them directly.
+ */
+type Node = { id: string; name: string; type: string; output: number; method: string; lines: { componentId: string; qty: number; wastePct: number; used: number }[] };
+type Info = { id: string; name: string; sku: string; unit: string; type: string; purchasePrice: number; avg: number | null; onHand: number; salePrice: number };
+
+async function loadAll(t: Db, C: string) {
+  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty, r.waste_pct, p.name, p.type, COALESCE(h.output_qty,1) output, COALESCE(h.method,'DIRECT') method
+     FROM product_recipes r JOIN products p ON p.id=r.product_id LEFT JOIN recipe_headers h ON h.product_id=r.product_id WHERE r.company_id=$1 ORDER BY r.sort`, [C]);
+  const nodes = new Map<string, Node>();
+  for (const r of rows) {
+    const n: Node = nodes.get(r.productId) || { id: r.productId, name: r.name, type: r.type, output: r.type === "STOCK" ? Number(r.output) : 1, method: r.method, lines: [] };
+    const w = Number(r.wastePct || 0); n.lines.push({ componentId: r.componentId, qty: Number(r.qty), wastePct: w, used: Number(r.qty) * (1 + w / 100) }); nodes.set(r.productId, n);
+  }
+  const ids = [...new Set([...nodes.keys(), ...rows.map((r: any) => r.componentId)])];
+  const infos = new Map<string, Info>();
+  if (ids.length) for (const x of await t.rows(`SELECT c.id, c.name, c.sku, c.unit, c.type, c.purchase_price, c.sale_price,
+        (SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id AND b.qty > 0) avg,
+        COALESCE((SELECT SUM(b.qty) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id),0) on_hand FROM products c WHERE c.company_id=$1 AND c.id = ANY($2::uuid[])`, [C, ids]))
+    infos.set(x.id, { id: x.id, name: x.name, sku: x.sku, unit: x.unit, type: x.type, purchasePrice: Number(x.purchasePrice || 0), avg: x.avg === null ? null : Number(x.avg), onHand: Number(x.onHand), salePrice: Number(x.salePrice || 0) });
+  return { nodes, infos };
+}
+/** Sold or consumed through its recipe (a dish, or a preparation on the direct method) rather than taken from stock as itself. */
+const exploded = (n?: Node) => !!n && (n.type !== "STOCK" || n.method === "DIRECT");
+/** Standard cost of one unit from the recipe downwards. */
+function stdCost(all: { nodes: Map<string, Node>; infos: Map<string, Info> }, id: string, depth = 0): number {
+  const n = all.nodes.get(id), i = all.infos.get(id);
+  if (!n || depth > 6) return i ? (i.avg ?? i.purchasePrice) : 0;
+  return n.lines.reduce((a, l) => a + l.used * unitCost(all, l.componentId, depth + 1), 0) / n.output;
+}
+/** What one unit costs today: stock average for what is held in stock, the recipe for what is not. */
+function unitCost(all: { nodes: Map<string, Node>; infos: Map<string, Info> }, id: string, depth = 0): number {
+  const n = all.nodes.get(id), i = all.infos.get(id);
+  if (n && (exploded(n) || !i || i.avg === null)) return stdCost(all, id, depth);
+  return i ? (i.avg ?? i.purchasePrice) : 0;
+}
+/** Raw materials (and batch preparations held in stock) behind `qty` units of an item. */
+function explode(all: { nodes: Map<string, Node>; infos: Map<string, Info> }, id: string, qty: number, acc = new Map<string, number>(), depth = 0) {
+  const n = all.nodes.get(id);
+  if (!n) { acc.set(id, (acc.get(id) || 0) + qty); return acc; }
+  if (depth > 6) throw bad("الوصفة تدور على نفسها أو أعمق من ستة مستويات");
+  for (const l of n.lines) {
+    const need = (qty * l.used) / n.output;
+    if (exploded(all.nodes.get(l.componentId)) ) explode(all, l.componentId, need, acc, depth + 1); else acc.set(l.componentId, (acc.get(l.componentId) || 0) + need);
+  }
+  return acc;
+}
+
 export async function getRecipe(t: Db, C: string, productId: string) {
-  const prod = await t.one(`SELECT id, name, type, sale_price FROM products WHERE id=$1 AND company_id=$2`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
-  const rows = await t.rows(
-    `SELECT r.component_id, r.qty, r.waste_pct, c.name, c.sku, c.unit, c.purchase_price,
-            COALESCE((SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id AND b.qty > 0), c.purchase_price, 0) avg_cost,
-            COALESCE((SELECT SUM(b.qty) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id),0) on_hand
-       FROM product_recipes r JOIN products c ON c.id=r.component_id WHERE r.company_id=$1 AND r.product_id=$2 ORDER BY r.sort, c.name`, [C, prod.id]);
-  // what is taken from stock per unit sold = the net quantity plus its waste (peel, trim, spill)
-  const lines = rows.map((r: any) => { const w = Number(r.wastePct || 0), used = Number(r.qty) * (1 + w / 100); return { componentId: r.componentId, name: r.name, sku: r.sku, unit: r.unit, qty: Number(r.qty), wastePct: w, usedQty: Math.round(used * 10000) / 10000, unitCost: r2(Number(r.avgCost)), cost: r2(used * Number(r.avgCost)), onHand: r3(Number(r.onHand)) }; });
-  const cost = r2(lines.reduce((s: number, l: any) => s + l.cost, 0));
+  const prod = await t.one(`SELECT id, name, type, unit, sale_price FROM products WHERE id=$1 AND company_id=$2`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
+  const all = await loadAll(t, C);
+  const n = all.nodes.get(prod.id);
+  const isPrep = prod.type === "STOCK";
+  const lines = (n?.lines || []).map((l) => { const i = all.infos.get(l.componentId)!, cn = all.nodes.get(l.componentId), uc = unitCost(all, l.componentId);
+    return { componentId: l.componentId, name: i.name, sku: i.sku, unit: i.unit, qty: l.qty, wastePct: l.wastePct, usedQty: Math.round(l.used * 10000) / 10000, unitCost: Math.round(uc * 10000) / 10000, cost: r2(l.used * uc), onHand: r3(i.onHand), kind: cn ? (cn.method === "BATCH" ? "PREP_BATCH" : "PREP_DIRECT") : "RAW" }; });
+  const output = n ? n.output : 1;
+  const batchCost = r2(lines.reduce((s: number, l: any) => s + l.usedQty * l.unitCost, 0));
+  const cost = isPrep ? Math.round((batchCost / output) * 10000) / 10000 : batchCost;
   const price = Number(prod.salePrice || 0);
-  return { productId: prod.id, name: prod.name, type: prod.type, canHaveRecipe: prod.type !== "STOCK", lines, cost, salePrice: price, margin: price > 0 ? r2(price - cost) : null, marginPct: price > 0 ? r2(((price - cost) / price) * 100) : null,
-    canMake: lines.length ? Math.max(0, Math.floor(Math.min(...lines.map((l: any) => l.onHand / l.usedQty)))) : null };
+  const inputTotal = r3(lines.reduce((s: number, l: any) => s + l.qty, 0));
+  let canMake: number | null = null;
+  if (n) { const need = explode(all, prod.id, 1); canMake = Math.max(0, Math.floor(Math.min(...[...need.entries()].map(([id, q]) => (all.infos.get(id)?.onHand || 0) / q)))); }
+  return { productId: prod.id, name: prod.name, type: prod.type, unit: prod.unit, isPrep, canHaveRecipe: true, lines, cost: isPrep ? cost : batchCost, batchCost, outputQty: output, inputTotal, yieldPct: isPrep && inputTotal > 0 ? r2((output / inputTotal) * 100) : null,
+    method: isPrep ? (n?.method || "DIRECT") : null, onHand: isPrep ? r3(all.infos.get(prod.id)?.onHand || 0) : null, stockCost: isPrep ? all.infos.get(prod.id)?.avg ?? null : null,
+    salePrice: price, margin: !isPrep && price > 0 ? r2(price - batchCost) : null, marginPct: !isPrep && price > 0 ? r2(((price - batchCost) / price) * 100) : null, canMake };
 }
 
 export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
   const prod = await t.one(`SELECT id, name, type FROM products WHERE id=$1 AND company_id=$2 FOR UPDATE`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
   const lines: any[] = Array.isArray(b?.lines) ? b.lines : [];
-  if (lines.length && prod.type === "STOCK") throw bad("الوصفة تكون لصنف غير مخزني (طبق أو خدمة أو باقة): الصنف المخزني يُخصم هو نفسه من المخزون");
+  const isPrep = prod.type === "STOCK";
   if (lines.length > 60) throw bad("الوصفة لا تزيد عن 60 مكوناً");
   const seen = new Set<string>();
   for (const l of lines) {
@@ -139,28 +201,140 @@ export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
     if (!c) throw bad("المكوّن غير موجود");
     if (c.type !== "STOCK") throw bad(`المكوّن «${c.name}» ليس صنفاً مخزنياً`);
   }
+  // a recipe must not contain itself through its preparations
+  const all = await loadAll(t, C);
+  const reaches = (id: string, depth = 0): boolean => depth > 8 || id === prod.id || (all.nodes.get(id)?.lines || []).some((x) => reaches(x.componentId, depth + 1));
+  for (const l of lines) if (reaches(l.componentId)) throw bad("الوصفة تدور على نفسها: أحد المكونات يحتوي هذا الصنف في وصفته");
+  const output = isPrep ? Math.round(num(b.outputQty) * 10000) / 10000 : 1;
+  const method = isPrep && b.method === "BATCH" ? "BATCH" : "DIRECT";
+  if (isPrep && lines.length && !(output > 0)) throw bad("اكتب ناتج الوصفة: كم تعطي الطبخة الواحدة من هذا الصنف");
+  if (isPrep && lines.length && method === "DIRECT") {
+    const bal = await t.one(`SELECT COALESCE(SUM(qty),0) q FROM stock_balances WHERE company_id=$1 AND product_id=$2`, [C, prod.id]);
+    if (Math.abs(Number(bal.q)) > 0.0005) throw bad(`للصنف رصيد في المخزون (${r3(Number(bal.q))}): طريقة الخصم المباشر تكون لتحضيرة لا تُخزَّن. استهلك الرصيد أو سوِّه بالجرد أولاً، أو اختر طريقة الطبخة`);
+  }
   await t.exec(`DELETE FROM product_recipes WHERE product_id=$1 AND company_id=$2`, [prod.id, C]);
+  await t.exec(`DELETE FROM recipe_headers WHERE product_id=$1`, [prod.id]);
   let i = 0;
   for (const l of lines) await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort, waste_pct) VALUES ($1,$2,$3,$4,$5,$6)`, [C, prod.id, l.componentId, Math.round(num(l.qty) * 10000) / 10000, i++, Math.round(num(l.wastePct) * 100) / 100]);
+  if (isPrep && lines.length) await t.exec(`INSERT INTO recipe_headers (product_id, company_id, output_qty, method) VALUES ($1,$2,$3,$4)`, [prod.id, C, output, method]);
   return getRecipe(t, C, prod.id);
 }
 
-/** Recipes of the given products: productId → [{componentId, qty, name, purchasePrice}] */
+/** What a sale of each given product takes from stock through its recipe: productId → [{componentId, qty per unit sold, name, purchasePrice}] */
 export async function recipesOf(t: Db, C: string, productIds: string[]) {
   const out = new Map<string, any[]>();
   if (!productIds.length) return out;
-  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty * (1 + r.waste_pct / 100.0) qty, c.name, c.purchase_price FROM product_recipes r JOIN products c ON c.id=r.component_id WHERE r.company_id=$1 AND r.product_id = ANY($2::uuid[]) ORDER BY r.sort`, [C, productIds]);
-  for (const r of rows) { const a = out.get(r.productId) || []; a.push({ componentId: r.componentId, qty: Number(r.qty), name: r.name, purchasePrice: Number(r.purchasePrice || 0) }); out.set(r.productId, a); }
+  const any = await t.maybe(`SELECT 1 FROM product_recipes WHERE company_id=$1 AND product_id = ANY($2::uuid[]) LIMIT 1`, [C, productIds]);
+  if (!any) return out;
+  const all = await loadAll(t, C);
+  for (const id of new Set(productIds)) {
+    if (!exploded(all.nodes.get(id))) continue;
+    out.set(id, [...explode(all, id, 1).entries()].map(([cid, q]) => ({ componentId: cid, qty: q, name: all.infos.get(cid)?.name || "", purchasePrice: unitCost(all, cid) })));
+  }
   return out;
 }
 
-/** Items that have a recipe, with today's cost and margin (menu engineering). */
+/** Dishes (non-stock items with a recipe), with today's cost and margin. */
 export async function recipeList(t: Db, C: string) {
-  const ids = await t.rows(`SELECT DISTINCT r.product_id id FROM product_recipes r WHERE r.company_id=$1`, [C]);
+  const ids = await t.rows(`SELECT DISTINCT r.product_id id FROM product_recipes r JOIN products p ON p.id=r.product_id WHERE r.company_id=$1 AND p.type <> 'STOCK'`, [C]);
   const rows: any[] = [];
   for (const x of ids) { const r = await getRecipe(t, C, x.id); rows.push({ productId: r.productId, name: r.name, components: r.lines.length, cost: r.cost, salePrice: r.salePrice, margin: r.margin, marginPct: r.marginPct, canMake: r.canMake }); }
   rows.sort((a, b) => a.name.localeCompare(b.name, "ar"));
   return { rows };
+}
+
+/** Preparations (stock items with a recipe). */
+export async function prepList(t: Db, C: string) {
+  const ids = await t.rows(`SELECT DISTINCT r.product_id id FROM product_recipes r JOIN products p ON p.id=r.product_id WHERE r.company_id=$1 AND p.type = 'STOCK'`, [C]);
+  const rows: any[] = [];
+  for (const x of ids) { const r = await getRecipe(t, C, x.id); rows.push({ productId: r.productId, name: r.name, unit: r.unit, method: r.method, components: r.lines.length, inputTotal: r.inputTotal, outputQty: r.outputQty, yieldPct: r.yieldPct, cost: r.cost, stockCost: r.stockCost, onHand: r.onHand, canMake: r.canMake }); }
+  rows.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  return { rows };
+}
+
+// ── production batches (الطبخات) ──
+async function batchPlan(t: Db, C: string, b: any) {
+  const all = await loadAll(t, C);
+  const n = all.nodes.get(String(b.productId));
+  if (!n || n.type !== "STOCK") throw bad("اختر تحضيرة لها وصفة (صنف مخزني بمكونات)");
+  if (n.method !== "BATCH") throw bad(`«${n.name}» على طريقة الخصم المباشر: لا تُنتَج للمخزون. غيّر طريقتها إلى «الطبخة» من وصفتها إن أردت تصنيعها`);
+  const inputStd = n.lines.reduce((s, l) => s + l.qty, 0);
+  const factor = num(b.inputQty) > 0 ? num(b.inputQty) / inputStd : num(b.batches) > 0 ? num(b.batches) : 1;
+  const expected = Math.round(n.output * factor * 10000) / 10000;
+  const output = b.outputQty === undefined || b.outputQty === null || b.outputQty === "" ? expected : Math.round(num(b.outputQty) * 10000) / 10000;
+  if (!(output > 0)) throw bad("الناتج الفعلي يجب أن يكون أكبر من صفر");
+  const need = new Map<string, number>();
+  for (const l of n.lines) { const q = l.used * factor; if (exploded(all.nodes.get(l.componentId))) explode(all, l.componentId, q, need); else need.set(l.componentId, (need.get(l.componentId) || 0) + q); }
+  const lines = [...need.entries()].map(([id, q]) => { const i = all.infos.get(id)!; return { componentId: id, name: i.name, unit: i.unit, qty: r3(q), onHand: r3(i.onHand), unitCost: Math.round(unitCost(all, id) * 10000) / 10000, cost: r2(q * unitCost(all, id)), short: i.onHand + 1e-9 < q }; });
+  const cost = r2(lines.reduce((s, l) => s + l.cost, 0));
+  return { all, node: n, productId: n.id, name: n.name, unit: all.infos.get(n.id)?.unit, inputQty: r3(inputStd * factor), inputStd: r3(inputStd), factor, expectedQty: expected, outputQty: output, yieldPct: r2((output / (inputStd * factor)) * 100), standardYieldPct: r2((n.output / inputStd) * 100), lines, cost, unitCost: Math.round((cost / output) * 10000) / 10000, standardUnitCost: Math.round((cost / expected) * 10000) / 10000 };
+}
+export async function batchPreview(t: Db, C: string, b: any) { const { all, node, ...p } = await batchPlan(t, C, b); return p; }
+
+export async function createBatch(t: Db, C: string, user: string, b: any, opts: { isDemo?: boolean } = {}) {
+  const date = isDate(b.date) ? String(b.date) : today();
+  await assertOpenDate(t, C, date);
+  const plan = await batchPlan(t, C, b);
+  const co = await t.one(`SELECT allow_negative_stock FROM companies WHERE id=$1`, [C]);
+  const wh = UUID.test(String(b.warehouseId)) ? (await t.one(`SELECT id FROM warehouses WHERE id=$1 AND company_id=$2`, [b.warehouseId, C], "المستودع غير موجود")).id : (await t.one(`SELECT id FROM warehouses WHERE company_id=$1 ORDER BY is_default DESC, code LIMIT 1`, [C])).id;
+  const number = await nextNumber(t, C, "PRD", date);
+  const row = await t.insert("prep_batches", { companyId: C, number, date, productId: plan.productId, warehouseId: wh, inputQty: plan.inputQty, expectedQty: plan.expectedQty, outputQty: plan.outputQty, cost: 0, lines: "[]", notes: b.notes ? String(b.notes).slice(0, 300) : null, createdBy: user, isDemo: !!opts.isDemo });
+  let cost = 0; const used: any[] = [];
+  for (const l of plan.lines) {
+    const c = await stockOut(t, C, { productId: l.componentId, warehouseId: wh, qty: l.qty, date, sourceType: "PRODUCTION", sourceId: row.id, reference: number, isDemo: !!opts.isDemo, allowNegative: !!co.allowNegativeStock, fallbackCost: l.unitCost, productName: l.name });
+    cost = r2(cost + c); used.push({ componentId: l.componentId, name: l.name, unit: l.unit, qty: l.qty, cost: c });
+  }
+  // the preparation enters stock at exactly what left it: inventory value is unchanged, so no journal entry is needed
+  await stockIn(t, C, { productId: plan.productId, warehouseId: wh, qty: plan.outputQty, date, sourceType: "PRODUCTION", sourceId: row.id, reference: number, isDemo: !!opts.isDemo, value: cost, lotNo: number });
+  await t.exec(`UPDATE prep_batches SET cost=$2, lines=$3 WHERE id=$1`, [row.id, cost, JSON.stringify(used)]);
+  return { ...row, cost, lines: used, name: plan.name, unit: plan.unit, expectedQty: plan.expectedQty, outputQty: plan.outputQty, yieldPct: plan.yieldPct, standardYieldPct: plan.standardYieldPct, unitCost: Math.round((cost / plan.outputQty) * 10000) / 10000 };
+}
+
+export async function listBatches(t: Db, C: string) {
+  const rows = await t.rows(`SELECT b.*, p.name, p.unit FROM prep_batches b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 ORDER BY b.date DESC, b.created_at DESC LIMIT 300`, [C]);
+  return { rows: rows.map((r: any) => ({ ...r, date: iso(r.date), inputQty: Number(r.inputQty), expectedQty: Number(r.expectedQty), outputQty: Number(r.outputQty), cost: Number(r.cost), unitCost: Math.round((Number(r.cost) / Number(r.outputQty)) * 10000) / 10000, yieldPct: r2((Number(r.outputQty) / Number(r.inputQty)) * 100), variance: r3(Number(r.outputQty) - Number(r.expectedQty)) })) };
+}
+
+export async function cancelBatch(t: Db, C: string, user: string, id: string) {
+  const bt = await t.one(`SELECT b.*, p.name FROM prep_batches b JOIN products p ON p.id=b.product_id WHERE b.id=$1 AND b.company_id=$2 FOR UPDATE OF b`, [UUID.test(id) ? id : null, C], "الطبخة غير موجودة");
+  if (bt.status !== "POSTED") throw conflict("الطبخة ملغاة من قبل");
+  const date = today();
+  await assertOpenDate(t, C, date);
+  // the preparation must still be in stock; what it is worth now goes back to the ingredients in the batch's proportions
+  const back = await stockOut(t, C, { productId: bt.productId, warehouseId: bt.warehouseId, qty: Number(bt.outputQty), date, sourceType: "PRODUCTION_CANCEL", sourceId: bt.id, reference: bt.number, isDemo: bt.isDemo, allowNegative: false, productName: bt.name });
+  const ls: any[] = bt.lines || []; const total = ls.reduce((s, l) => s + Number(l.cost), 0); let rest = back;
+  for (let i = 0; i < ls.length; i++) {
+    const v = i === ls.length - 1 ? rest : r2(total > 0 ? (back * Number(ls[i].cost)) / total : back / ls.length); rest = r2(rest - v);
+    await stockIn(t, C, { productId: ls[i].componentId, warehouseId: bt.warehouseId, qty: Number(ls[i].qty), date, sourceType: "PRODUCTION_CANCEL", sourceId: bt.id, reference: bt.number, isDemo: bt.isDemo, value: v, lotNo: "RETURN" });
+  }
+  await t.exec(`UPDATE prep_batches SET status='CANCELLED' WHERE id=$1`, [bt.id]);
+  return { id: bt.id, number: bt.number, status: "CANCELLED" };
+}
+
+/**
+ * Worked example for restaurants: a chicken shawarma from the raw materials to the sandwich, with both costing
+ * methods side by side — the cooked meat on the batch method, the marinade and the garlic sauce on direct deduction.
+ * Everything is flagged as sample data, so «حذف البيانات التجريبية» removes it.
+ */
+export async function seedShawarmaExample(t: Db, company: any, user: string) {
+  const C = company.id;
+  if (await t.maybe(`SELECT 1 FROM products WHERE company_id=$1 AND sku='EX-SW'`, [C])) throw conflict("مثال الشاورما محمَّل من قبل — تجده في تبويبي «الوصفات» و«التحضيرات»");
+  const eg = BASE === "EGP";
+  const sup = await t.insert("partners", { companyId: C, code: "EX-SUP", name: "مورد المطعم (مثال)", isSupplier: true, isCustomer: false, kind: "COMPANY", vatNumber: eg ? "200000001" : "300000000000003", street: "طريق الملك فهد", buildingNo: "1234", district: "العليا", city: eg ? "القاهرة" : "الرياض", postalCode: "12211", phone: "0501234567", isDemo: true });
+  const mk = (sku: string, name: string, unit: string, price: number, type = "STOCK", sale = 0) => t.insert("products", { companyId: C, sku, name, type, unit, salePrice: sale, purchasePrice: price, taxCode: "S", isActive: true, isDemo: true });
+  const chicken = await mk("EX-CK", "صدور دجاج (مثال)", "كجم", 20), spice = await mk("EX-SP", "بهارات شاورما (مثال)", "كجم", 40), yog = await mk("EX-YG", "زبادي (مثال)", "كجم", 8), oil = await mk("EX-OL", "زيت نباتي (مثال)", "كجم", 10);
+  const garlic = await mk("EX-GR", "ثوم (مثال)", "كجم", 12), bread = await mk("EX-BD", "خبز صاج (مثال)", "حبة", 0.5), pickle = await mk("EX-PK", "مخلل (مثال)", "كجم", 6);
+  const marin = await mk("EX-MR", "شاورما دجاج متبّلة — وصفة أولية (مثال)", "كجم", 0), cooked = await mk("EX-CKD", "شاورما دجاج مطبوخة — وصفة نهائية (مثال)", "كجم", 0), toum = await mk("EX-TM", "ثومية (مثال)", "كجم", 0);
+  const sand = await mk("EX-SW", "ساندوتش شاورما دجاج (مثال)", "حبة", 0, "SERVICE", 15);
+  const d = await saveDraft(t, company, user, { direction: "PURCHASE", kind: "INVOICE", date: today(), partnerId: sup.id, supplierRef: "EX-1001", isDemo: true,
+    lines: [[chicken, 100, 20], [spice, 10, 40], [yog, 20, 8], [oil, 30, 10], [garlic, 10, 12], [bread, 500, 0.5], [pickle, 10, 6]].map(([p, q, pr]: any) => ({ productId: p.id, qty: q, unitPrice: pr, taxCode: "S" })) } as any);
+  await postInvoice(t, company, d.id, user);
+  await saveRecipe(t, C, marin.id, { outputQty: 12, method: "DIRECT", lines: [{ componentId: chicken.id, qty: 10 }, { componentId: spice.id, qty: 0.5 }, { componentId: yog.id, qty: 1 }, { componentId: oil.id, qty: 0.5 }] });
+  await saveRecipe(t, C, cooked.id, { outputQty: 7.8, method: "BATCH", lines: [{ componentId: marin.id, qty: 12 }] });
+  await saveRecipe(t, C, toum.id, { outputQty: 3, method: "DIRECT", lines: [{ componentId: garlic.id, qty: 1 }, { componentId: oil.id, qty: 2 }] });
+  await saveRecipe(t, C, sand.id, { lines: [{ componentId: cooked.id, qty: 0.12 }, { componentId: toum.id, qty: 0.03 }, { componentId: bread.id, qty: 1 }, { componentId: pickle.id, qty: 0.02 }] });
+  const batch = await createBatch(t, C, user, { productId: cooked.id, inputQty: 24, outputQty: 15, notes: "مثال: سيخ 24 كجم خرج منه 15 كجم بدل 15.6" }, { isDemo: true });
+  return { ok: true, sandwich: sand.id, cooked: cooked.id, batch: batch.number };
 }
 
 /**

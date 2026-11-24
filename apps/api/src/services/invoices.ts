@@ -302,9 +302,9 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   // ── inventory effects ──
   // recipes: a non-stock item sold on an invoice consumes its ingredients; its cost of sales is what was consumed.
   // Ingredients may go negative (a kitchen does not stop selling for a late goods receipt) and show in the negative-stock alert.
-  const recipes = isSale && inv.kind === "INVOICE" ? await recipesOf(t, companyId, lines.filter((x) => x.productId && x.ptype !== "STOCK").map((x) => x.productId)) : new Map<string, any[]>();
+  const recipes = isSale && inv.kind === "INVOICE" ? await recipesOf(t, companyId, lines.filter((x) => x.productId).map((x) => x.productId)) : new Map<string, any[]>();
   for (const l of lines) {
-    if (l.productId && l.ptype !== "STOCK" && recipes.has(l.productId)) {
+    if (l.productId && recipes.has(l.productId)) {
       const sold = r3(Number(l.qty) * Number(l.factor || 1));
       let used = 0;
       for (const c of recipes.get(l.productId)!) {

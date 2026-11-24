@@ -16,6 +16,12 @@ r343.post("/setoffs", perm("accounting.write"), h(async (req) => { const r = awa
 r343.post("/setoffs/:id/cancel", perm("accounting.write"), h(async (req) => { const r = await tx((t) => s.cancelSetoff(t, cid(req), actor(req), p(req).id)); await audit(req, "CANCEL", "setoff", r.id, { number: r.number }); return r; }));
 
 r343.get("/recipes/engineering", perm("products.read"), h(async (req) => s.menuEngineering(db, cid(req), { days: Number(req.query.days || 30) })));
+r343.post("/preps/example", perm("products.write"), h(async (req) => { const r = await tx((t) => s.seedShawarmaExample(t, req.company, actor(req))); await audit(req, "CREATE", "example", null, { example: "shawarma" }); return r; }));
+r343.get("/preps", perm("products.read"), h(async (req) => s.prepList(db, cid(req))));
+r343.get("/prep-batches", perm("inventory.read"), h(async (req) => s.listBatches(db, cid(req))));
+r343.post("/prep-batches/preview", perm("inventory.read"), h(async (req) => s.batchPreview(db, cid(req), req.body || {})));
+r343.post("/prep-batches", perm("inventory.write"), h(async (req) => { const r = await tx((t) => s.createBatch(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "prep_batch", r.id, { number: r.number, item: r.name, output: r.outputQty, cost: r.cost }); return r; }));
+r343.post("/prep-batches/:id/cancel", perm("inventory.write"), h(async (req) => { const r = await tx((t) => s.cancelBatch(t, cid(req), actor(req), p(req).id)); await audit(req, "CANCEL", "prep_batch", r.id, { number: r.number }); return r; }));
 r343.get("/recipes", perm("products.read"), h(async (req) => s.recipeList(db, cid(req))));
 r343.get("/products/:id/recipe", perm("products.read"), h(async (req) => s.getRecipe(db, cid(req), p(req).id)));
 r343.put("/products/:id/recipe", perm("products.write"), h(async (req) => { const r = await tx((t) => s.saveRecipe(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "recipe", p(req).id, { components: r.lines.length, cost: r.cost }); return r; }));

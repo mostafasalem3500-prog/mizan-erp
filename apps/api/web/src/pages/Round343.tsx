@@ -1,6 +1,6 @@
 /** 3.43.0 screens: customer/supplier set-off, recipes (ingredients and cost of a dish), the bank file of a payment run. */
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, useFetch, Money, money, Loading, Empty, Modal, Field, Input, NumInput, Picker, productFetcher, Tabs, useAction, useToast, useCompanyContext, fmtDate, confirmDlg, today } from "../lib";
 
 // ─── set-off between what a party owes us and what we owe it ─────────────
@@ -69,18 +69,52 @@ export function RecipesPage() {
   const { data, reload } = useFetch<any>("/recipes");
   const [edit, setEdit] = useState<any>(null);
   const [pick, setPick] = useState<any>(null);
-  const [tab, setTab] = useState("list");
+  const [sp, setSp] = useSearchParams();
+  const tab = ["preps", "batches", "eng", "guide"].includes(sp.get("tab") || "") ? String(sp.get("tab")) : "list";
+  const setTab = (k: string) => setSp(k === "list" ? {} : { tab: k });
   const [days, setDays] = useState(30);
   const eng = useFetch<any>(tab === "eng" ? `/recipes/engineering?days=${days}` : null, [tab, days]);
+  const preps = useFetch<any>(tab === "preps" ? "/preps" : null, [tab]);
+  const batches = useFetch<any>(tab === "batches" ? "/prep-batches" : null, [tab]);
+  const [cook, setCook] = useState<any>(null);
+  const { run, busy } = useAction();
+  const toast = useToast();
+  const IW = can("inventory.write");
+  const reloadAll = () => { reload(); preps.reload(); batches.reload(); };
   const W = can("products.write");
   const KL: Record<string, [string, string]> = { STAR: ["⭐ نجم", "green"], PLOWHORSE: ["🐎 يُباع بهامش ضعيف", "amber"], PUZZLE: ["🧩 هامش جيد قليل البيع", "blue"], DOG: ["⚠ ضعيف", "red"], NEW: ["بلا مبيعات", ""] };
   return (
     <div className="grid" data-recipes>
       <div className="alert small">الوصفة تربط الطبق أو الباقة (صنف غير مخزني) بمكوناته المخزنية. عند بيعه من نقطة البيع أو الفاتورة تُخصم المكونات من المخزون، وتكلفة المبيعات هي تكلفة ما خُصم — فيظهر ربح الطبق الحقيقي. المكونات يمكن أن تنزل بالسالب حتى لا يتوقف البيع، وتظهر في تنبيه الأرصدة السالبة.</div>
       {W && <div className="card"><div className="row" style={{ alignItems: "flex-end", gap: 8 }}>
-        <div style={{ minWidth: 280, flex: 1 }}><Field label="وصفة جديدة لصنف"><Picker value={pick} onChange={setPick} fetcher={productFetcher} label={(p: any) => `${p.sku || ""} ${p.name}`} placeholder="ابحث عن الطبق أو الباقة" /></Field></div>
+        <div style={{ minWidth: 280, flex: 1 }}><Field label="فتح وصفة صنف (طبق أو تحضيرة)"><Picker value={pick} onChange={setPick} fetcher={productFetcher} label={(p: any) => `${p.sku || ""} ${p.name}`} placeholder="ابحث عن الطبق أو الباقة" /></Field></div>
         <button className="btn primary" disabled={!pick} data-recipe-new onClick={() => { setEdit(pick); setPick(null); }}>＋ فتح الوصفة</button></div></div>}
-      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "eng", label: "هندسة القائمة" }]} value={tab} onChange={setTab} />
+      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "preps", label: "التحضيرات" }, { key: "batches", label: "الطبخات (التصنيع)" }, { key: "eng", label: "هندسة القائمة" }, { key: "guide", label: "كيف تُحسب التكلفة؟" }]} value={tab} onChange={setTab} />
+      {tab === "preps" && <div className="card" data-preps>{!preps.data ? <Loading /> : !preps.data.rows.length ? <Empty text="لا تحضيرات بعد — التحضيرة صنف مخزني له وصفة (مثل الشاورما المطبوخة أو الثومية). افتح وصفتها من الأعلى، أو حمّل مثال الشاورما من تبويب «كيف تُحسب التكلفة؟»" /> : <div className="table-wrap"><table className="tbl" data-prep-list>
+        <thead><tr><th>التحضيرة</th><th>الطريقة</th><th className="n">وزن المدخلات</th><th className="n">الناتج</th><th className="n">نسبة الناتج</th><th className="n">تكلفة الوحدة</th><th className="n">الرصيد</th><th /></tr></thead>
+        <tbody>{preps.data.rows.map((r: any) => <tr key={r.productId} className="clickable" onClick={() => setEdit({ id: r.productId, name: r.name })}><td><b>{r.name}</b></td><td><span className={"badge " + (r.method === "BATCH" ? "teal" : "blue")} data-prep-method={r.method}>{r.method === "BATCH" ? "طبخة (تصنيع)" : "خصم مباشر"}</span></td><td className="n">{r.inputTotal}</td><td className="n">{r.outputQty} {r.unit}</td><td className="n">{r.yieldPct}%</td><td className="n"><Money v={r.cost} /></td><td className="n">{r.method === "BATCH" ? r.onHand : "—"}</td>
+          <td onClick={(e) => e.stopPropagation()}>{IW && r.method === "BATCH" && <button className="btn sm primary" data-prep-cook onClick={() => setCook(r)}>طبخة جديدة</button>}</td></tr>)}</tbody></table></div>}</div>}
+      {tab === "batches" && <div className="card" data-batches-tab>{!batches.data ? <Loading /> : !batches.data.rows.length ? <Empty text="لا طبخات بعد — من تبويب «التحضيرات» اضغط «طبخة جديدة» على تحضيرة بطريقة الطبخة" /> : <div className="table-wrap"><table className="tbl" data-batch-list>
+        <thead><tr><th>الرقم</th><th>التاريخ</th><th>التحضيرة</th><th className="n">المدخلات</th><th className="n">المتوقع</th><th className="n">الناتج الفعلي</th><th className="n">الفرق</th><th className="n">النسبة</th><th className="n">التكلفة</th><th className="n">تكلفة الوحدة</th><th>الحالة</th><th /></tr></thead>
+        <tbody>{batches.data.rows.map((r: any) => <tr key={r.id}><td className="num"><b>{r.number}</b></td><td className="dt">{fmtDate(r.date)}</td><td>{r.name}</td><td className="n">{r.inputQty}</td><td className="n">{r.expectedQty}</td><td className="n">{r.outputQty} {r.unit}</td><td className="n"><span className={r.variance < -0.0005 ? "neg-val" : ""}>{r.variance}</span></td><td className="n">{r.yieldPct}%</td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.unitCost} /></td>
+          <td>{r.status === "POSTED" ? <span className="badge green">مرحّلة</span> : <span className="badge">ملغاة</span>}</td>
+          <td>{IW && r.status === "POSTED" && <button className="btn sm ghost danger" disabled={busy} data-batch-cancel onClick={() => { if (confirmDlg(`إلغاء الطبخة ${r.number}؟ تعود المكونات للمخزون ويخرج منها الناتج (يلزم أن يكون ما زال في المخزون).`)) run(async () => { await api(`/prep-batches/${r.id}/cancel`, { body: {} }); reloadAll(); }, "أُلغيت الطبخة"); }}>إلغاء</button>}</td></tr>)}</tbody></table></div>}</div>}
+      {tab === "guide" && <div className="card" data-cost-guide>
+        <div className="card-h"><h3>تكاليف المطاعم والمقاهي: من المادة الخام إلى الطبق</h3></div>
+        <p>مثال الشاورما يمر بثلاث مراحل، وكل مرحلة لها وصفتها:</p>
+        <ol className="small" style={{ lineHeight: 1.9 }}>
+          <li><b>الوصفة الأولية (التتبيلة):</b> 10 كجم صدور دجاج + 0.5 بهارات + 1 زبادي + 0.5 زيت = <b>12 كجم مدخلات</b> بتكلفة 233 ← 12 كجم شاورما متبّلة.</li>
+          <li><b>الوصفة النهائية (المطبوخة):</b> 12 كجم متبّلة تعطي <b>7.8 كجم مطبوخة</b> (نسبة الناتج 65%) ← تكلفة الكيلو المطبوخ 233 ÷ 7.8 = 29.87.</li>
+          <li><b>المنتج النهائي (الساندوتش):</b> 120 جم شاورما مطبوخة (وصفة) + 30 جم ثومية (وصفة) + رغيف خبز + 20 جم مخلل (مواد خام) ← تكلفة الساندوتش ≈ 4.52.</li>
+        </ol>
+        <p>ولكل تحضيرة تختار واحدة من طريقتين:</p>
+        <div className="grid c2">
+          <div className="alert small"><b>١) طريقة الطبخة (التصنيع)</b><br />تسجّل «طبخة» بوزن المدخلات الفعلي والناتج الفعلي: تخرج المواد الخام من المخزون وتدخل التحضيرة بتكلفتها. البيع يخصم من التحضيرة. تظهر <b>نسبة الناتج الحقيقية</b> والفرق عن المعيار، وتكلفة الساندوتش تتبع ما خرج فعلاً. تناسب السيخ والصوصات التي تُحضَّر بكميات.</div>
+          <div className="alert small"><b>٢) طريقة الخصم المباشر</b><br />لا تسجّل طبخات. عند بيع الساندوتش يُفكّ إلى مواده الخام بنسبة الناتج المعيارية وتُخصم مباشرة (120 جم مطبوخة = 154 جم دجاج خام…). أبسط في التشغيل، لكن الهالك الفعلي لا يظهر إلا عند الجرد.</div>
+        </div>
+        <p className="small muted">في الطريقتين القيد واحد عند البيع: من ح/ تكلفة البضاعة المباعة إلى ح/ المخزون. الطبخة نفسها لا قيد لها لأن القيمة تنتقل داخل المخزون من المواد الخام إلى التحضيرة.</p>
+        {W && <button className="btn primary" disabled={busy} data-load-example onClick={() => { if (confirmDlg("تحميل مثال الشاورما؟ يضيف أصنافاً ومورداً وفاتورة مشتريات وطبخة مُعلَّمة كبيانات تجريبية (تُحذف من الإعدادات ← البيانات التجريبية).")) run(async () => { await api("/preps/example", { body: {} }); reloadAll(); setTab("preps"); }, "حُمّل مثال الشاورما"); }}>تحميل مثال الشاورما بأرقامه</button>}
+      </div>}
       {tab === "eng" && <div className="card" data-menu-eng>
         <div className="row" style={{ gap: 8, alignItems: "center", marginBottom: 10 }}><span className="small muted">الفترة:</span>{[30, 90, 365].map((d) => <button key={d} className={"btn sm" + (days === d ? " primary" : "")} onClick={() => setDays(d)}>{d === 365 ? "سنة" : `${d} يوماً`}</button>)}
           {eng.data && <span className="small muted">ربح الأطباق <b>{money(eng.data.totals.profit)}</b> — متوسط هامش الوحدة <b>{money(eng.data.totals.avgMargin)}</b></span>}</div>
@@ -94,7 +128,8 @@ export function RecipesPage() {
         <thead><tr><th>الصنف</th><th className="n">المكونات</th><th className="n">تكلفة الوصفة</th><th className="n">سعر البيع</th><th className="n">الهامش</th><th className="n">%</th><th className="n">يكفي المخزون لـ</th></tr></thead>
         <tbody>{data.rows.map((r: any) => <tr key={r.productId} className="clickable" onClick={() => setEdit({ id: r.productId, name: r.name })}><td><b>{r.name}</b></td><td className="n">{r.components}</td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.salePrice} /></td>
           <td className="n">{r.margin === null ? "—" : <Money v={r.margin} />}</td><td className="n">{r.marginPct === null ? "—" : <span className={r.marginPct < 30 ? "neg-val" : ""}>{r.marginPct}%</span>}</td><td className="n">{r.canMake ?? "—"}</td></tr>)}</tbody></table></div>}</div>}
-      {edit && <RecipeModal product={edit} canWrite={W} onClose={(ch) => { setEdit(null); if (ch) reload(); }} />}
+      {edit && <RecipeModal product={edit} canWrite={W} onClose={(ch) => { setEdit(null); if (ch) reloadAll(); }} />}
+      {cook && <BatchModal prep={cook} onClose={(done) => { setCook(null); if (done) { reloadAll(); setTab("batches"); } }} />}
     </div>
   );
 }
@@ -104,27 +139,67 @@ export function RecipeModal({ product, canWrite, onClose }: { product: any; canW
   const [lines, setLines] = useState<any[] | null>(null);
   const [add, setAdd] = useState<any>(null);
   const [target, setTarget] = useState<any>(65);
+  const [output, setOutput] = useState<any>("");
+  const [method, setMethod] = useState("BATCH");
   const { run, busy } = useAction();
   const toast = useToast();
-  useEffect(() => { if (data && lines === null) setLines(data.lines.map((l: any) => ({ ...l }))); }, [data]);
+  useEffect(() => { if (data && lines === null) { setLines(data.lines.map((l: any) => ({ ...l }))); if (data.isPrep && data.lines.length) { setOutput(data.outputQty); setMethod(data.method || "BATCH"); } } }, [data]);
   if (!data || lines === null) return <Modal title={`وصفة — ${product.name}`} onClose={() => onClose()}><Loading /></Modal>;
+  const inSum = (lines || []).reduce((a, l) => a + (Number(l.qty) || 0), 0);
   const used = (l: any) => (Number(l.qty) || 0) * (1 + (Number(l.wastePct) || 0) / 100);
   const cost = lines.reduce((a, l) => a + used(l) * Number(l.unitCost || 0), 0);
   const tg = Math.min(95, Math.max(0, Number(target) || 0)), suggested = cost > 0 ? cost / (1 - tg / 100) : 0;
   const price = Number(data.salePrice || 0);
   return (
     <Modal title={`وصفة — ${data.name}`} onClose={() => onClose()} wide footer={<><div className="grow" /><button className="btn" onClick={() => onClose()}>إغلاق</button>
-      {canWrite && data.canHaveRecipe && <button className="btn primary" disabled={busy || lines.some((l) => !(Number(l.qty) > 0))} data-recipe-save onClick={() => run(async () => { await api(`/products/${product.id}/recipe`, { method: "PUT", body: { lines: lines.map((l) => ({ componentId: l.componentId, qty: Number(l.qty), wastePct: Number(l.wastePct) || 0 })) } }); onClose(true); }, "حُفظت الوصفة")}>حفظ الوصفة</button>}</>}>
-      {!data.canHaveRecipe ? <div className="alert warn">هذا صنف مخزني: يُخصم هو نفسه من المخزون عند البيع. الوصفة تكون لصنف غير مخزني (طبق، مشروب محضَّر، باقة).</div> : <>
+      {canWrite && data.canHaveRecipe && <button className="btn primary" disabled={busy || lines.some((l) => !(Number(l.qty) > 0)) || (data.isPrep && lines.length > 0 && !(Number(output) > 0))} data-recipe-save onClick={() => run(async () => { await api(`/products/${product.id}/recipe`, { method: "PUT", body: { lines: lines.map((l) => ({ componentId: l.componentId, qty: Number(l.qty), wastePct: Number(l.wastePct) || 0 })), outputQty: Number(output) || 0, method } }); onClose(true); }, "حُفظت الوصفة")}>حفظ الوصفة</button>}</>}>
+      {<>
+        {data.isPrep && <div data-prep-head><div className="alert small" style={{ marginBottom: 10 }}>هذا صنف مخزني، فوصفته <b>تحضيرة</b>: اكتب مكونات <b>الطبخة الواحدة كاملة</b> (بالوزن)، ثم كم تعطي من هذا الصنف. نسبة الناتج تُحسب من وزن المدخلات.</div>
+          <div className="form-grid">
+            <Field label={`ناتج الطبخة (${data.unit || ""})`} hint={inSum > 0 && Number(output) > 0 ? `وزن المدخلات ${Math.round(inSum * 1000) / 1000} ← نسبة الناتج ${Math.round((Number(output) / inSum) * 1000) / 10}%` : "كم تعطي هذه المكونات بعد التحضير"}><NumInput value={output} disabled={!canWrite} onChange={(e: any) => setOutput(e.target.value)} data-prep-output /></Field>
+            <Field label="أو نسبة الناتج %" hint="تُحسب الناتج من وزن المدخلات"><NumInput value={inSum > 0 && Number(output) > 0 ? Math.round((Number(output) / inSum) * 1000) / 10 : ""} disabled={!canWrite || !(inSum > 0)} onChange={(e: any) => setOutput(Math.round(inSum * (Number(e.target.value) || 0) * 100) / 10000)} data-prep-yield /></Field>
+            <Field label="طريقة التكلفة" hint={method === "BATCH" ? "تُسجَّل طبخات تُدخل الصنف للمخزون، والبيع يخصم منه" : "لا يُخزَّن: البيع يخصم مواده الخام مباشرة بنسبة الناتج"}><select className="input" value={method} disabled={!canWrite} onChange={(e) => setMethod(e.target.value)} data-prep-method-select><option value="BATCH">الطبخة (التصنيع)</option><option value="DIRECT">الخصم المباشر</option></select></Field>
+          </div></div>}
         {canWrite && <div className="row" style={{ alignItems: "flex-end", gap: 8, marginBottom: 10 }}>
           <div style={{ minWidth: 260, flex: 1 }}><Field label="إضافة مكوّن (صنف مخزني)"><Picker value={add} onChange={(p: any) => { if (!p) return; if (p.type !== "STOCK") { toast("المكوّن يجب أن يكون صنفاً مخزنياً", "err"); return; } if (p.id === product.id || lines.some((l) => l.componentId === p.id)) { toast("المكوّن موجود في الوصفة", "err"); return; } setLines([...lines, { componentId: p.id, name: p.name, sku: p.sku, unit: p.unit, qty: 1, wastePct: 0, unitCost: Number(p.avgCost || p.purchasePrice || 0), onHand: Number(p.qty || 0) }]); setAdd(null); }} fetcher={productFetcher} label={(p: any) => `${p.sku || ""} ${p.name}`} placeholder="ابحث عن المكوّن" /></Field></div></div>}
         {!lines.length ? <Empty text="لا مكونات بعد" /> : <div className="table-wrap"><table className="tbl" data-recipe-lines>
-          <thead><tr><th>المكوّن</th><th className="n">الكمية لكل وحدة مباعة</th><th>الوحدة</th><th className="n">هالك %</th><th className="n">تكلفة الوحدة</th><th className="n">التكلفة</th><th className="n">الرصيد</th><th /></tr></thead>
-          <tbody>{lines.map((l, i) => <tr key={l.componentId}><td>{l.name}</td><td className="n"><NumInput style={{ width: 110 }} value={l.qty} disabled={!canWrite} onChange={(e: any) => setLines(lines.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} data-recipe-qty /></td><td>{l.unit}</td><td className="n"><NumInput style={{ width: 80 }} value={l.wastePct ?? 0} disabled={!canWrite} onChange={(e: any) => setLines(lines.map((x, j) => j === i ? { ...x, wastePct: e.target.value } : x))} data-recipe-waste /></td><td className="n"><Money v={l.unitCost} /></td><td className="n"><Money v={used(l) * Number(l.unitCost || 0)} /></td><td className="n">{l.onHand}</td>
+          <thead><tr><th>المكوّن</th><th className="n">{data.isPrep ? "الكمية في الطبخة" : "الكمية لكل وحدة مباعة"}</th><th>الوحدة</th><th className="n">هالك %</th><th className="n">تكلفة الوحدة</th><th className="n">التكلفة</th><th className="n">الرصيد</th><th /></tr></thead>
+          <tbody>{lines.map((l, i) => <tr key={l.componentId}><td>{l.name}{l.kind && l.kind !== "RAW" && <span className={"badge " + (l.kind === "PREP_BATCH" ? "teal" : "blue")} style={{ marginInlineStart: 6 }}>{l.kind === "PREP_BATCH" ? "تحضيرة: طبخة" : "تحضيرة: خصم مباشر"}</span>}</td><td className="n"><NumInput style={{ width: 110 }} value={l.qty} disabled={!canWrite} onChange={(e: any) => setLines(lines.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} data-recipe-qty /></td><td>{l.unit}</td><td className="n"><NumInput style={{ width: 80 }} value={l.wastePct ?? 0} disabled={!canWrite} onChange={(e: any) => setLines(lines.map((x, j) => j === i ? { ...x, wastePct: e.target.value } : x))} data-recipe-waste /></td><td className="n"><Money v={l.unitCost} /></td><td className="n"><Money v={used(l) * Number(l.unitCost || 0)} /></td><td className="n">{l.onHand}</td>
             <td>{canWrite && <button className="btn sm ghost danger" onClick={() => setLines(lines.filter((_, j) => j !== i))}>حذف</button>}</td></tr>)}</tbody>
-          <tfoot><tr><td colSpan={5}>تكلفة الوصفة</td><td className="n" data-recipe-cost><Money v={cost} /></td><td colSpan={2} /></tr></tfoot></table></div>}
-        <div className="small muted mt">سعر البيع {money(price)}{price > 0 && <> — الهامش <b>{money(price - cost)}</b> ({Math.round(((price - cost) / price) * 1000) / 10}%)</>}. التكلفة بمتوسط تكلفة المخزون الحالي، وعند البيع تُحتسب بتكلفة ما يُخصم فعلاً.</div>
-        {cost > 0 && <div className="row mt" style={{ gap: 8, alignItems: "center" }} data-recipe-suggest><span className="small">لهامش مستهدف</span><NumInput style={{ width: 80 }} value={target} onChange={(e: any) => setTarget(e.target.value)} data-recipe-target /><span className="small">% يكون سعر البيع قبل الضريبة <b data-recipe-price>{money(suggested)}</b>{price > 0 && <> ({suggested > price + 0.005 ? `أعلى من الحالي بـ ${money(suggested - price)}` : `الحالي يحققه`})</>}</span></div>}
+          <tfoot><tr><td colSpan={5}>{data.isPrep ? "تكلفة الطبخة" : "تكلفة الوصفة"}</td><td className="n" data-recipe-cost><Money v={cost} /></td><td colSpan={2} /></tr>
+            {data.isPrep && Number(output) > 0 && <tr><td colSpan={5}>تكلفة الوحدة ({data.unit}) = تكلفة الطبخة ÷ الناتج</td><td className="n" data-prep-unitcost><Money v={cost / Number(output)} /></td><td colSpan={2} /></tr>}</tfoot></table></div>}
+        {!data.isPrep && <div className="small muted mt">سعر البيع {money(price)}{price > 0 && <> — الهامش <b>{money(price - cost)}</b> ({Math.round(((price - cost) / price) * 1000) / 10}%)</>}. التكلفة بمتوسط تكلفة المخزون الحالي، وعند البيع تُحتسب بتكلفة ما يُخصم فعلاً.</div>}
+        {!data.isPrep && cost > 0 && <div className="row mt" style={{ gap: 8, alignItems: "center" }} data-recipe-suggest><span className="small">لهامش مستهدف</span><NumInput style={{ width: 80 }} value={target} onChange={(e: any) => setTarget(e.target.value)} data-recipe-target /><span className="small">% يكون سعر البيع قبل الضريبة <b data-recipe-price>{money(suggested)}</b>{price > 0 && <> ({suggested > price + 0.005 ? `أعلى من الحالي بـ ${money(suggested - price)}` : `الحالي يحققه`})</>}</span></div>}
+      </>}
+    </Modal>
+  );
+}
+
+// ─── a production batch (طبخة) ──────────────────────────────────────────
+function BatchModal({ prep, onClose }: { prep: any; onClose: (done?: boolean) => void }) {
+  const [input, setInput] = useState<any>(prep.inputTotal);
+  const [out, setOut] = useState<any>("");
+  const [date, setDate] = useState(today());
+  const [notes, setNotes] = useState("");
+  const [pv, setPv] = useState<any>(null);
+  const { run, busy } = useAction();
+  useEffect(() => { let on = true; const h = setTimeout(() => { api("/prep-batches/preview", { body: { productId: prep.productId, inputQty: Number(input) || 0, outputQty: out === "" ? undefined : Number(out) } }).then((r) => on && setPv(r)).catch(() => on && setPv(null)); }, 250); return () => { on = false; clearTimeout(h); }; }, [input, out, prep.productId]);
+  const bad = !(Number(input) > 0) || (out !== "" && !(Number(out) > 0));
+  return (
+    <Modal title={`طبخة جديدة — ${prep.name}`} onClose={() => onClose()} wide footer={<><div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button>
+      <button className="btn primary" disabled={busy || bad || !pv} data-batch-post onClick={() => run(async () => { await api("/prep-batches", { body: { productId: prep.productId, inputQty: Number(input), outputQty: out === "" ? undefined : Number(out), date, notes } }); onClose(true); }, "رُحّلت الطبخة")}>ترحيل الطبخة</button></>}>
+      <div className="form-grid">
+        <Field label="وزن المدخلات الإجمالي" hint={`الوصفة المعيارية ${prep.inputTotal} ← ${prep.outputQty} ${prep.unit || ""}. اكتب الوزن الذي ستحضّره فتتناسب المكونات معه`}><NumInput value={input} onChange={(e: any) => setInput(e.target.value)} data-batch-input /></Field>
+        <Field label={`الناتج الفعلي (${prep.unit || ""})`} hint={pv ? `المتوقع بالمعادلة ${pv.expectedQty} (نسبة الناتج ${pv.standardYieldPct}%). اتركه فارغاً إن طابق` : ""}><NumInput value={out} onChange={(e: any) => setOut(e.target.value)} placeholder={pv ? String(pv.expectedQty) : ""} data-batch-output /></Field>
+        <Field label="التاريخ"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="ملاحظات"><Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="اختياري" /></Field>
+      </div>
+      {pv && !bad && <>
+        <div className="card-h mt"><h3>ما يخرج من المخزون</h3></div>
+        <div className="table-wrap"><table className="tbl" data-batch-lines><thead><tr><th>المادة</th><th className="n">الكمية</th><th>الوحدة</th><th className="n">الرصيد</th><th className="n">التكلفة</th></tr></thead>
+          <tbody>{pv.lines.map((l: any) => <tr key={l.componentId}><td>{l.name}{l.short && <span className="badge red" style={{ marginInlineStart: 6 }}>الرصيد لا يكفي</span>}</td><td className="n">{l.qty}</td><td>{l.unit}</td><td className="n">{l.onHand}</td><td className="n"><Money v={l.cost} /></td></tr>)}</tbody>
+          <tfoot><tr><td colSpan={4}>تكلفة الطبخة</td><td className="n" data-batch-cost><Money v={pv.cost} /></td></tr></tfoot></table></div>
+        <div className="small mt" data-batch-summary>يدخل المخزون <b>{pv.outputQty} {pv.unit}</b> بتكلفة <b>{money(pv.unitCost)}</b> للوحدة — نسبة الناتج <b>{pv.yieldPct}%</b>{Math.abs(pv.outputQty - pv.expectedQty) > 0.0005 && <> (المعياري {pv.standardYieldPct}% بتكلفة {money(pv.standardUnitCost)})</>}. لا قيد محاسبي: القيمة تنتقل داخل المخزون.</div>
       </>}
     </Modal>
   );

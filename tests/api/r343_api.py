@@ -43,7 +43,7 @@ cheese=c('/products',{'name':'جبن','sku':'CH','type':'STOCK','salePrice':0,'p
 pizza=c('/products',{'name':'بيتزا','sku':'PZ','type':'SERVICE','salePrice':40,'taxCode':'S'})
 sup=c('/partners',{'name':'مورد الأغذية','isSupplier':True,'kind':'COMPANY','vatNumber':'300000000000003' if not EG else '200000001',**ADDR})
 inv('PURCHASE',0,sup['id'],[{'productId':flour['id'],'qty':100,'unitPrice':4,'taxCode':'S'},{'productId':cheese['id'],'qty':10,'unitPrice':30,'taxCode':'S'}])
-refused(400,lambda: c(f"/products/{flour['id']}/recipe",{'lines':[{'componentId':cheese['id'],'qty':1}]},'PUT'),'a recipe on a stock item','مخزني')
+refused(400,lambda: c(f"/products/{flour['id']}/recipe",{'lines':[{'componentId':cheese['id'],'qty':1}]},'PUT'),'a recipe on a stock item without its batch output','ناتج')
 refused(400,lambda: c(f"/products/{pizza['id']}/recipe",{'lines':[{'componentId':S['id'],'qty':1}]},'PUT'),'a service as an ingredient','ليس صنفاً مخزنياً')
 rc=c(f"/products/{pizza['id']}/recipe",{'lines':[{'componentId':flour['id'],'qty':0.25},{'componentId':cheese['id'],'qty':0.1}]},'PUT')
 ok(near(rc['cost'],4.0) and near(rc['margin'],36) and rc['canMake']==100,'recipe: cost 0.25×4 + 0.1×30 = 4.00, margin 36, 100 can be made from stock')
