@@ -145,7 +145,13 @@ export async function executive(t: Db, companyId: string, q: any = {}) {
   // things worth a second look
   const dupBills = await t.rows(`SELECT MAX(i.partner_name) name, i.supplier_ref ref, COUNT(*)::int n, SUM(i.total) total FROM invoices i WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='INVOICE' AND i.status='POSTED' AND COALESCE(i.supplier_ref,'')<>'' AND i.date > CURRENT_DATE - 365 GROUP BY i.partner_id, i.supplier_ref HAVING COUNT(*) > 1 LIMIT 10`, [C]);
   const belowCost = await t.rows(`SELECT i.number, i.id, l.description, ${LQ} qty, l.net_amount net, ${LQ}*l.unit_cost cost FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE ${SALE} AND i.kind='INVOICE' AND l.product_id IS NOT NULL AND l.unit_cost > 0 AND l.net_amount < ${LQ}*l.unit_cost - 0.01 ORDER BY (${LQ}*l.unit_cost - l.net_amount) DESC LIMIT 10`, P);
-  const overLimit = await t.rows(`SELECT p.id, p.name, p.credit_limit lim, SUM((i.total - i.amount_paid)*COALESCE(i.exchange_rate,1)) open FROM partners p JOIN invoices i ON i.partner_id=p.id AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') WHERE p.company_id=$1 AND p.credit_limit > 0 GROUP BY p.id HAVING SUM((i.total - i.amount_paid)*COALESCE(i.exchange_rate,1)) > p.credit_limit LIMIT 10`, [C]);
+  // over the credit limit — on the net (less what we owe the same party as a supplier) unless the company measures it gross
+  const netting = (await t.one(`SELECT COALESCE(accounting->>'creditNetting','NET') m FROM companies WHERE id=$1`, [C])).m !== "GROSS";
+  const overLimit = (await t.rows(`SELECT p.id, p.name, p.credit_limit lim,
+       COALESCE(SUM((i.total - i.amount_paid)*COALESCE(i.exchange_rate,1)) FILTER (WHERE i.direction='SALE'),0) gross,
+       COALESCE(SUM((i.total - i.amount_paid)*COALESCE(i.exchange_rate,1)) FILTER (WHERE i.direction='PURCHASE'),0) owed
+     FROM partners p JOIN invoices i ON i.partner_id=p.id AND i.status='POSTED' AND i.kind IN ('INVOICE','DEBIT_NOTE') WHERE p.company_id=$1 AND p.credit_limit > 0 GROUP BY p.id`, [C]))
+    .map((o: any) => ({ ...o, open: Number(o.gross) - (netting ? Math.max(0, Number(o.owed)) : 0) })).filter((o: any) => o.open > Number(o.lim) + 0.005).slice(0, 10);
   const spikes = await t.rows(`WITH m AS (SELECT e.account_id, date_trunc('month', e.date) mo, SUM(e.amount) v FROM expenses e WHERE e.company_id=$1 AND e.status='POSTED' AND e.date >= date_trunc('month', $2::date) - interval '3 months' AND e.date <= $2 GROUP BY 1,2)
       SELECT a.name_ar name, c.v cur, COALESCE(p.avg,0) avg FROM (SELECT account_id, v FROM m WHERE mo = date_trunc('month', $2::date)) c JOIN accounts a ON a.id=c.account_id
       LEFT JOIN (SELECT account_id, SUM(v)/3 avg FROM m WHERE mo < date_trunc('month', $2::date) GROUP BY 1) p ON p.account_id=c.account_id WHERE COALESCE(p.avg,0) > 0 AND c.v > p.avg*1.5 AND c.v - p.avg > 200 ORDER BY c.v - p.avg DESC LIMIT 5`, [C, to]);

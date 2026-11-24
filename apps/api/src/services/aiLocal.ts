@@ -374,6 +374,22 @@ function estoreAnswer(r: any, cur: string): string {
   out.push("[التفصيل لكل طلب ووحدة](/estore/profit)");
   return out.join("\n");
 }
+function menuAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  if (!r.rows?.length) return "لا توجد وصفات بعد. عرّف مكونات الطبق من [وصفات الأصناف](/recipes) لتظهر تكلفته وربحه.";
+  const K: Record<string, string> = { STAR: "⭐ نجم", PLOWHORSE: "🐎 يُباع بهامش ضعيف", PUZZLE: "🧩 هامش جيد قليل البيع", DOG: "⚠ ضعيف", NEW: "— بلا مبيعات" };
+  const out = [`**هندسة القائمة — آخر ${r.days} يوماً** (ربح الأطباق ${money(r.totals.profit)} ${cur}):`, "", "| الصنف | التكلفة | السعر | الهامش % | المباع | الربح | التصنيف |", "|---|---|---|---|---|---|---|",
+    ...r.rows.map((x: any) => `| ${x.name} | ${money(x.cost)} | ${money(x.salePrice)} | ${x.marginPct ?? "—"} | ${x.soldQty} | ${money(x.profit)} | ${K[x.klass] || x.klass} |`)];
+  const act = r.rows.filter((x: any) => x.klass === "PLOWHORSE" || x.klass === "DOG").slice(0, 3);
+  if (act.length) out.push("", "**ما يحتاج قراراً:**", ...act.map((x: any) => `- ${x.name}: ${x.advice}.`));
+  out.push("", "[فتح هندسة القائمة](/recipes)");
+  return out.join("\n");
+}
+function setoffAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  if (!r.rows?.length) return "لا يوجد طرف له فواتير مفتوحة كعميل وكمورد في الوقت نفسه، فلا مقاصة ممكنة الآن.";
+  return [`**يمكن مقاصتهم بلا نقد (${r.rows.length}):**`, ...r.rows.map((x: any) => `- **${x.name}**: عليه ${money(x.receivable)}، له ${money(x.payable)} ← يمكن مقاصة **${money(x.max)} ${cur}** ويبقى ${x.net >= 0 ? `عليه ${money(x.net)}` : `له ${money(-x.net)}`}.`), "", "[فتح شاشة المقاصة](/setoffs)"].join("\n");
+}
 function gapsAnswer(r: any): string {
   if (r.error) return r.error;
   const li = (a: any[]) => a.slice(0, 12).map((x: any) => `- ${x.name}${x.sku ? ` (${x.sku})` : ""}: ${Number(x.qty)}`).join("\n");
@@ -589,6 +605,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "cash_forecast") return say(forecastAnswer(res, ctx.currency), ["من لم يسدد؟", "كم علينا للموردين؟", "دقق القيود"]);
     if (prev.name === "clearing_status") return say(clearingAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "ربحية طلبات المتاجر", "افحص الدفاتر"]);
     if (prev.name === "estore_profit") return say(estoreAnswer(res, ctx.currency), ["كم لم يصل من المنصات؟", "أرباح هذا الشهر"]);
+    if (prev.name === "menu_engineering") return say(menuAnswer(res, ctx.currency), ["الأصناف الناقصة", "ملخص اليوم"]);
+    if (prev.name === "setoff_candidates") return say(setoffAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "افحص الدفاتر"]);
     if (prev.name === "stock_gaps") return say(gapsAnswer(res), ["كيف أعمل جرد", "إعادة الطلب"]);
     if (prev.name === "business_query") return say(dataAnswer(res, ctx.currency), NEXT[res.metric] || NEXT.summary);
     if (prev.name === "partner_balance") return say(partnerAnswer(res, ctx.currency), res.candidates ? res.candidates.slice(0, 4).map((x: string) => `رصيد ${prev.input.role === "SUPPLIER" ? "المورد" : "العميل"} ${x}`) : undefined);
@@ -640,6 +658,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (/(كم|ايش|وش|ما|اللي|التي|لم|ما ) ?.{0,25}(ما وصل|لم يصل|لم تصل|ما نزل|ما سمع|معلق|معلقه|باقي) .{0,20}(الشبكه|شبكه|مدي|مدى|البنك|المنصه|المنصات|سله|زد)|(مبيعات|عمليات) (ال)?(شبكه|مدي|مدى) .{0,25}(ما وصل|لم تصل|معلق|البنك)|(مستحق|مستحقات|فلوس|فلوسي) .{0,12}(عند|لدي|لدى) (سله|زد|المنصه|المنصات)|كم لم يصل/.test(n))
       return call("clearing_status", /سله/.test(n) ? { source: "SALLA" } : /(^| )زد( |$)/.test(n) ? { source: "ZID" } : /شبكه|مدي|مدى/.test(n) ? { source: "CARD" } : {});
     if (/(ربح|ربحيه|ارباح|خساره|مكسب) .{0,15}(طلبات|طلب|متجر|المتاجر|سله|زد|المنصه|الاونلاين)|(طلبات|متجر) .{0,15}(خاسره|رابحه)/.test(n)) { const per = parsePeriod(n, ctx.today); return call("estore_profit", { ...(per.explicit ? { from: per.from, to: per.to } : {}), ...(/سله/.test(n) ? { platform: "SALLA" } : /(^| )زد( |$)/.test(n) ? { platform: "ZID" } : {}) }); }
+    if (/هندسه (القائمه|المنيو)|(تكلفه|تكاليف|ربح|ربحيه|هامش) .{0,12}(الاطباق|الطبق|الوصفات|الوصفه|المنيو|الوجبات)|(اي|ايش|وش|ما) .{0,10}(الاطباق|الوجبات) .{0,15}(تربح|رابحه|خاسره|الاربح)/.test(n)) return call("menu_engineering", {});
+    if (/مقاصه|(عميل ومورد|مورد وعميل)/.test(n)) return call("setoff_candidates", {});
     if (/(اصناف|منتجات|بضاعه|صنف) .{0,20}(خلصت|خلص|نفدت|نفد|انتهت|بالسالب|سالب|رصيدها صفر)|(وش|ايش|ما) (اللي|الذي) (خلص|نفد)/.test(n)) return call("stock_gaps", {});
     const fq = FAQ.find((f) => !(f.sa && ctx.vatRate === 14) && !(f.eg && ctx.vatRate !== 14) && hit(f.keys, a.raw, n));
     if (fq) return say(`**${fq.title}**\n\n${fq.text}`);

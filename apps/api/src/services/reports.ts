@@ -615,6 +615,12 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   const exp = await n(`SELECT COUNT(*) FILTER (WHERE expiry_date < $2)::int expired, COUNT(*) FILTER (WHERE expiry_date BETWEEN $2 AND $3)::int soon FROM stock_lots WHERE company_id=$1 AND qty > 0`, [companyId, td, addDays(td, 30)]);
   if (exp.expired) items.push({ level: "err", text: `${exp.expired} دفعة منتهية الصلاحية ما زالت في المخزون — أتلفها أو أرجعها للمورد`, to: "/lots", count: exp.expired });
   if (exp.soon) items.push({ level: "warn", text: `${exp.soon} دفعة تنتهي صلاحيتها خلال 30 يوماً`, to: "/lots", count: exp.soon });
+  // a party with open invoices on both sides can be settled without cash; a dish whose recipe cost ate its margin
+  const setoffs = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(LEAST(ar, ap)),0) v FROM (SELECT partner_id, SUM(total-amount_paid) FILTER (WHERE direction='SALE') ar, SUM(total-amount_paid) FILTER (WHERE direction='PURCHASE') ap FROM invoices WHERE company_id=$1 AND status='POSTED' AND kind IN ('INVOICE','DEBIT_NOTE') AND total-amount_paid > 0.005 AND partner_id IS NOT NULL GROUP BY partner_id) x WHERE ar > 0.005 AND ap > 0.005`, [companyId]);
+  if (setoffs.c) items.push({ level: "info", text: `${setoffs.c} طرف هو عميل ومورد معاً ويمكن مقاصة ${r2(setoffs.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol} بلا نقد`, to: "/setoffs", count: setoffs.c });
+  const thin = await n(`SELECT COUNT(*)::int c FROM (SELECT d.id FROM products d JOIN product_recipes r ON r.product_id=d.id JOIN products c ON c.id=r.component_id WHERE d.company_id=$1 AND d.is_active AND d.sale_price > 0 GROUP BY d.id, d.sale_price
+      HAVING SUM(r.qty * (1 + r.waste_pct/100.0) * COALESCE((SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.product_id=c.id AND b.qty > 0), c.purchase_price, 0)) > d.sale_price * 0.7) x`, [companyId]);
+  if (thin.c) items.push({ level: "warn", text: `${thin.c} صنف بوصفة صارت تكلفته أكثر من 70% من سعر بيعه — راجع السعر أو الوصفة`, to: "/recipes", count: thin.c });
   if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });

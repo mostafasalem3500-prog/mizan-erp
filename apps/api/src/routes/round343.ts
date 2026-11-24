@@ -15,6 +15,7 @@ r343.post("/setoffs/preview", perm("payments.read"), h(async (req) => s.setoffPr
 r343.post("/setoffs", perm("accounting.write"), h(async (req) => { const r = await tx((t) => s.createSetoff(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "setoff", r.id, { number: r.number, amount: r.amount, partner: r.partnerName }); return r; }));
 r343.post("/setoffs/:id/cancel", perm("accounting.write"), h(async (req) => { const r = await tx((t) => s.cancelSetoff(t, cid(req), actor(req), p(req).id)); await audit(req, "CANCEL", "setoff", r.id, { number: r.number }); return r; }));
 
+r343.get("/recipes/engineering", perm("products.read"), h(async (req) => s.menuEngineering(db, cid(req), { days: Number(req.query.days || 30) })));
 r343.get("/recipes", perm("products.read"), h(async (req) => s.recipeList(db, cid(req))));
 r343.get("/products/:id/recipe", perm("products.read"), h(async (req) => s.getRecipe(db, cid(req), p(req).id)));
 r343.put("/products/:id/recipe", perm("products.write"), h(async (req) => { const r = await tx((t) => s.saveRecipe(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "recipe", p(req).id, { components: r.lines.length, cost: r.cost }); return r; }));

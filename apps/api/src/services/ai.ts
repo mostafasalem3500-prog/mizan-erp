@@ -3,6 +3,7 @@
  * A proposal is dry-run inside a rolled-back transaction (so the user sees the real journal entry), stored as
  * `pending`, and only the user's «تأكيد» (confirmPlan) executes it — with the user's own permissions.
  */
+import { menuEngineering, setoffCandidates } from "./round343";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -166,6 +167,16 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     if (CFG.code === "EG") return { error: "ربط المتاجر الإلكترونية غير متاح في هذه النسخة" };
     const r = await estoreProfit(t, company, { from: input.from, to: input.to, platform: input.platform });
     return { from: r.from, to: r.to, totals: r.totals, worst: [...r.orders].sort((a: any, b: any) => a.profit - b.profit).slice(0, 5), best: r.products.slice(0, 5) };
+  }
+  if (name === "menu_engineering") {
+    if (!perms(auth, "products.read")) return { error: "صلاحيتك لا تسمح بعرض الأصناف" };
+    const r = await menuEngineering(t, C, { days: num(input.days) || 30 });
+    return { days: r.days, counts: r.counts, totals: r.totals, rows: r.rows.slice(0, 15).map((x: any) => ({ name: x.name, cost: x.cost, salePrice: x.salePrice, marginPct: x.marginPct, soldQty: x.soldQty, profit: x.profit, klass: x.klass, advice: x.advice, canMake: x.canMake })) };
+  }
+  if (name === "setoff_candidates") {
+    if (!perms(auth, "payments.read")) return { error: "صلاحيتك لا تسمح بعرض المقاصات" };
+    const r = await setoffCandidates(t, C);
+    return { rows: r.rows.slice(0, 10).map((x: any) => ({ name: x.name, receivable: x.receivable, payable: x.payable, max: x.max, net: x.net })) };
   }
   if (name === "stock_gaps") {
     if (!perms(auth, "inventory.read")) return { error: "صلاحيتك لا تسمح بعرض المخزون" };

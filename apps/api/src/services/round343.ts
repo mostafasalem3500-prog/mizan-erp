@@ -110,15 +110,16 @@ export async function setoffGuardOnReverse(t: Db, C: string, entryId: string) {
 export async function getRecipe(t: Db, C: string, productId: string) {
   const prod = await t.one(`SELECT id, name, type, sale_price FROM products WHERE id=$1 AND company_id=$2`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
   const rows = await t.rows(
-    `SELECT r.component_id, r.qty, c.name, c.sku, c.unit, c.purchase_price,
+    `SELECT r.component_id, r.qty, r.waste_pct, c.name, c.sku, c.unit, c.purchase_price,
             COALESCE((SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id AND b.qty > 0), c.purchase_price, 0) avg_cost,
             COALESCE((SELECT SUM(b.qty) FROM stock_balances b WHERE b.company_id=$1 AND b.product_id=c.id),0) on_hand
        FROM product_recipes r JOIN products c ON c.id=r.component_id WHERE r.company_id=$1 AND r.product_id=$2 ORDER BY r.sort, c.name`, [C, prod.id]);
-  const lines = rows.map((r: any) => ({ componentId: r.componentId, name: r.name, sku: r.sku, unit: r.unit, qty: Number(r.qty), unitCost: r2(Number(r.avgCost)), cost: r2(Number(r.qty) * Number(r.avgCost)), onHand: r3(Number(r.onHand)) }));
+  // what is taken from stock per unit sold = the net quantity plus its waste (peel, trim, spill)
+  const lines = rows.map((r: any) => { const w = Number(r.wastePct || 0), used = Number(r.qty) * (1 + w / 100); return { componentId: r.componentId, name: r.name, sku: r.sku, unit: r.unit, qty: Number(r.qty), wastePct: w, usedQty: Math.round(used * 10000) / 10000, unitCost: r2(Number(r.avgCost)), cost: r2(used * Number(r.avgCost)), onHand: r3(Number(r.onHand)) }; });
   const cost = r2(lines.reduce((s: number, l: any) => s + l.cost, 0));
   const price = Number(prod.salePrice || 0);
   return { productId: prod.id, name: prod.name, type: prod.type, canHaveRecipe: prod.type !== "STOCK", lines, cost, salePrice: price, margin: price > 0 ? r2(price - cost) : null, marginPct: price > 0 ? r2(((price - cost) / price) * 100) : null,
-    canMake: lines.length ? Math.max(0, Math.floor(Math.min(...lines.map((l: any) => l.onHand / l.qty)))) : null };
+    canMake: lines.length ? Math.max(0, Math.floor(Math.min(...lines.map((l: any) => l.onHand / l.usedQty)))) : null };
 }
 
 export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
@@ -133,13 +134,14 @@ export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
     if (seen.has(l.componentId)) throw bad("المكوّن مكرر في الوصفة");
     seen.add(l.componentId);
     if (!(num(l.qty) > 0)) throw bad("كمية المكوّن يجب أن تكون أكبر من صفر");
+    if (num(l.wastePct) < 0 || num(l.wastePct) > 90) throw bad("نسبة الهالك بين 0 و90%");
     const c = await t.maybe(`SELECT type, name FROM products WHERE id=$1 AND company_id=$2`, [l.componentId, C]);
     if (!c) throw bad("المكوّن غير موجود");
     if (c.type !== "STOCK") throw bad(`المكوّن «${c.name}» ليس صنفاً مخزنياً`);
   }
   await t.exec(`DELETE FROM product_recipes WHERE product_id=$1 AND company_id=$2`, [prod.id, C]);
   let i = 0;
-  for (const l of lines) await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort) VALUES ($1,$2,$3,$4,$5)`, [C, prod.id, l.componentId, Math.round(num(l.qty) * 10000) / 10000, i++]);
+  for (const l of lines) await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort, waste_pct) VALUES ($1,$2,$3,$4,$5,$6)`, [C, prod.id, l.componentId, Math.round(num(l.qty) * 10000) / 10000, i++, Math.round(num(l.wastePct) * 100) / 100]);
   return getRecipe(t, C, prod.id);
 }
 
@@ -147,7 +149,7 @@ export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
 export async function recipesOf(t: Db, C: string, productIds: string[]) {
   const out = new Map<string, any[]>();
   if (!productIds.length) return out;
-  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty, c.name, c.purchase_price FROM product_recipes r JOIN products c ON c.id=r.component_id WHERE r.company_id=$1 AND r.product_id = ANY($2::uuid[]) ORDER BY r.sort`, [C, productIds]);
+  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty * (1 + r.waste_pct / 100.0) qty, c.name, c.purchase_price FROM product_recipes r JOIN products c ON c.id=r.component_id WHERE r.company_id=$1 AND r.product_id = ANY($2::uuid[]) ORDER BY r.sort`, [C, productIds]);
   for (const r of rows) { const a = out.get(r.productId) || []; a.push({ componentId: r.componentId, qty: Number(r.qty), name: r.name, purchasePrice: Number(r.purchasePrice || 0) }); out.set(r.productId, a); }
   return out;
 }
@@ -159,6 +161,35 @@ export async function recipeList(t: Db, C: string) {
   for (const x of ids) { const r = await getRecipe(t, C, x.id); rows.push({ productId: r.productId, name: r.name, components: r.lines.length, cost: r.cost, salePrice: r.salePrice, margin: r.margin, marginPct: r.marginPct, canMake: r.canMake }); }
   rows.sort((a, b) => a.name.localeCompare(b.name, "ar"));
   return { rows };
+}
+
+/**
+ * Menu engineering (Kasavana & Smith): each dish is placed by how much it sells against how much each sale leaves.
+ * Popular = its share of units is at least 70% of an equal share; profitable = its margin per unit is at least the
+ * average margin per unit sold. Star (both), plowhorse (sells, thin margin), puzzle (good margin, sells little), dog (neither).
+ */
+export async function menuEngineering(t: Db, C: string, q: { days?: number }) {
+  const days = Math.min(365, Math.max(7, Math.round(num(q.days) || 30)));
+  const sold = await t.rows(
+    `SELECT l.product_id id, SUM(l.qty * COALESCE(l.factor,1) * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) qty,
+            SUM(l.net_amount * COALESCE(i.exchange_rate,1) * CASE WHEN i.kind='CREDIT_NOTE' THEN -1 ELSE 1 END) net,
+            SUM(CASE WHEN i.kind='INVOICE' THEN l.qty * COALESCE(l.factor,1) * l.unit_cost ELSE 0 END) cost
+       FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
+      WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date > CURRENT_DATE - $2::int
+        AND l.product_id IN (SELECT product_id FROM product_recipes WHERE company_id=$1) GROUP BY l.product_id`, [C, days]);
+  const by = new Map(sold.map((x: any) => [x.id, x]));
+  const list = (await recipeList(t, C)).rows;
+  const rows = list.map((r: any) => { const s: any = by.get(r.productId) || {}; const qty = r3(Number(s.qty || 0)), net = r2(Number(s.net || 0)), cost = r2(Number(s.cost || 0)); return { ...r, soldQty: qty, revenue: net, soldCost: cost, profit: r2(net - cost), unitMargin: qty > 0 ? r2((net - cost) / qty) : r.margin }; });
+  const totalQty = rows.reduce((a: number, r: any) => a + Math.max(0, r.soldQty), 0), totalProfit = rows.reduce((a: number, r: any) => a + r.profit, 0);
+  const popLine = rows.length ? (totalQty / rows.length) * 0.7 : 0, avgMargin = totalQty > 0 ? totalProfit / totalQty : 0;
+  for (const r of rows) {
+    const pop = totalQty > 0 && r.soldQty >= popLine - 1e-9 && r.soldQty > 0, prof = Number(r.unitMargin || 0) >= avgMargin - 1e-9;
+    r.sharePct = totalQty > 0 ? r2((Math.max(0, r.soldQty) / totalQty) * 100) : 0;
+    r.klass = totalQty <= 0 ? "NEW" : pop && prof ? "STAR" : pop ? "PLOWHORSE" : prof ? "PUZZLE" : "DOG";
+    r.advice = r.klass === "STAR" ? "حافظ عليه: مكانه البارز في القائمة وجودته كما هي" : r.klass === "PLOWHORSE" ? "يُباع كثيراً بهامش ضعيف: ارفع السعر قليلاً أو خفّض تكلفة الوصفة" : r.klass === "PUZZLE" ? "هامشه جيد ويُباع قليلاً: روّج له أو غيّر مكانه واسمه في القائمة" : r.klass === "DOG" ? "لا يُباع ولا يربح: راجع وجوده في القائمة" : "لا مبيعات في الفترة بعد";
+  }
+  rows.sort((a: any, b: any) => b.profit - a.profit);
+  return { days, rows, totals: { qty: r3(totalQty), profit: r2(totalProfit), avgMargin: r2(avgMargin), popularityLine: r3(popLine) }, counts: { STAR: rows.filter((r: any) => r.klass === "STAR").length, PLOWHORSE: rows.filter((r: any) => r.klass === "PLOWHORSE").length, PUZZLE: rows.filter((r: any) => r.klass === "PUZZLE").length, DOG: rows.filter((r: any) => r.klass === "DOG").length } };
 }
 
 // ───────────────────────── supplier bank details + bank file ─────────────────────────
@@ -200,5 +231,20 @@ export async function bankFile(t: Db, C: string, runId: string) {
   const q = (v: any) => { const x = String(v ?? ""); return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
   const head = ["Beneficiary", "IBAN", "Bank", "Amount", "Currency", "Reference", "Details", "Debit IBAN", "Value date"];
   const csv = "﻿" + [head, ...rows.map((r) => [r.beneficiary, r.iban, r.bank, r.amount.toFixed(2), r.currency, r.reference, r.details, src?.iban || "", iso(run.payDate)])].map((a) => a.map(q).join(",")).join("\r\n") + "\r\n";
-  return { number: run.number, status: run.status, count: rows.length, total: r2(rows.reduce((s, r) => s + r.amount, 0)), missing, debitIban: src?.iban || null, rows, csv, filename: `${run.number}-bank.csv` };
+  // ISO 20022 customer credit transfer initiation (pain.001.001.03) — the format banks accept for bulk transfers
+  const x = (v: any) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const co = await t.one(`SELECT COALESCE(NULLIF(name_en,''), name_ar) AS name FROM companies WHERE id=$1`, [C]);
+  const total = r2(rows.reduce((s, r) => s + r.amount, 0));
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03">
+ <CstmrCdtTrfInitn>
+  <GrpHdr><MsgId>${x(run.number)}</MsgId><CreDtTm>${new Date().toISOString().slice(0, 19)}</CreDtTm><NbOfTxs>${rows.length}</NbOfTxs><CtrlSum>${total.toFixed(2)}</CtrlSum><InitgPty><Nm>${x(co.name).slice(0, 70)}</Nm></InitgPty></GrpHdr>
+  <PmtInf><PmtInfId>${x(run.number)}</PmtInfId><PmtMtd>TRF</PmtMtd><NbOfTxs>${rows.length}</NbOfTxs><CtrlSum>${total.toFixed(2)}</CtrlSum><ReqdExctnDt>${iso(run.payDate)}</ReqdExctnDt>
+   <Dbtr><Nm>${x(co.name).slice(0, 70)}</Nm></Dbtr><DbtrAcct><Id>${src?.iban ? `<IBAN>${x(src.iban)}</IBAN>` : `<Othr><Id>NOTPROVIDED</Id></Othr>`}</Id></DbtrAcct><DbtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></DbtrAgt>
+${rows.map((r, i) => `   <CdtTrfTxInf><PmtId><EndToEndId>${x(run.number)}-${i + 1}</EndToEndId></PmtId><Amt><InstdAmt Ccy="${x(r.currency)}">${r.amount.toFixed(2)}</InstdAmt></Amt><Cdtr><Nm>${x(r.beneficiary).slice(0, 70)}</Nm></Cdtr><CdtrAcct><Id><IBAN>${x(r.iban)}</IBAN></Id></CdtrAcct><RmtInf><Ustrd>${x(r.details || r.reference).slice(0, 140)}</Ustrd></RmtInf></CdtTrfTxInf>`).join("\n")}
+  </PmtInf>
+ </CstmrCdtTrfInitn>
+</Document>
+`;
+  return { xml, xmlFilename: `${run.number}-pain001.xml`, number: run.number, status: run.status, count: rows.length, total: r2(rows.reduce((s, r) => s + r.amount, 0)), missing, debitIban: src?.iban || null, rows, csv, filename: `${run.number}-bank.csv` };
 }
