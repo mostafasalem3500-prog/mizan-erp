@@ -36,6 +36,8 @@ const PaymentRunsPage = lz(() => import("./pages/Round338"), "PaymentRunsPage");
 const CashForecastPage = lz(() => import("./pages/Round338"), "CashForecastPage");
 const AuditorPage = lz(() => import("./pages/Round338"), "AuditorPage");
 const ClearingPage = lz(() => import("./pages/Round340"), "ClearingPage");
+const SetoffPage = lz(() => import("./pages/Round343"), "SetoffPage");
+const RecipesPage = lz(() => import("./pages/Round343"), "RecipesPage");
 const EstoreProfitPage = lz(() => import("./pages/Round340"), "EstoreProfitPage");
 const RemittancesPage = lz(() => import("./pages/Round339"), "RemittancesPage");
 const EgCompliancePage = lz(() => import("./pages/Round339"), "EgCompliancePage");
@@ -269,6 +271,8 @@ export function App() {
                 <Route path="/journal-approvals" element={<JournalApprovalsPage />} />
                 <Route path="/pos/modifiers" element={<ModifiersPage />} />
                 <Route path="/payment-runs" element={<PaymentRunsPage />} />
+                <Route path="/setoffs" element={<SetoffPage />} />
+                <Route path="/recipes" element={<RecipesPage />} />
                 <Route path="/cash-forecast" element={<CashForecastPage />} />
                 <Route path="/auditor" element={<AuditorPage />} />
                 <Route path="/cost-allocations" element={<CostAllocationsPage />} />

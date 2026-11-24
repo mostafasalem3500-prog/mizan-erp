@@ -10,6 +10,7 @@ import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, i
 import { currentCtx } from "../lib/context";
 import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut, avgCost } from "../accounting/stock";
+import { recipesOf } from "./round343";
 import { stampInvoice } from "../zatca/stamp";
 import { checkPartner } from "../lib/partnerRules";
 import { rateFor, toFc, fcUnitToBase, BASE } from "./currency";
@@ -299,7 +300,21 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   }
 
   // ── inventory effects ──
+  // recipes: a non-stock item sold on an invoice consumes its ingredients; its cost of sales is what was consumed.
+  // Ingredients may go negative (a kitchen does not stop selling for a late goods receipt) and show in the negative-stock alert.
+  const recipes = isSale && inv.kind === "INVOICE" ? await recipesOf(t, companyId, lines.filter((x) => x.productId && x.ptype !== "STOCK").map((x) => x.productId)) : new Map<string, any[]>();
   for (const l of lines) {
+    if (l.productId && l.ptype !== "STOCK" && recipes.has(l.productId)) {
+      const sold = r3(Number(l.qty) * Number(l.factor || 1));
+      let used = 0;
+      for (const c of recipes.get(l.productId)!) {
+        used = r2(D(used).plus(await stockOut(t, companyId, { productId: c.componentId, warehouseId: inv.warehouseId, qty: r3(sold * c.qty), date: inv.date, sourceId: inv.id, reference: ref, isDemo: inv.isDemo, sourceType: inv.channel === "POS" ? "POS" : "SALE", allowNegative: true, fallbackCost: c.purchasePrice, productName: c.name })));
+      }
+      costTotal = r2(D(costTotal).plus(used));
+      await t.exec(`UPDATE invoice_lines SET unit_cost=$2 WHERE id=$1`, [l.id, sold ? r4(D(used).div(sold)) : 0]);
+      l._cost = used;
+      continue;
+    }
     if (!l.productId || l.ptype !== "STOCK") continue;
     const q = r3(Number(l.qty) * Number(l.factor || 1)); // base units
     const base = { productId: l.productId, warehouseId: inv.warehouseId, qty: q, date: inv.date, sourceId: inv.id, reference: ref, isDemo: inv.isDemo };

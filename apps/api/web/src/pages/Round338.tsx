@@ -6,6 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { RecurringForm } from "./Round3";
+import { BankFileBtn } from "./Round343";
 import { api, q, useFetch, useAction, Money, money, Loading, Empty, Modal, Field, Input, NumInput, Select, Picker, partnerFetcher, today, fmtDate, fmtDT, confirmDlg, useCompanyContext } from "../lib";
 
 const addDays = (s: string, n: number) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -179,6 +180,7 @@ function RunModal({ id, onClose }: { id: string; onClose: () => void }) {
       {d.status === "DRAFT" && <button className="btn primary" disabled={busy} data-run-approve onClick={() => act("approve", "اعتُمدت الدفعة", `اعتماد سداد ${money(d.total)} لـ${d.suppliers.length} موردين؟`)}>اعتماد</button>}
       {d.status === "APPROVED" && <><button className="btn ghost" disabled={busy} onClick={() => act("reopen", "أُعيدت مسودة")}>إعادة مسودة</button><button className="btn primary" disabled={busy} data-run-post onClick={() => act("post", "رُحّلت الدفعة وصدرت سندات الصرف", `ترحيل الدفعة وإصدار ${d.suppliers.length} سند صرف من ${d.accountName}؟`)}>ترحيل وإصدار السندات</button></>}
       {d.status !== "CANCELLED" && <button className="btn ghost danger" disabled={busy} onClick={() => act("cancel", "أُلغيت الدفعة", d.status === "POSTED" ? "إلغاء الدفعة يلغي سندات الصرف التي صدرت منها بقيود عكسية. متابعة؟" : "إلغاء الدفعة؟")}>إلغاء الدفعة</button>}
+      {(d.status === "APPROVED" || d.status === "POSTED") && <BankFileBtn runId={d.id} />}
       <button className="btn ghost" onClick={() => window.print()}>طباعة</button></>}>
       {!d ? <Loading /> : <div className="print-doc" data-run-detail>
         <div className="grid c3">

@@ -52,7 +52,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 19; // 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 20; // 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -450,6 +450,15 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         });
       } catch { /* the example is optional */ }
     }
+    // example: a dish with a recipe — its cost and margin show in the recipes screen; selling it takes the ingredients from stock
+    try {
+      await t.savepoint(async () => {
+        const comps = await t.rows(`SELECT id FROM products WHERE company_id=$1 AND is_demo AND type='STOCK' AND purchase_price > 0 AND sku <> 'CB-DEMO' ORDER BY purchase_price LIMIT 2`, [companyId]);
+        if (comps.length < 2) return;
+        const dish = await t.insert("products", { companyId, sku: "RCP-DEMO", name: "وجبة مجمّعة (مثال: وصفة بمكونات)", type: "SERVICE", unit: "وجبة", salePrice: 35, purchasePrice: 0, taxCode: "S", isActive: true, isDemo: true });
+        await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort) VALUES ($1,$2,$3,1,0),($1,$2,$4,2,1)`, [companyId, dish.id, comps[0].id, comps[1].id]);
+      });
+    } catch { /* the example is optional */ }
     if (IS_EG) await egLocalizeDemo(t, companyId);
     await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);
   });
@@ -486,6 +495,8 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM landed_costs WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM clearing_batches WHERE company_id=$1 AND (is_demo OR id IN (SELECT l.batch_id FROM clearing_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo))`, [companyId]);
     // a payment run prepared on sample bills goes with them (its lines point at the bills)
+    await t.exec(`DELETE FROM partner_setoffs WHERE company_id=$1 AND (is_demo OR partner_id IN (SELECT id FROM partners WHERE company_id=$1 AND is_demo))`, [companyId]);
+    await t.exec(`DELETE FROM product_recipes WHERE company_id=$1 AND (product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo) OR component_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);
     await t.exec(`DELETE FROM payment_runs WHERE company_id=$1 AND id IN (SELECT l.run_id FROM payment_run_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo)`, [companyId]);
     await t.exec(`DELETE FROM recurring_templates WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM estore_payouts WHERE company_id=$1 AND is_demo`, [companyId]);
