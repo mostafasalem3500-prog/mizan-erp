@@ -4,6 +4,7 @@
  *   { columns: [{ key, label, type, sum }], rows: [...], totals: {...}, meta }
  * Rows may carry `_link` (in-app path) for drill-down.
  */
+import { CAT_TREE } from "./round347";
 import { Db } from "../db/pool";
 import { VAT_F, VAT_RATE, BASE_CURRENCY } from "../lib/country";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
@@ -150,7 +151,7 @@ function docWhere(companyId: string, q: any, alias = "i") {
   if (q.user) w.add(`${alias}.created_by=?`, q.user);
   if (q.productId && UUID.test(q.productId)) w.add(`EXISTS (SELECT 1 FROM invoice_lines x WHERE x.invoice_id=${alias}.id AND x.product_id=?::uuid)`, q.productId);
   const cats = list(q.categoryId).filter((x) => UUID.test(x));
-  if (cats.length) w.add(`EXISTS (SELECT 1 FROM invoice_lines x JOIN products px ON px.id=x.product_id WHERE x.invoice_id=${alias}.id AND px.category_id = ANY(?::uuid[]))`, cats);
+  if (cats.length) w.add(`EXISTS (SELECT 1 FROM invoice_lines x JOIN products px ON px.id=x.product_id WHERE x.invoice_id=${alias}.id AND px.category_id IN ${CAT_TREE()})`, cats);
   if (q.overdue === "1" || q.overdueOnly === "1") w.raw(`${alias}.status='POSTED' AND ${alias}.kind IN ('INVOICE','DEBIT_NOTE') AND ${alias}.total-${alias}.amount_paid>0.001 AND COALESCE(${alias}.due_date,${alias}.date) < CURRENT_DATE`);
   if (q.minTotal && Number(q.minTotal) > 0) w.add(`${alias}.total >= ?`, Number(q.minTotal));
   w.like([`${alias}.number`, `${alias}.partner_name`, `${alias}.supplier_ref`, `${alias}.notes`, `${alias}.external_ref`], q.q);
@@ -183,7 +184,7 @@ IMPL["sales.summary"] = async (t, companyId, q) => {
   w.raw("i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE')");
   w.uuid("p.category_id", undefined); // placeholder (category handled in docWhere via EXISTS; also line-level below)
   const cats = list(q.categoryId).filter((x) => UUID.test(x));
-  if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   if (q.productId && UUID.test(q.productId)) w.add("l.product_id=?::uuid", q.productId);
   if (q.taxCode) w.in("l.tax_code", q.taxCode);
   const [gk, gl, gs] = lineDim(g);
@@ -206,7 +207,7 @@ IMPL["sales.lines"] = async (t, companyId, q) => {
   const w = docWhere(companyId, q);
   w.raw("i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE','DEBIT_NOTE')");
   if (q.productId && UUID.test(q.productId)) w.add("l.product_id=?::uuid", q.productId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   if (q.taxCode) w.in("l.tax_code", q.taxCode);
   const sale = q.direction !== "PURCHASE";
   const rows = await t.rows(`SELECT i.id, i.number, i.date, i.kind, i.partner_name, i.channel, i.created_by, l.description, p.sku, c.name AS category, l.qty, l.uom, l.factor, l.unit_price, l.discount_pct, l.tax_code, l.net_amount*${SIGN} net, l.vat_amount*${SIGN} vat, l.total*${SIGN} total, l.qty*l.factor*l.unit_cost*${SIGN} cost, w.name AS warehouse
@@ -261,7 +262,7 @@ IMPL["sales.daily-cash"] = async (t, companyId, q) => {
 IMPL["purch.price-history"] = async (t, companyId, q) => {
   const w = docWhere(companyId, { ...q, direction: "PURCHASE", kind: "INVOICE", status: "POSTED" });
   if (q.productId && UUID.test(q.productId)) w.add("l.product_id=?::uuid", q.productId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   w.raw("l.product_id IS NOT NULL");
   const g = q.groupBy || "product";
   const base = `FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id WHERE ${w.sql}`;
@@ -281,7 +282,7 @@ function moveWhere(companyId: string, q: any, withPeriod = true) {
   const w = new W("m.company_id=?", companyId);
   if (withPeriod) w.range("m.date", from, to);
   w.uuids("m.warehouse_id", q.warehouseId).uuid("m.product_id", q.productId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   branchViaWarehouse(w, q);
   w.in("m.source_type", q.moveType);
   w.like(["m.reference", "p.name", "p.sku"], q.q);
@@ -292,7 +293,7 @@ IMPL["inv.movement"] = async (t, companyId, q) => {
   const g = q.groupBy || "product";
   const w = new W("m.company_id=?", companyId);
   w.add("m.date <= ?", to).uuids("m.warehouse_id", q.warehouseId).uuid("m.product_id", q.productId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   branchViaWarehouse(w, q);
   if (q.moveType) w.add("(m.date < ? OR m.source_type = ANY(?::text[]))", from), w.params.push(list(q.moveType)), (w.conds[w.conds.length - 1] = w.conds[w.conds.length - 1].replace("ANY(?", `ANY($${w.params.length}`));
   w.params.push(from); const F = `$${w.params.length}`;
@@ -317,7 +318,7 @@ IMPL["inv.moves"] = async (t, companyId, q) => {
 IMPL["inv.by-warehouse"] = async (t, companyId, q) => {
   const w = new W("b.company_id=?", companyId);
   w.uuid("b.product_id", q.productId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   branchViaWarehouse(w, q);
   w.like(["p.name", "p.sku"], q.q);
   const rows = await t.rows(`SELECT p.id, p.sku, p.name, p.unit, p.reorder_level, c.name AS category, w.name AS warehouse, b.qty, b.value FROM stock_balances b JOIN products p ON p.id=b.product_id JOIN warehouses w ON w.id=b.warehouse_id LEFT JOIN product_categories c ON c.id=p.category_id WHERE ${w.sql} ORDER BY p.name`, w.params);
@@ -331,7 +332,7 @@ IMPL["inv.by-warehouse"] = async (t, companyId, q) => {
 IMPL["inv.status"] = async (t, companyId, q) => {
   const days = Math.max(7, Number(q.days) || 90);
   const w = new W("p.company_id=?", companyId); w.raw("p.type='STOCK' AND p.is_active");
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   w.like(["p.name", "p.sku"], q.q);
   const whIds = list(q.warehouseId).filter((x) => UUID.test(x));
   const whCond = whIds.length ? `AND b.warehouse_id = ANY('{${whIds.join(",")}}'::uuid[])` : q.branchId && UUID.test(q.branchId) ? `AND b.warehouse_id IN (SELECT id FROM warehouses WHERE branch_id='${q.branchId}'::uuid)` : "";
@@ -358,7 +359,7 @@ IMPL["inv.turnover"] = async (t, companyId, q) => {
   const g = q.groupBy || "product";
   const w = new W("m.company_id=?", companyId);
   w.add("m.date <= ?", to).uuids("m.warehouse_id", q.warehouseId);
-  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add("p.category_id = ANY(?::uuid[])", cats);
+  const cats = list(q.categoryId).filter((x) => UUID.test(x)); if (cats.length) w.add(`p.category_id IN ${CAT_TREE()}`, cats);
   branchViaWarehouse(w, q);
   w.params.push(from); const F = `$${w.params.length}`;
   const sel = g === "category" ? "COALESCE(c.name,'بدون تصنيف') AS name" : "p.sku, p.name";

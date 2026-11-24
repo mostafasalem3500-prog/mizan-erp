@@ -53,7 +53,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 22; // 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 23; // 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -90,6 +90,13 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
   await db.exec(`UPDATE memberships SET staff_no='1001' WHERE company_id=$1 AND user_id=$2 AND staff_no IS NULL AND NOT EXISTS (SELECT 1 FROM memberships x WHERE x.company_id=$1 AND x.staff_no IS NOT NULL)`, [companyId, userId]);
   const c = { ...company, id: companyId, allowNegativeStock: false, pricesIncludeVat: false };
   const rand = rng(20260926);
+  // a believable time of day for a sample sale: busier at lunch and in the evening, more so at weekends
+  const atHour = (date: string, till = false) => {
+    const wd = new Date(date + "T00:00:00Z").getUTCDay(), weekend = wd === 4 || wd === 5;
+    const hours = till ? (weekend ? [11, 13, 13, 14, 17, 18, 19, 20, 20, 21, 21, 22] : [9, 10, 12, 13, 13, 14, 16, 18, 19, 19, 20, 21]) : [8, 9, 9, 10, 10, 11, 11, 12, 13, 14, 15, 16];
+    const h = hours[Math.floor(rand() * hours.length)], m = Math.floor(rand() * 60);
+    return new Date(Date.parse(date + "T00:00:00Z") + (h - 3) * 3600e3 + m * 60e3);
+  };
   const pick = <T,>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
   const between = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1));
   const end = today();
@@ -224,7 +231,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         try {
           await t.savepoint(async () => {
             const d = await saveDraft(t, c, userName, { direction: "SALE", kind: "INVOICE", date, partnerId: cust.id, warehouseId: jed ? ids.wh2 : ids.wh, invoiceType: "STANDARD", lines: jed ? lines.map((l: any) => ({ ...l, qty: Math.min(l.qty, 25), uomId: null, unitPrice: l.uomId ? Number(ids.products.find((x: any) => x.id === l.productId)?.salePrice) : l.unitPrice })) : lines, isDemo: true });
-            salesInvoices.push(await postInvoice(t, c, d.id, userName));
+            salesInvoices.push(await postInvoice(t, c, d.id, userName, { issuedAt: atHour(date) }));
           });
         } catch (e: any) {
           if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "CREDIT_LIMIT" && e.code !== "EXPIRED_STOCK") throw e;
@@ -240,7 +247,7 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
           const lines = Array.from({ length: between(1, 4) }, () => ({ productId: pick(stock).id, qty: between(1, 6) }));
           const method = rand() < 0.55 ? "CARD" : "CASH";
           try {
-            const inv = await t.savepoint(() => posSale(t, c, user, { sessionId: session.id, lines, tenders: [{ method: method as any, amount: null }], isDemo: true, date, partnerId: rand() < 0.2 ? pick(ids.customers.filter((x) => x.kind === "INDIVIDUAL")).id : null, discountPct: rand() < 0.1 ? 5 : 0 }));
+            const inv = await t.savepoint(() => posSale(t, c, user, { sessionId: session.id, lines, tenders: [{ method: method as any, amount: null }], isDemo: true, date, issuedAt: atHour(date, true).toISOString(), partnerId: rand() < 0.2 ? pick(ids.customers.filter((x) => x.kind === "INDIVIDUAL")).id : null, discountPct: rand() < 0.1 ? 5 : 0 }));
             tickets.push(inv);
           } catch (e: any) {
             if (e.code !== "INSUFFICIENT_STOCK" && e.code !== "EXPIRED_STOCK") throw e;
@@ -460,6 +467,8 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
         await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort) VALUES ($1,$2,$3,1,0),($1,$2,$4,2,1)`, [companyId, dish.id, comps[0].id, comps[1].id]);
       });
     } catch { /* the example is optional */ }
+    // the sample categories get an icon and an order, as a real menu would
+    await t.exec(`UPDATE product_categories SET icon = CASE name WHEN 'مواد غذائية' THEN '🍚' WHEN 'مشروبات' THEN '🥤' WHEN 'منظفات' THEN '🧴' WHEN 'قرطاسية' THEN '📎' WHEN 'إلكترونيات' THEN '💻' WHEN 'خدمات' THEN '🛠' WHEN 'أدوية ومستلزمات' THEN '💊' ELSE icon END WHERE company_id=$1 AND is_demo AND icon IS NULL`, [companyId]);
     // example: restaurant costing — shawarma from raw materials to the sandwich, batch and direct methods side by side
     try { await t.savepoint(async () => { await seedShawarmaExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName, userId); }); } catch { /* the example is optional */ }
     if (IS_EG) await egLocalizeDemo(t, companyId);

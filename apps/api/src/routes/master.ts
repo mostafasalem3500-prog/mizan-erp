@@ -8,6 +8,7 @@ import { h, bad, conflict, notFound, req as need, num, paging, TAX_CODES, AppErr
 import { authenticate, perm, cid, actor, p, ROLES } from "../lib/auth";
 import { TYPE_BY_CLASS, SUBTYPE_AR, SUBTYPES_BY_TYPE, normalizeSubtype } from "../accounting/coa";
 import { BASE_CURRENCY, IS_EG, COUNTRY } from "../lib/country";
+import { CAT_TREE } from "../services/round347";
 import { EG_WHT_TYPES } from "../services/egypt";
 const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 
@@ -132,10 +133,6 @@ export async function nextCode(companyId: string, prefix: string) {
 }
 
 // ─── products & categories ────────────────────────────────────────────────
-master.get("/categories", perm("products.read"), h(async (req) => db.rows(`SELECT c.*, (SELECT COUNT(*)::int FROM products p WHERE p.category_id=c.id) count FROM product_categories c WHERE company_id=$1 ORDER BY name`, [cid(req)])));
-master.post("/categories", perm("products.write"), h(async (req) => db.insert("product_categories", { companyId: cid(req), name: String(need(req.body, "name", "الاسم")), color: req.body.color || null })));
-master.put("/categories/:id", perm("products.write"), h(async (req) => db.update("product_categories", { id: p(req).id, companyId: cid(req) }, { name: req.body.name, color: req.body.color })));
-master.delete("/categories/:id", perm("products.write"), h(async (req) => { await db.exec(`UPDATE products SET category_id=NULL WHERE category_id=$1`, [p(req).id]); await db.exec(`DELETE FROM product_categories WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true }; }));
 
 /** Product columns for lists — the image travels as a cacheable media URL (versioned), never as inline base64. */
 export const PRODUCT_COLS = `p.id, p.company_id, p.sku, p.barcode, p.name, p.name_en, p.type, p.category_id, p.unit, p.sale_price, p.purchase_price, p.tax_code, p.reorder_level, p.is_active, p.is_demo, p.created_at, p.track_lots, p.shelf_life_days, p.image_updated_at,
@@ -162,7 +159,7 @@ master.get(
     const where = ["p.company_id=$1"];
     if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(p.name ILIKE $${params.length} OR p.sku ILIKE $${params.length} OR p.barcode ILIKE $${params.length})`); }
     if (req.query.barcode) { params.push(req.query.barcode); where.push(`(p.barcode=$${params.length} OR p.sku=$${params.length} OR EXISTS (SELECT 1 FROM product_uoms u WHERE u.product_id=p.id AND u.barcode=$${params.length}))`); }
-    if (req.query.categoryId) { params.push(req.query.categoryId); where.push(`p.category_id=$${params.length}`); }
+    if (req.query.categoryId && /^[0-9a-f-]{36}$/i.test(String(req.query.categoryId))) { params.push([String(req.query.categoryId)]); where.push(`p.category_id IN ${CAT_TREE(`$${params.length}`)}`); }
     if (req.query.active !== "all") where.push("p.is_active");
     params.push(limit, offset);
     const rows = await db.rows(

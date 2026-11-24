@@ -17,6 +17,7 @@ import { r338 } from "./routes/round338";
 import { r339 } from "./routes/round339";
 import { r340 } from "./routes/round340";
 import { r343 } from "./routes/round343";
+import { r347 } from "./routes/round347";
 import { startDigestScheduler } from "./services/digest";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -176,6 +177,7 @@ app.use("/api", r338);
 app.use("/api", r339);
 app.use("/api", r340);
 app.use("/api", r343);
+app.use("/api", r347);
 app.use("/api", egr);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));

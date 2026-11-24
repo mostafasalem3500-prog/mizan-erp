@@ -4,6 +4,7 @@ import { ProductImagesModal } from "./ProductImages";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ImportModal } from "./Import";
+import { CategoryOptions, CategoryEditor } from "./Categories";
 import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches, useNewParam, useTabParam } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ export const StatementModal = PartnerStatement;
 export function ProductsPage() {
   const { can } = useCompanyContext();
   const [search, setSearch] = useUrlSearch();
-  const [cat, setCat] = useState("");
+  const [cat, setCat] = useState(() => new URLSearchParams(window.location.search).get("cat") || "");
   const [type, setType] = useState("");
   const [stock, setStock] = useState("");
   const [img, setImg] = useState("");
@@ -122,11 +123,11 @@ export function ProductsPage() {
   const allSel = filtered.length > 0 && filtered.every((p: any) => sel[p.id]);
   return (
     <div className="card">
-      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setImages(selected.length ? selected : filtered)} title="رفع/تغيير صور الأصناف المحددة (أو الظاهرة)">🖼 صور الأصناف{selected.length ? ` (${selected.length})` : ""}</button><button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button><button className="btn sm" onClick={() => setCats(true)}>التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
+      <div className="card-h"><h3>الأصناف والخدمات <span className="muted small">({data?.length || 0})</span></h3><div className="row">{can("products.write") && <><button className="btn sm" onClick={() => setImages(selected.length ? selected : filtered)} title="رفع/تغيير صور الأصناف المحددة (أو الظاهرة)">🖼 صور الأصناف{selected.length ? ` (${selected.length})` : ""}</button><button className="btn sm" onClick={() => setImp(true)}>⬆ استيراد Excel</button><button className="btn sm" onClick={() => navP("/categories")} data-open-categories>🗂 التصنيفات</button><button className="btn primary sm" onClick={() => setEdit({})}>＋ صنف جديد</button></>}</div></div>
       <div className="card-b">
         <div className="toolbar">
           <SearchBox value={search} onChange={setSearch} placeholder="بحث بالاسم / الرمز / الباركود" width={260} />
-          <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">كل التصنيفات</option>{(categories.data || []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+          <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">كل التصنيفات</option><CategoryOptions cats={categories.data || []} /></Select>
           <Select value={type} onChange={(e) => setType(e.target.value)}><option value="">مخزني وخدمة</option><option value="STOCK">أصناف مخزنية</option><option value="SERVICE">خدمات</option></Select>
           <Select value={stock} onChange={(e) => setStock(e.target.value)}><option value="">كل حالات المخزون</option><option value="ok">متوفر</option><option value="low">منخفض (حد الطلب)</option><option value="out">نافد</option></Select>
           <Select value={img} onChange={(e) => setImg(e.target.value)}><option value="">بصورة وبدون</option><option value="with">لها صورة</option><option value="without">بدون صورة</option></Select>
@@ -165,7 +166,10 @@ export function ProductEditor({ p, categories, onClose }: { p: any; categories: 
   const [f, setF] = useState<any>({ type: "STOCK", unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p, uoms: (p.uoms || []).map((u: any) => ({ ...u, key: Math.random() })) });
   const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const updU = (k: number, patch: any) => setF({ ...f, uoms: f.uoms.map((u: any) => (u.key === k ? { ...u, ...patch } : u)) });
-  return (
+  const [cats, setCats] = useState<any[]>(categories);
+  const [newCat, setNewCat] = useState(false);
+  useEffect(() => { setCats(categories); }, [categories]);
+  return (<>
     <Modal wide title={p.id ? `تعديل: ${p.name}` : "صنف جديد"} onClose={() => onClose()} footer={<>
       {p.id && <button className="btn danger sm" onClick={() => run(async () => { if (!confirmDlg("حذف الصنف؟")) return; const r = await api(`/products/${p.id}`, { method: "DELETE" }); if (r.message) toast(r.message); onClose(true); })}>حذف</button>}
       <div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { p.id ? await api(`/products/${p.id}`, { method: "PUT", body: f }) : await api("/products", { body: f }); onClose(true); }, "تم الحفظ")}>حفظ</button></>}>
@@ -174,7 +178,7 @@ export function ProductEditor({ p, categories, onClose }: { p: any; categories: 
         <Field label="النوع"><Select value={f.type} onChange={s("type")} disabled={!!p.id}><option value="STOCK">صنف مخزني</option><option value="SERVICE">خدمة</option></Select></Field>
         <Field label="الرمز SKU (تلقائي)"><Input value={f.sku || ""} onChange={s("sku")} dir="ltr" /></Field>
         <Field label="الباركود"><Input value={f.barcode || ""} onChange={s("barcode")} dir="ltr" /></Field>
-        <Field label="التصنيف"><Select value={f.categoryId || ""} onChange={s("categoryId")}><option value="">—</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
+        <Field label="التصنيف"><div className="row" style={{ gap: 6, flexWrap: "nowrap" }}><Select style={{ flex: 1, minWidth: 0 }} value={f.categoryId || ""} onChange={s("categoryId")} data-prod-cat><option value="">—</option><CategoryOptions cats={cats} /></Select><button type="button" className="btn sm ghost" title="تصنيف جديد" data-prod-cat-new onClick={() => setNewCat(true)}>＋</button></div></Field>
         <Field label="الوحدة"><Input value={f.unit} onChange={s("unit")} list="units" /><datalist id="units"><option value="حبة" /><option value="كرتون" /><option value="كيلو" /><option value="لتر" /><option value="علبة" /><option value="كيس" /><option value="متر" /><option value="خدمة" /></datalist></Field>
         <Field label="سعر البيع"><NumInput value={f.salePrice} onChange={s("salePrice")} /></Field>
         <Field label="سعر الشراء الافتراضي"><NumInput value={f.purchasePrice} onChange={s("purchasePrice")} /></Field>
@@ -197,7 +201,8 @@ export function ProductEditor({ p, categories, onClose }: { p: any; categories: 
         <datalist id="uom-names"><option value="كرتون" /><option value="علبة" /><option value="درزن" /><option value="شد" /><option value="كيس" /><option value="طرد" /></datalist>
       </div>}
     </Modal>
-  );
+    {newCat && <CategoryEditor c={{}} cats={cats} onClose={async (r) => { setNewCat(false); if (r) { setCats(await api("/categories")); setF((x: any) => ({ ...x, categoryId: r.id })); } }} />}
+  </>);
 }
 
 function CategoriesModal({ onClose }: { onClose: () => void }) {
@@ -217,12 +222,12 @@ export function StockCardModal({ p, onClose }: { p: any; onClose: () => void }) 
   const [from, setFrom] = useState(today().slice(0, 4) + "-01-01");
   const [to, setTo] = useState(today());
   const { data } = useFetch(`/inventory/card/${p.id}${q({ from, to })}`);
-  const SRC: Record<string, string> = { SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "تسوية جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع", PURCHASE_REVISION: "عكس شراء (تعديل فاتورة)", PURCHASE_REV_COST: "فرق سعر تعديل شراء" };
+  const SRC: Record<string, string> = { PRODUCTION: "طبخة / تصنيع", PRODUCTION_CANCEL: "إلغاء طبخة", STOCK_ADJUSTMENT: "تسوية مخزون", DAMAGE: "إتلاف", SALE: "بيع", SALE_RETURN: "مرتجع بيع", PURCHASE: "شراء", PURCHASE_RETURN: "مرتجع شراء", ADJUSTMENT: "تسوية جرد", OPENING: "رصيد افتتاحي", TRANSFER: "تحويل", POS: "نقطة بيع", PURCHASE_REVISION: "عكس شراء (تعديل فاتورة)", PURCHASE_REV_COST: "فرق سعر تعديل شراء" };
   return (
     <Modal wide title={`كرت الصنف: ${p.name} (${p.sku})`} onClose={onClose} footer={<><PrintBtn />{data && <ExportBtn name={`كرت صنف ${p.sku}`} rows={() => data.rows.map((r: any) => ({ التاريخ: r.date, الحركة: SRC[r.sourceType], المرجع: r.reference, المستودع: r.warehouse, الكمية: r.qty, "تكلفة الوحدة": r.unitCost, القيمة: r.value, "رصيد الكمية": r.balanceQty, "رصيد القيمة": r.balanceVal }))} />}<button className="btn" onClick={onClose}>إغلاق</button></>}>
       <div className="no-print mb"><DateRange from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} /></div>
       {!data ? <Loading /> : <div className="table-wrap"><table className="tbl compact"><thead><tr><th>التاريخ</th><th>الحركة</th><th>المرجع</th><th>المستودع</th><th className="n">وارد</th><th className="n">صادر</th><th className="n">تكلفة الوحدة</th><th className="n">القيمة</th><th className="n">رصيد الكمية</th><th className="n">رصيد القيمة</th><th className="n">متوسط التكلفة</th></tr></thead>
-        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td className="dt">{fmtDate(r.date)}</td><td>{SRC[r.sourceType]}</td><td>{r.reference}</td><td>{r.warehouse}</td><td className="n pos-val">{Number(r.qty) > 0 ? Number(r.qty) : ""}</td><td className="n neg-val">{Number(r.qty) < 0 ? -Number(r.qty) : ""}</td><td className="n"><Money v={r.unitCost} /></td><td className="n"><Money v={r.value} sign /></td><td className="n">{Number(r.balanceQty)}</td><td className="n"><Money v={r.balanceVal} /></td><td className="n">{Number(r.balanceQty) > 0 ? money(Number(r.balanceVal) / Number(r.balanceQty)) : ""}</td></tr>)}</tbody></table></div>}
+        <tbody>{data.rows.map((r: any) => <tr key={r.id}><td className="dt">{fmtDate(r.date)}</td><td>{SRC[r.sourceType] || r.sourceType}</td><td>{r.reference}</td><td>{r.warehouse}</td><td className="n pos-val">{Number(r.qty) > 0 ? Number(r.qty) : ""}</td><td className="n neg-val">{Number(r.qty) < 0 ? -Number(r.qty) : ""}</td><td className="n"><Money v={r.unitCost} /></td><td className="n"><Money v={r.value} sign /></td><td className="n">{Number(r.balanceQty)}</td><td className="n"><Money v={r.balanceVal} /></td><td className="n">{Number(r.balanceQty) > 0 ? money(Number(r.balanceVal) / Number(r.balanceQty)) : ""}</td></tr>)}</tbody></table></div>}
     </Modal>
   );
 }

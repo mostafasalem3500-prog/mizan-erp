@@ -374,6 +374,46 @@ function estoreAnswer(r: any, cur: string): string {
   out.push("[التفصيل لكل طلب ووحدة](/estore/profit)");
   return out.join("\n");
 }
+const BAR = (n: number) => `[[bars:${n}]]`;
+function breakdownAnswer(r: any, cur: string, label?: string): string {
+  if (r.error) return r.error;
+  if (!r.rows?.length) return `لا مبيعات في الفترة ${r.from} — ${r.to}.`;
+  const hasCost = r.rows.some((x: any) => x.cost > 0);
+  const out = [`**المبيعات حسب ${r.label}${label ? ` — ${label}` : ""}** (${r.from} — ${r.to})، الإجمالي **${money(r.total)} ${cur}**:`, "", BAR(2),
+    `| ${r.label} | المبيعات | الحصة % |${hasCost ? " الربح | الهامش % |" : ""}`, `|---|---|---|${hasCost ? "---|---|" : ""}`,
+    ...r.rows.map((x: any) => `| ${x.key} | ${money(x.revenue)} | ${x.sharePct ?? "—"} |${hasCost ? ` ${money(x.profit)} | ${x.marginPct ?? "—"} |` : ""}`)];
+  if (r.others) out.push("", `و${r.others.count} أخرى بـ ${money(r.others.revenue)}.`);
+  const top = [...r.rows].sort((a: any, b: any) => b.revenue - a.revenue)[0];
+  if (top && !["day", "month"].includes(r.by)) out.push("", `الأعلى: **${top.key}** بـ ${top.sharePct}% من المبيعات${hasCost && top.marginPct !== null ? ` وهامش ${top.marginPct}%` : ""}.`);
+  if (hasCost && r.rows.length > 2 && !["day", "month", "hour", "weekday"].includes(r.by)) { const thin = r.rows.filter((x: any) => x.marginPct !== null && x.revenue > 0).sort((a: any, b: any) => a.marginPct - b.marginPct)[0]; if (thin && thin.marginPct < 20) out.push(`الأضعف هامشاً: **${thin.key}** (${thin.marginPct}%).`); }
+  return out.join("\n");
+}
+function insightsAnswer(r: any): string {
+  if (r.error) return r.error;
+  if (!r.items?.length) return "لا ملاحظات لافتة الآن: لا تغيّر كبير في المبيعات، ولا أصناف تنفد قريباً، ولا ديون متأخرة طويلاً ✓";
+  return ["**ملاحظات على وضع المنشأة الآن:**", "", ...r.items.map((x: any) => `- ${x.icon} **${x.title}** — ${x.text}${x.to && x.to !== "/" ? ` [افتح](${x.to})` : ""}`)].join("\n");
+}
+function peakAnswer(r: any): string {
+  if (r.error) return r.error;
+  if (!r.peak) return `لا أوقات مسجلة للمبيعات في آخر ${r.days} يوماً.`;
+  const out = [`**أوقات الذروة — آخر ${r.days} يوماً:**`, "", `- أزحم ساعة: **${r.peak.dayName} ${String(r.peak.hour).padStart(2, "0")}:00** (${r.peak.docs} فاتورة).`];
+  if (r.bestDay) out.push(`- أفضل يوم مبيعاً: **${r.bestDay.name}** (${money(r.bestDay.net)}).`);
+  if (r.quietHour) out.push(`- أهدأ ساعة فيها بيع: ${String(r.quietHour.hour).padStart(2, "0")}:00 — وقت مناسب للتحضير والجرد.`);
+  out.push("", BAR(1), "| الساعة | المبيعات | الفواتير |", "|---|---|---|", ...r.byHour.map((h: any) => `| ${String(h.hour).padStart(2, "0")}:00 | ${money(h.net)} | ${h.docs} |`));
+  if (r.untimed) out.push("", `${r.untimed} فاتورة بلا وقت مسجل لم تدخل التوزيع على الساعات.`);
+  return out.join("\n");
+}
+function foodCostAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const T = r.totals;
+  if (!T.revenue) return "لا مبيعات لأصناف لها وصفة في هذه الفترة. عرّف الوصفات من [المطاعم والمقاهي](/recipes).";
+  const lvl = T.costPct <= r.target ? "✓ ضمن المستهدف" : T.costPct <= r.target + 8 ? "قريبة من الحد" : "⚠ أعلى من المستهدف";
+  const out = [`**تكلفة الطعام** (${r.from} — ${r.to}): **${T.costPct}%** من مبيعات الأطباق، والمستهدف ${r.target}% — ${lvl}.`, `- المبيعات ${money(T.revenue)} ${cur}، تكلفة ما خرج من المخزن ${money(T.cost)}، مجمل الربح ${money(T.profit)}.`];
+  if (T.waste) out.push(`- هالك وتسويات ${money(T.waste)} — مع الهالك تصير النسبة ${T.costWithWastePct}%.`);
+  if (r.worst?.length) out.push("", "**الأعلى نسبة تكلفة:**", ...r.worst.map((d: any) => `- ${d.name}${d.variant ? ` (${d.variant})` : ""}: ${d.costPct}% — تكلفة الوحدة ${money(d.unitCost)} من سعر ${money(d.unitPrice)}`));
+  out.push("", "[تقرير تكاليف الطعام](/recipes?tab=cost)");
+  return out.join("\n");
+}
 function menuAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   if (!r.rows?.length) return "لا توجد وصفات بعد. عرّف مكونات الطبق من [وصفات الأصناف](/recipes) لتظهر تكلفته وربحه.";
@@ -605,6 +645,10 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "cash_forecast") return say(forecastAnswer(res, ctx.currency), ["من لم يسدد؟", "كم علينا للموردين؟", "دقق القيود"]);
     if (prev.name === "clearing_status") return say(clearingAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "ربحية طلبات المتاجر", "افحص الدفاتر"]);
     if (prev.name === "estore_profit") return say(estoreAnswer(res, ctx.currency), ["كم لم يصل من المنصات؟", "أرباح هذا الشهر"]);
+    if (prev.name === "sales_breakdown") return say(breakdownAnswer(res, ctx.currency, prev.input.label), res.by === "category" ? ["المبيعات حسب الصنف", "المبيعات حسب الساعة", "قارن هذا الشهر بالشهر الماضي"] : ["المبيعات حسب التصنيف", "متى وقت الذروة؟", "ملاحظاتك على الوضع"]);
+    if (prev.name === "smart_insights") return say(insightsAnswer(res), ["المبيعات حسب التصنيف هذا الشهر", "الأصناف الناقصة", "حلّل الوضع المالي"]);
+    if (prev.name === "peak_hours") return say(peakAnswer(res), ["المبيعات حسب يوم الأسبوع", "ملخص اليوم"]);
+    if (prev.name === "food_cost") return say(foodCostAnswer(res, ctx.currency), ["هندسة القائمة", "الأصناف الناقصة"]);
     if (prev.name === "menu_engineering") return say(menuAnswer(res, ctx.currency), ["الأصناف الناقصة", "ملخص اليوم"]);
     if (prev.name === "setoff_candidates") return say(setoffAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "افحص الدفاتر"]);
     if (prev.name === "stock_gaps") return say(gapsAnswer(res), ["كيف أعمل جرد", "إعادة الطلب"]);
@@ -658,6 +702,19 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (/(كم|ايش|وش|ما|اللي|التي|لم|ما ) ?.{0,25}(ما وصل|لم يصل|لم تصل|ما نزل|ما سمع|معلق|معلقه|باقي) .{0,20}(الشبكه|شبكه|مدي|مدى|البنك|المنصه|المنصات|سله|زد)|(مبيعات|عمليات) (ال)?(شبكه|مدي|مدى) .{0,25}(ما وصل|لم تصل|معلق|البنك)|(مستحق|مستحقات|فلوس|فلوسي) .{0,12}(عند|لدي|لدى) (سله|زد|المنصه|المنصات)|كم لم يصل/.test(n))
       return call("clearing_status", /سله/.test(n) ? { source: "SALLA" } : /(^| )زد( |$)/.test(n) ? { source: "ZID" } : /شبكه|مدي|مدى/.test(n) ? { source: "CARD" } : {});
     if (/(ربح|ربحيه|ارباح|خساره|مكسب) .{0,15}(طلبات|طلب|متجر|المتاجر|سله|زد|المنصه|الاونلاين)|(طلبات|متجر) .{0,15}(خاسره|رابحه)/.test(n)) { const per = parsePeriod(n, ctx.today); return call("estore_profit", { ...(per.explicit ? { from: per.from, to: per.to } : {}), ...(/سله/.test(n) ? { platform: "SALLA" } : /(^| )زد( |$)/.test(n) ? { platform: "ZID" } : {}) }); }
+    { // «المبيعات حسب …»: a breakdown by a dimension, for the period named (this month by default)
+      const dm = n.match(/(?:مبيعات|المبيعات|مبيعاتي|بيع|البيع|ربح|الربح|ارباح|الارباح|ايرادات|الايرادات).{0,40}?(?:حسب|بحسب|موزعه علي|موزعه على|توزيع|لكل|علي مستوي|على مستوى) (?:ال)?(تصنيف|تصنيفات|اقسام|قسم|صنف|اصناف|منتج|منتجات|عميل|عملاء|يوم الاسبوع|ايام الاسبوع|يوم|ايام|شهر|اشهر|شهور|ساعه|ساعات|فرع|فروع|قناه|قنوات|كاشير|موظف|موظفين)/)
+        || n.match(/^(?:ال)?(?:مبيعات )?(?:حسب|بحسب) (?:ال)?(تصنيف|صنف|عميل|يوم الاسبوع|يوم|شهر|ساعه|فرع|قناه|كاشير|موظف)/);
+      if (dm) {
+        const w = dm[1]; const by = /تصنيف|اقسام|قسم/.test(w) ? "category" : /صنف|اصناف|منتج/.test(w) ? "product" : /عميل|عملاء/.test(w) ? "customer" : /اسبوع/.test(w) ? "weekday" : /يوم|ايام/.test(w) ? "day" : /شهر|اشهر|شهور/.test(w) ? "month" : /ساع/.test(w) ? "hour" : /فرع|فروع/.test(w) ? "branch" : /قنا/.test(w) ? "channel" : "cashier";
+        const per = parsePeriod(n.replace(/(يوم|ايام) الاسبوع/g, " "), ctx.today);
+        const P = by === "month" && !per.explicit ? { from: ctx.today.slice(0, 4) + "-01-01", to: ctx.today, label: "هذه السنة" } : (by === "weekday" || by === "hour") && !per.explicit ? { from: new Date(Date.parse(ctx.today) - 27 * 864e5).toISOString().slice(0, 10), to: ctx.today, label: "آخر 4 أسابيع" } : per;
+        return call("sales_breakdown", { by, from: P.from, to: P.to, label: P.label });
+      }
+    }
+    if (/(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|نصايح|توصيات) (علي|على|عن|حول|ل)? ?(ال)?(وضع|الوضع|المنشاه|الشركه|المحل|المطعم|اعمالي|الشغل|اليوم|الحين)|^(وش|ايش|ما|ماذا) (الجديد|تلاحظ|لاحظت)|^(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|توصيات)$|تنبيهات ذكيه/.test(n)) return call("smart_insights", {});
+    if (/(وقت|اوقات|ساعه|ساعات|ايام|يوم) (ال)?(ذروه|زحمه|الضغط)|(متي|متى) (يكون |تكون )?(ال)?(زحمه|ذروه|الضغط)|(افضل|اكثر) (يوم|ساعه|وقت) .{0,8}(بيع|مبيعات)|(اي|ايش|وش|ما) (افضل|اكثر) (يوم|ساعه|وقت)/.test(n)) return call("peak_hours", { days: /اسبوع/.test(n) ? 7 : /3 اشهر|ثلاث(ه)? اشهر|ربع/.test(n) ? 90 : 28 });
+    if (/تكلفه (ال)?(طعام|اكل|الاطباق|المطبخ)|نسبه (ال)?تكلفه .{0,10}(الطعام|الاطباق|المطعم|المطبخ)|food ?cost/.test(n)) { const per = parsePeriod(n, ctx.today); return call("food_cost", { from: per.from, to: per.to }); }
     if (/هندسه (القائمه|المنيو)|(تكلفه|تكاليف|ربح|ربحيه|هامش) .{0,12}(الاطباق|الطبق|الوصفات|الوصفه|المنيو|الوجبات)|(اي|ايش|وش|ما) .{0,10}(الاطباق|الوجبات) .{0,15}(تربح|رابحه|خاسره|الاربح)/.test(n)) return call("menu_engineering", {});
     if (/مقاصه|(عميل ومورد|مورد وعميل)/.test(n)) return call("setoff_candidates", {});
     if (/(اصناف|منتجات|بضاعه|صنف) .{0,20}(خلصت|خلص|نفدت|نفد|انتهت|بالسالب|سالب|رصيدها صفر)|(وش|ايش|ما) (اللي|الذي) (خلص|نفد)/.test(n)) return call("stock_gaps", {});

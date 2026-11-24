@@ -26,6 +26,10 @@ export function PosPage() {
   const canOversell = me.company?.accounting?.pos?.oversell !== "BLOCK";
   const cats = useFetch("/categories");
   const uiF = useFetch<any>("/pos/ui");
+  // category tree: a main category shows its sub categories, and selecting it shows everything below it
+  const catList: any[] = ((cats.data as any[]) || []).filter((c: any) => c.isActive !== false);
+  const catIds = new Set(catList.map((c: any) => c.id));
+  const under = (id: string): Set<string> => { const out = new Set([id]); let grew = true; while (grew) { grew = false; for (const c of catList) if (c.parentId && out.has(c.parentId) && !out.has(c.id)) { out.add(c.id); grew = true; } } return out; };
   const ui = uiF.data?.ui || {}, topIds: string[] = uiF.data?.top || [];
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("all");
@@ -77,7 +81,8 @@ export function PosPage() {
   const [imgMissing, setImgMissing] = useState(false);
   const [imgEdit, setImgEdit] = useState<any[] | null>(null);
   const canImg = can("products.write");
-  const list = useMemo(() => (cat === "top" ? topIds.map((id) => (products.data || []).find((p: any) => p.id === id)).filter(Boolean) : (products.data || [])).filter((p: any) => (search || imgMode || Number(p.salePrice) > 0) && (cat === "all" || cat === "top" || p.categoryId === cat) && (!search || matches(p, search, ["name", "sku", "barcode"]) || p.barcode === search) && (!imgMode || !imgMissing || !p.image)), [products.data, cat, search, imgMode, imgMissing, topIds.length]);
+  const catSet = useMemo(() => (cat !== "all" && cat !== "top" ? under(cat) : null), [cat, cats.data]);
+  const list = useMemo(() => (cat === "top" ? topIds.map((id) => (products.data || []).find((p: any) => p.id === id)).filter(Boolean) : (products.data || [])).filter((p: any) => (search || imgMode || Number(p.salePrice) > 0) && (cat === "all" || cat === "top" || (catSet ? catSet.has(p.categoryId) : p.categoryId === cat)) && (!search || matches(p, search, ["name", "sku", "barcode"]) || p.barcode === search) && (!imgMode || !imgMissing || !p.image)), [products.data, cat, search, imgMode, imgMissing, topIds.length, catSet]);
   const imgChosen = (products.data || []).filter((p: any) => imgSel[p.id]);
 
   // customer price list (fixed prices / % discount) — applied when the customer is chosen and on every add
@@ -229,8 +234,10 @@ export function PosPage() {
         <div className="cats">
           <button className={cat === "all" ? "active" : ""} onClick={() => setCat("all")}>الكل <span className="cnt">{(products.data || []).filter((p: any) => Number(p.salePrice) > 0).length}</span></button>
           {topIds.length > 0 && ui.topFirst !== false && <button className={"top" + (cat === "top" ? " active" : "")} data-pos-top onClick={() => setCat("top")}>⭐ الأكثر مبيعاً</button>}
-          {(cats.data || []).map((c: any) => <button key={c.id} className={cat === c.id ? "active" : ""} onClick={() => setCat(c.id)} style={cat === c.id && c.color ? { background: c.color, borderColor: c.color } : c.color ? { borderInlineStart: `4px solid ${c.color}` } : {}}>{EMOJI[c.name] || "•"} {c.name} <span className="cnt">{(products.data || []).filter((p: any) => p.categoryId === c.id && Number(p.salePrice) > 0).length}</span></button>)}
+          {catList.filter((c: any) => !c.parentId || !catIds.has(c.parentId)).map((c: any) => { const on = cat === c.id || (catSet && under(c.id).has(cat)); const ids = under(c.id); return <button key={c.id} className={on ? "active" : ""} data-pos-cat={c.name} onClick={() => setCat(c.id)} style={on && c.color ? { background: c.color, borderColor: c.color } : c.color ? { borderInlineStart: `4px solid ${c.color}` } : {}}>{c.icon || EMOJI[c.name] || "•"} {c.name} <span className="cnt">{(products.data || []).filter((p: any) => ids.has(p.categoryId) && Number(p.salePrice) > 0).length}</span></button>; })}
         </div>
+        {(() => { if (cat === "all" || cat === "top") return null; const sel = catList.find((c: any) => c.id === cat); if (!sel) return null; const parent = catList.some((c: any) => c.parentId === sel.id) ? sel : catList.find((c: any) => c.id === sel.parentId); if (!parent) return null; const kids = catList.filter((c: any) => c.parentId === parent.id); if (!kids.length) return null;
+          return <div className="subcats" data-pos-subcats><button className={cat === parent.id ? "active" : ""} onClick={() => setCat(parent.id)}>كل {parent.name}</button>{kids.map((k: any) => <button key={k.id} className={cat === k.id ? "active" : ""} data-pos-subcat={k.name} onClick={() => setCat(k.id)}>{k.icon || ""} {k.name}</button>)}</div>; })()}
         <div className="items">
           {list.map((p: any) => {
             const out = p.type === "STOCK" && Number(p.qty) <= 0 && !me.company.allowNegativeStock;

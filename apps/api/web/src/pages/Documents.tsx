@@ -158,6 +158,18 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
       setLoaded(true);
     }).catch((e) => toast(e.message, "err"));
   }, [id]);
+  // unsaved work is kept in the browser and offered back when the form is opened again (new documents only)
+  const autosave = !id && !prefill && !originId && !revise;
+  const draftKey = `mz_unsaved_${me.company.id}_${direction}_${kind}`;
+  const [restore, setRestore] = useState<any>(() => { if (!autosave) return null; try { const x = JSON.parse(localStorage.getItem(draftKey) || "null"); return x && Date.now() - x.at < 7 * 864e5 && (x.lines || []).some((l: any) => l.product || String(l.description || "").trim()) ? x : null; } catch { return null; } });
+  useEffect(() => {
+    if (!autosave || restore) return;
+    const has = lines.some((l) => l.product || String(l.description || "").trim());
+    const h = setTimeout(() => { try { if (has) localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), partner, date, dueDate, notes, supplierRef, costCenterId, warehouseId, lines })); } catch { /* storage full or blocked */ } }, 700);
+    return () => clearTimeout(h);
+  }, [partner, date, dueDate, notes, supplierRef, costCenterId, warehouseId, lines, restore]);
+  const forgetDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* blocked */ } };
+  const restoreDraft = () => { const x = restore; setPartner(x.partner || null); setDate(x.date || today()); setDueDate(x.dueDate || ""); setNotes(x.notes || ""); setSupplierRef(x.supplierRef || ""); setCostCenterId(x.costCenterId || ""); setWarehouseId(x.warehouseId || ""); setLines((x.lines || []).map((l: any) => ({ ...l, key: Math.random() }))); setRestore(null); toast("استُعيدت المسودة غير المحفوظة", "ok"); };
   const totals = useMemo(() => {
     let net = 0, vat = 0, rc = 0, customs = 0;
     for (const l of lines) { const c = calc(l, incl); net += c.net; vat += c.vat; rc += c.rcVat; if (!isSale && l.taxCode === "IM") customs += c.vat; }
@@ -213,6 +225,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   const preview = () => run(async () => { const d = await storeDraft(); setPrevE(await api(`/invoices/${d.id}/preview-entry`, { body: {} })); });
   const save = (post: boolean) => run(async () => {
     const d = await storeDraft();
+    if (autosave) forgetDraft();
     if (post) {
       if (!confirmDlg(`ترحيل ${KIND_TITLE[direction][kind]} بإجمالي ${money(totals.total)} ${CUR()}؟ لا يمكن تعديل المستند بعد الترحيل.`)) { onClose(true); return; }
       await postWithCreditCheck(d.id, me.role === "OWNER" || me.role === "ADMIN" || me.superAdmin);
@@ -240,6 +253,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
       {(kind === "INVOICE" || isNote) && <button className="btn primary" disabled={busy} onClick={() => save(true)}>حفظ وترحيل ✓</button>}
       {(kind === "QUOTATION" || kind === "ORDER") && <button className="btn primary" disabled={busy} onClick={() => save(false)}>حفظ</button>}</>}
     </>}>
+      {restore && <div className="alert info row" style={{ gap: 10, alignItems: "center", marginBottom: 10 }} data-restore-draft><span className="grow">لديك {KIND_TITLE[direction][kind]} لم يُحفظ{restore.partner?.name ? ` لـ«${restore.partner.name}»` : ""} — {(restore.lines || []).filter((l: any) => l.product || l.description).length} بند، منذ {Math.max(1, Math.round((Date.now() - restore.at) / 60000))} دقيقة.</span><button className="btn sm primary" onClick={restoreDraft} data-restore-yes>استعادة</button><button className="btn sm ghost" onClick={() => { forgetDraft(); setRestore(null); }}>تجاهل</button></div>}
       {prevE && <Modal wide title="معاينة القيد قبل الترحيل" onClose={() => setPrevE(null)} footer={<><div className="grow" /><button className="btn" onClick={() => setPrevE(null)}>رجوع للتعديل</button></>}><div className="small muted mb">حُفظت الفاتورة مسودة.</div><EntryPreview prev={prevE} /></Modal>}
       {revise && <div className="alert info small mb">تعديل فاتورة مشتريات مرحّلة: يُعكس القيد الأصلي ويُعاد الترحيل <b>بنفس رقم الفاتورة</b>، وتُعكس كميات المخزون وتُستلم من جديد. فرق السعر على الكميات المباعة يُحمّل على تكلفة المبيعات. يُحفظ التعديل في سجل المراجعة مع سببه وصورة قبل/بعد.{revise.amountPaid > 0 && <> المسدد على الفاتورة {money(revise.amountPaid)} {CUR()} يبقى مخصصاً لها — لا يمكن تغيير المورد أو تخفيض الإجمالي عنه.</>}</div>}
       {revise && <Field label="سبب التعديل (إلزامي — سجل المراجعة)"><Input autoFocus value={revReason} onChange={(e) => setRevReason(e.target.value)} placeholder="مثال: خطأ في سعر الوحدة مقارنة بفاتورة المورد رقم ..." /></Field>}

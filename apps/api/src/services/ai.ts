@@ -3,7 +3,8 @@
  * A proposal is dry-run inside a rolled-back transaction (so the user sees the real journal entry), stored as
  * `pending`, and only the user's «تأكيد» (confirmPlan) executes it — with the user's own permissions.
  */
-import { menuEngineering, setoffCandidates } from "./round343";
+import { menuEngineering, setoffCandidates, foodCost } from "./round343";
+import { salesBreakdown, insights, heatmap } from "./round347";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -167,6 +168,24 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     if (CFG.code === "EG") return { error: "ربط المتاجر الإلكترونية غير متاح في هذه النسخة" };
     const r = await estoreProfit(t, company, { from: input.from, to: input.to, platform: input.platform });
     return { from: r.from, to: r.to, totals: r.totals, worst: [...r.orders].sort((a: any, b: any) => a.profit - b.profit).slice(0, 5), best: r.products.slice(0, 5) };
+  }
+  if (name === "sales_breakdown") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    return salesBreakdown(t, C, { by: input.by, from: input.from, to: input.to, limit: num(input.limit) || 12 });
+  }
+  if (name === "smart_insights") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    return insights(t, C);
+  }
+  if (name === "peak_hours") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const r = await heatmap(t, C, { days: num(input.days) || 28 });
+    return { days: r.days, peak: r.peak, bestDay: r.bestDay, quietHour: r.quietHour, byDay: r.byDay, byHour: r.byHour.filter((h: any) => h.docs > 0), timed: r.timed, untimed: r.untimed };
+  }
+  if (name === "food_cost") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const r = await foodCost(t, C, { from: input.from, to: input.to });
+    return { from: r.from, to: r.to, target: r.target, totals: r.totals, dishes: r.dishes.slice(0, 10), worst: [...r.dishes].filter((d: any) => d.costPct !== null).sort((a: any, b: any) => b.costPct - a.costPct).slice(0, 3) };
   }
   if (name === "menu_engineering") {
     if (!perms(auth, "products.read")) return { error: "صلاحيتك لا تسمح بعرض الأصناف" };

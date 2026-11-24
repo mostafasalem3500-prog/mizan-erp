@@ -8,7 +8,8 @@ import { isEn } from "../i18n";
 const SUGGEST = (): [string, string, string[]][] => [
   ["📝", "سجّل عملية", [`فاتورة مياه المكتب بقيمة 200 ${CUR()} شامل الضريبة من المورد شركة المياه الوطنية، دُفعت نقداً`, "إيداع نقدي في البنك 10,000"]],
   ["🗓", "يومك", ["ملخص اليوم", "ماذا أفعل اليوم؟", "ربحية المشاريع"]],
-  ["📊", "اسأل عن أرقامك", ["ملخص هذا الشهر", "قارن هذا الشهر بالشهر الماضي", "من لم يسدد؟"]],
+  ["📊", "اسأل عن أرقامك", ["ملخص هذا الشهر", "المبيعات حسب التصنيف", "قارن هذا الشهر بالشهر الماضي", "من لم يسدد؟"]],
+  ["💡", "ملاحظات ذكية", ["ملاحظاتك على الوضع", "متى وقت الذروة؟", "المبيعات حسب يوم الأسبوع"]],
   ["🧠", "تحليل وتقارير", ["حلّل الوضع المالي", "اكتب تقريراً للإدارة", "افحص الدفاتر"]],
   ["🎓", "تعلّم واسأل", ["كيف أعالج المصروفات المدفوعة مقدماً؟", "ماذا تستطيع أن تفعل؟"]],
 ];
@@ -44,12 +45,15 @@ const inline = (ln: string) => ln.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(\/[^)\s]*\))
 const cells = (ln: string) => ln.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
 const Rich = ({ text }: { text: string }) => {
   const lines = String(text || "").split("\n"); const out: React.ReactNode[] = [];
+  let bars = -1;
   for (let i = 0; i < lines.length; i++) {
     const ln = lines[i];
+    const bm = ln.trim().match(/^\[\[bars:(\d+)\]\]$/); if (bm) { bars = Number(bm[1]); continue; } // the next table draws a bar in this column
     if (/^\s*\|.*\|\s*$/.test(ln)) { // a table: header, separator, rows
       const rows: string[][] = []; let j = i; while (j < lines.length && /^\s*\|.*\|\s*$/.test(lines[j])) { if (!/^\s*\|[\s:|-]+\|\s*$/.test(lines[j])) rows.push(cells(lines[j])); j++; }
       const [head, ...body] = rows; const numeric = (v: string) => /^[−\-+▲▼]?\s?[\d,.]+(%| .{0,8})?$/.test(v) || v === "—";
-      out.push(<div key={i} className="table-wrap ai-tbl"><table className="tbl compact"><thead><tr>{head.map((c, k) => <th key={k} className={k ? "n" : ""}>{inline(c)}</th>)}</tr></thead><tbody>{body.map((r, k) => <tr key={k}>{r.map((c, q) => <td key={q} className={q && numeric(c) ? "n num" : q ? "n" : ""}>{/^[−\-+]?[\d,.]+%?$/.test(c) ? <span dir="ltr">{c}</span> : inline(c)}</td>)}</tr>)}</tbody></table></div>);
+      const bc = bars, toN = (v: string) => Number(String(v).replace(/[^\d.\-]/g, "")) || 0, bmax = bc > 0 ? Math.max(1, ...body.map((r) => Math.abs(toN(r[bc - 1] || "")))) : 0; bars = -1;
+      out.push(<div key={i} className={"table-wrap ai-tbl" + (bc > 0 ? " ai-bars" : "")}><table className="tbl compact"><thead><tr>{head.map((c, k) => <th key={k} className={k ? "n" : ""}>{inline(c)}</th>)}</tr></thead><tbody>{body.map((r, k) => <tr key={k}>{r.map((c, q) => <td key={q} className={q && numeric(c) ? "n num" : q ? "n" : ""}>{bc > 0 && q === bc - 1 ? <span className="ai-bar"><i style={{ width: `${Math.max(2, (Math.abs(toN(c)) / bmax) * 100)}%` }} /><span dir="ltr">{c}</span></span> : /^[−\-+]?[\d,.]+%?$/.test(c) ? <span dir="ltr">{c}</span> : inline(c)}</td>)}</tr>)}</tbody></table></div>);
       i = j - 1; continue;
     }
     const li = ln.match(/^(\s*)(-|•|\d+\.)\s+(.*)$/);
@@ -107,6 +111,9 @@ export function AiAssistantPage() {
   const end = useRef<HTMLDivElement>(null);
   const inp = useRef<HTMLInputElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [conv?.view?.length, busy]);
+  // a question sent from elsewhere (the home screen): ask it once the assistant is ready
+  const asked = useRef(false);
+  useEffect(() => { const qq = new URLSearchParams(window.location.search).get("q"); if (!qq || asked.current || !st.data?.entitled) return; asked.current = true; window.history.replaceState(null, "", window.location.pathname); setConv(null); setTimeout(() => send(qq.slice(0, 500)), 50); }, [st.data?.entitled]);
   const addFiles = (fl: FileList | File[]) => { const ok = Array.from(fl).filter((f) => { if (!/^(image\/|application\/pdf|text\/)/.test(f.type)) { toast(`«${f.name}»: المساعد يقرأ الصور وPDF والنص فقط`, "err"); return false; } if (f.size > 5 * 1048576) { toast(`«${f.name}» أكبر من 5 ميجابايت`, "err"); return false; } return true; }); setFiles((x) => [...x, ...ok].slice(0, 5)); };
   const open = async (id: string) => { try { setConv(await api(`/ai/conversations/${id}`)); } catch (e: any) { toast(e.message, "err"); } };
   const send = async (msg?: string) => {

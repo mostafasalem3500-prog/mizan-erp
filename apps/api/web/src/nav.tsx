@@ -80,6 +80,7 @@ export const NAV_TREE: NavGroup[] = [
   ] },
   { key: "inventory", ic: "🏬", label: "المخزون", items: [
     { to: "/products", label: "الأصناف والخدمات", perm: "products.read" },
+    { to: "/categories", label: "التصنيفات (رئيسية وفرعية)", perm: "products.read" },
     { to: "/inventory", label: "تقييم المخزون", perm: "inventory.read" },
     { to: "/inventory?tab=adj", label: "الجرد والتسويات والتحويلات", perm: "inventory.read" },
     { to: "/inventory?tab=wh", label: "المستودعات", perm: "inventory.read" },

@@ -52,6 +52,8 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   }
   const issuedAt = s.clientRef && s.issuedAt && !isNaN(Date.parse(s.issuedAt)) && Date.now() - Date.parse(s.issuedAt) < 7 * 86400000 && Date.parse(s.issuedAt) <= Date.now() + 300000 ? new Date(s.issuedAt) : undefined;
   const saleDate = issuedAt ? new Date(issuedAt.getTime() + 3 * 3600 * 1000).toISOString().slice(0, 10) : s.date || today();
+  // sample data: the till time of day it happened (the date stays the sale date)
+  const demoAt = !issuedAt && s.isDemo && s.issuedAt && !isNaN(Date.parse(s.issuedAt)) ? new Date(s.issuedAt) : undefined;
   const session = await t.one(`SELECT * FROM pos_sessions WHERE id=$1 AND company_id=$2 FOR UPDATE`, [s.sessionId, companyId], "الوردية غير موجودة");
   if (session.status !== "OPEN") throw conflict("الوردية مغلقة");
   const partner = s.partnerId ? await t.one(`SELECT * FROM partners WHERE id=$1 AND company_id=$2`, [s.partnerId, companyId], "العميل غير موجود") : await walkInCustomer(t, companyId);
@@ -129,7 +131,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   let posted: any;
   if (credit) {
     // mixed: post invoice on AR then a receipt for the paid part
-    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id, issuedAt, allowOversell });
+    posted = await postInvoice(t, company, draft.id, user.name, { posSessionId: session.id, issuedAt: issuedAt || demoAt, allowOversell });
     if (postTenders.length) {
       const { createPayment } = require("./payments") as typeof import("./payments");
       const cashAcc = await t.one(`SELECT id FROM accounts WHERE company_id=$1 AND system_key='POS_CASH'`, [companyId]);
@@ -140,7 +142,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
       await t.exec(`UPDATE invoices SET tenders=$2, pos_session_id=$3 WHERE id=$1`, [posted.id, JSON.stringify([...postTenders, { method: "CREDIT", amount: creditAmount }]), session.id]);
     }
   } else {
-    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id, issuedAt, allowOversell });
+    posted = await postInvoice(t, company, draft.id, user.name, { tenders: postTenders, posSessionId: session.id, issuedAt: issuedAt || demoAt, allowOversell });
   }
   const cashPart = r2(postTenders.filter((x) => x.method === "CASH").reduce((a, x) => a + x.amount, 0));
   const cardPart = r2(postTenders.filter((x) => x.method !== "CASH").reduce((a, x) => a + x.amount, 0));
