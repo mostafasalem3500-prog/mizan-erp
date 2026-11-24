@@ -182,6 +182,7 @@ export function PosSetupPage() {
   const s = data.settings;
   const MODES: [string, string, string, string][] = [["RETAIL", "🛒", "تجزئة وخدمات", "بقالة، ملابس، صيدلية، قطع غيار، مغسلة، صالون: بيع مباشر بالباركود والبحث، تعليق الطلب، وأسعار الجملة."], ["RESTAURANT", "🍽", "مطعم بطاولات", "صالات وطاولات، طلب مفتوح لكل طاولة، إرسال للمطبخ على دفعات، نقل ودمج وتقسيم الفاتورة، وسفري وتوصيل."], ["CAFE", "☕", "كافيه ووجبات سريعة", "طلبات مرقّمة سفري ومحلي وتوصيل بلا طاولات، مع تذكرة تحضير وشاشة المطبخ."]];
   return <div className="grid">
+    <PosLook canWrite={W} />
     <div className="card"><div className="card-h"><div><h3>نوع النشاط في نقطة البيع</h3><div className="small muted">يحدد شكل شاشة البيع. يمكن تغييره في أي وقت؛ المبيعات والقيود والمخزون واحدة في كل الأنواع.</div></div><Link className="btn sm" to="/pos">← نقطة البيع</Link></div>
       <div className="card-b mode-grid">{MODES.map(([k, ic, t, d]) => <button key={k} className={"mode-card" + (s.mode === k ? " on" : "")} disabled={!W || busy} onClick={() => run(async () => { await api("/pos/restaurant/settings", { method: "PUT", body: { mode: k } }); reload(); }, `نوع النشاط: ${t}`)}><div className="mi">{ic}</div><b>{t}</b><div className="small muted">{d}</div>{s.mode === k && <span className="badge green">المستخدم الآن</span>}</button>)}</div></div>
     {s.mode === "RESTAURANT" && <div className="card"><div className="card-h"><h3>الصالات والطاولات</h3>{W && <div className="row"><Input placeholder="اسم صالة جديدة (مثل: العائلات، الخارجية)" value={floorName} onChange={(e) => setFloorName(e.target.value)} style={{ width: 260 }} /><button className="btn primary sm" disabled={busy || !floorName.trim()} onClick={() => run(async () => { await api("/pos/floors", { body: { name: floorName } }); setFloorName(""); reload(); })}>＋ صالة</button></div>}</div>
@@ -205,3 +206,22 @@ export function PosSetupPage() {
   </div>;
 }
 const RepTable = ({ title, rows }: { title: string; rows: [string, number, number][] }) => <div><b>{title}</b><div className="table-wrap mt" style={{ maxHeight: 260 }}><table className="tbl compact"><thead><tr><th>البند</th><th className="n">طلبات</th><th className="n">الإجمالي</th></tr></thead><tbody>{rows.map((r, i) => <tr key={i}><td>{r[0]}</td><td className="n num">{r[1]}</td><td className="n num">{money(r[2])}</td></tr>)}{!rows.length && <tr><td colSpan={3} className="muted">لا بيانات في الفترة</td></tr>}</tbody></table></div></div>;
+
+/** How the till looks: tile size, where the sections sit, pictures, the accent colour. */
+function PosLook({ canWrite }: { canWrite: boolean }) {
+  const { data, reload } = useFetch<any>("/pos/ui");
+  const { run, busy } = useAction();
+  if (!data) return null;
+  const ui = { tile: "M", cats: "TOP", images: true, accent: null as string | null, topFirst: true, ...(data.ui || {}) };
+  const save = (patch: any) => run(async () => { await api("/pos/ui", { method: "PUT", body: { ...ui, ...patch } }); reload(); }, "حُفظ مظهر نقطة البيع");
+  const COLORS = ["#0f766e", "#1d4ed8", "#7c3aed", "#be123c", "#c2410c", "#15803d", "#0f172a"];
+  const Opt = ({ k, v, children }: any) => <button className={"btn sm" + ((ui as any)[k] === v ? " primary" : "")} disabled={!canWrite || busy} data-look={`${k}-${v}`} onClick={() => save({ [k]: v })}>{children}</button>;
+  return <div className="card" data-pos-look><div className="card-h"><div><h3>مظهر شاشة البيع</h3><div className="small muted">يطبَّق على كل أجهزة الكاشير عند فتح الشاشة</div></div></div>
+    <div className="card-b form-grid">
+      <Field label="حجم بطاقات الأصناف" hint="الكبير يناسب شاشات اللمس"><div className="row" style={{ gap: 6 }}><Opt k="tile" v="S">صغير</Opt><Opt k="tile" v="M">متوسط</Opt><Opt k="tile" v="L">كبير</Opt></div></Field>
+      <Field label="مكان الأقسام" hint="الجانبي يناسب قوائم الطعام الكثيرة الأقسام"><div className="row" style={{ gap: 6 }}><Opt k="cats" v="TOP">شريط علوي</Opt><Opt k="cats" v="SIDE">عمود جانبي</Opt></div></Field>
+      <Field label="صور الأصناف"><div className="row" style={{ gap: 6 }}><Opt k="images" v={true}>إظهار</Opt><Opt k="images" v={false}>بطاقات نصية</Opt></div></Field>
+      <Field label="قسم «الأكثر مبيعاً»" hint="أكثر 24 صنفاً مبيعاً في آخر 30 يوماً"><div className="row" style={{ gap: 6 }}><Opt k="topFirst" v={true}>إظهار</Opt><Opt k="topFirst" v={false}>إخفاء</Opt></div></Field>
+      <Field label="لون الهوية في شاشة البيع"><div className="row" style={{ gap: 6, alignItems: "center" }}>{COLORS.map((c) => <button key={c} title={c} aria-label={c} disabled={!canWrite || busy} data-look-color={c} onClick={() => save({ accent: c })} style={{ width: 28, height: 28, borderRadius: 999, background: c, border: ui.accent === c ? "3px solid var(--text)" : "2px solid #fff", boxShadow: "0 0 0 1px var(--border)", cursor: "pointer" }} />)}<button className="btn sm ghost" disabled={!canWrite || busy || !ui.accent} onClick={() => save({ accent: null })}>الافتراضي</button></div></Field>
+    </div></div>;
+}

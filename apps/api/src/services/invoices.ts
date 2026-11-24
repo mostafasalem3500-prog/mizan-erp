@@ -10,7 +10,7 @@ import { AppError, bad, conflict, notFound, calcLine, r2, r3, r4, D, num, sum, i
 import { currentCtx } from "../lib/context";
 import { post, nextNumber, assertOpenDate, accountByKey, Line, resolveBranch, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut, avgCost } from "../accounting/stock";
-import { recipesOf } from "./round343";
+import { recipesOf, leavesOf } from "./round343";
 import { stampInvoice } from "../zatca/stamp";
 import { checkPartner } from "../lib/partnerRules";
 import { rateFor, toFc, fcUnitToBase, BASE } from "./currency";
@@ -304,10 +304,15 @@ export async function postInvoice(t: Db, company: any, id: string, user: string,
   // Ingredients may go negative (a kitchen does not stop selling for a late goods receipt) and show in the negative-stock alert.
   const recipes = isSale && inv.kind === "INVOICE" ? await recipesOf(t, companyId, lines.filter((x) => x.productId).map((x) => x.productId)) : new Map<string, any[]>();
   for (const l of lines) {
-    if (l.productId && recipes.has(l.productId)) {
+    // sizes and add-ons chosen at the till: a size multiplies the recipe, an add-on takes its own ingredient
+    const mods: any[] = isSale && inv.kind === "INVOICE" && Array.isArray(l.modifiers) ? l.modifiers : [];
+    const sizeFactor = mods.reduce((a, m) => a * (Number(m?.factor) > 0 ? Number(m.factor) : 1), 1);
+    const addOns = mods.filter((m) => m?.componentId && Number(m.componentQty) > 0).map((m) => ({ componentId: String(m.componentId), qty: Number(m.componentQty) }));
+    if (l.productId && (recipes.has(l.productId) || (addOns.length && l.ptype !== "STOCK"))) {
       const sold = r3(Number(l.qty) * Number(l.factor || 1));
+      const take = [...(recipes.get(l.productId) || []).map((c: any) => ({ ...c, qty: c.qty * sizeFactor })), ...(addOns.length ? await leavesOf(t, companyId, addOns) : [])];
       let used = 0;
-      for (const c of recipes.get(l.productId)!) {
+      for (const c of take) {
         used = r2(D(used).plus(await stockOut(t, companyId, { productId: c.componentId, warehouseId: inv.warehouseId, qty: r3(sold * c.qty), date: inv.date, sourceId: inv.id, reference: ref, isDemo: inv.isDemo, sourceType: inv.channel === "POS" ? "POS" : "SALE", allowNegative: true, fallbackCost: c.purchasePrice, productName: c.name })));
       }
       costTotal = r2(D(costTotal).plus(used));

@@ -70,7 +70,7 @@ export function RecipesPage() {
   const [edit, setEdit] = useState<any>(null);
   const [pick, setPick] = useState<any>(null);
   const [sp, setSp] = useSearchParams();
-  const tab = ["preps", "batches", "eng", "guide"].includes(sp.get("tab") || "") ? String(sp.get("tab")) : "list";
+  const tab = ["preps", "batches", "eng", "guide", "cost"].includes(sp.get("tab") || "") ? String(sp.get("tab")) : "list";
   const setTab = (k: string) => setSp(k === "list" ? {} : { tab: k });
   const [days, setDays] = useState(30);
   const eng = useFetch<any>(tab === "eng" ? `/recipes/engineering?days=${days}` : null, [tab, days]);
@@ -85,11 +85,14 @@ export function RecipesPage() {
   const KL: Record<string, [string, string]> = { STAR: ["⭐ نجم", "green"], PLOWHORSE: ["🐎 يُباع بهامش ضعيف", "amber"], PUZZLE: ["🧩 هامش جيد قليل البيع", "blue"], DOG: ["⚠ ضعيف", "red"], NEW: ["بلا مبيعات", ""] };
   return (
     <div className="grid" data-recipes>
+      {(tab === "list" || tab === "preps") && <>
       <div className="alert small">الوصفة تربط الطبق أو الباقة (صنف غير مخزني) بمكوناته المخزنية. عند بيعه من نقطة البيع أو الفاتورة تُخصم المكونات من المخزون، وتكلفة المبيعات هي تكلفة ما خُصم — فيظهر ربح الطبق الحقيقي. المكونات يمكن أن تنزل بالسالب حتى لا يتوقف البيع، وتظهر في تنبيه الأرصدة السالبة.</div>
       {W && <div className="card"><div className="row" style={{ alignItems: "flex-end", gap: 8 }}>
         <div style={{ minWidth: 280, flex: 1 }}><Field label="فتح وصفة صنف (طبق أو تحضيرة)"><Picker value={pick} onChange={setPick} fetcher={productFetcher} label={(p: any) => `${p.sku || ""} ${p.name}`} placeholder="ابحث عن الطبق أو الباقة" /></Field></div>
         <button className="btn primary" disabled={!pick} data-recipe-new onClick={() => { setEdit(pick); setPick(null); }}>＋ فتح الوصفة</button></div></div>}
-      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "preps", label: "التحضيرات" }, { key: "batches", label: "الطبخات (التصنيع)" }, { key: "eng", label: "هندسة القائمة" }, { key: "guide", label: "كيف تُحسب التكلفة؟" }]} value={tab} onChange={setTab} />
+      </>}
+      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "preps", label: "التحضيرات" }, { key: "batches", label: "الطبخات (التصنيع)" }, { key: "cost", label: "تقرير تكاليف الطعام" }, { key: "eng", label: "هندسة القائمة" }, { key: "guide", label: "كيف تُحسب التكلفة؟" }]} value={tab} onChange={setTab} />
+      {tab === "cost" && <FoodCostReport onOpen={(r) => setEdit({ id: r.productId, name: r.name })} />}
       {tab === "preps" && <div className="card" data-preps>{!preps.data ? <Loading /> : !preps.data.rows.length ? <Empty text="لا تحضيرات بعد — التحضيرة صنف مخزني له وصفة (مثل الشاورما المطبوخة أو الثومية). افتح وصفتها من الأعلى، أو حمّل مثال الشاورما من تبويب «كيف تُحسب التكلفة؟»" /> : <div className="table-wrap"><table className="tbl" data-prep-list>
         <thead><tr><th>التحضيرة</th><th>الطريقة</th><th className="n">وزن المدخلات</th><th className="n">الناتج</th><th className="n">نسبة الناتج</th><th className="n">تكلفة الوحدة</th><th className="n">الرصيد</th><th /></tr></thead>
         <tbody>{preps.data.rows.map((r: any) => <tr key={r.productId} className="clickable" onClick={() => setEdit({ id: r.productId, name: r.name })}><td><b>{r.name}</b></td><td><span className={"badge " + (r.method === "BATCH" ? "teal" : "blue")} data-prep-method={r.method}>{r.method === "BATCH" ? "طبخة (تصنيع)" : "خصم مباشر"}</span></td><td className="n">{r.inputTotal}</td><td className="n">{r.outputQty} {r.unit}</td><td className="n">{r.yieldPct}%</td><td className="n"><Money v={r.cost} /></td><td className="n">{r.method === "BATCH" ? r.onHand : "—"}</td>
@@ -139,6 +142,7 @@ export function RecipeModal({ product, canWrite, onClose }: { product: any; canW
   const [lines, setLines] = useState<any[] | null>(null);
   const [add, setAdd] = useState<any>(null);
   const [target, setTarget] = useState<any>(65);
+  const variants = useFetch<any>(`/products/${product.id}/variant-costs`);
   const [output, setOutput] = useState<any>("");
   const [method, setMethod] = useState("BATCH");
   const { run, busy } = useAction();
@@ -169,9 +173,72 @@ export function RecipeModal({ product, canWrite, onClose }: { product: any; canW
           <tfoot><tr><td colSpan={5}>{data.isPrep ? "تكلفة الطبخة" : "تكلفة الوصفة"}</td><td className="n" data-recipe-cost><Money v={cost} /></td><td colSpan={2} /></tr>
             {data.isPrep && Number(output) > 0 && <tr><td colSpan={5}>تكلفة الوحدة ({data.unit}) = تكلفة الطبخة ÷ الناتج</td><td className="n" data-prep-unitcost><Money v={cost / Number(output)} /></td><td colSpan={2} /></tr>}</tfoot></table></div>}
         {!data.isPrep && <div className="small muted mt">سعر البيع {money(price)}{price > 0 && <> — الهامش <b>{money(price - cost)}</b> ({Math.round(((price - cost) / price) * 1000) / 10}%)</>}. التكلفة بمتوسط تكلفة المخزون الحالي، وعند البيع تُحتسب بتكلفة ما يُخصم فعلاً.</div>}
+        {!data.isPrep && variants.data?.rows?.length > 0 && <div data-variant-costs><div className="card-h mt"><h3>تكلفة كل حجم وكل إضافة</h3></div>
+          <div className="table-wrap"><table className="tbl compact"><thead><tr><th>المجموعة</th><th>الخيار</th><th>يخصم</th><th className="n">التكلفة</th><th className="n">السعر</th><th className="n">الهامش</th><th style={{ width: 150 }}>نسبة التكلفة</th></tr></thead>
+            <tbody>{variants.data.rows.map((v: any, i: number) => <tr key={i}><td className="muted">{v.group}</td><td><b>{v.option}</b></td><td className="small">{v.kind === "SIZE" ? `الوصفة × ${v.factor}` : ""}{v.component ? `${v.kind === "SIZE" ? " + " : ""}${v.componentQty} ${v.component}` : v.kind === "ADDON" ? "—" : ""}</td><td className="n"><Money v={v.cost} /></td><td className="n"><Money v={v.price} /></td><td className="n"><Money v={v.margin} /></td><td><PctBar v={v.costPct} target={30} /></td></tr>)}</tbody></table></div>
+          <div className="small muted">الحجم = تكلفة الوصفة × معامله، وسعره = سعر الصنف + سعره الإضافي. الإضافة تُحسب بمكوّنها وحده. تُضبط من «الإضافات ورسوم الخدمة».</div></div>}
         {!data.isPrep && cost > 0 && <div className="row mt" style={{ gap: 8, alignItems: "center" }} data-recipe-suggest><span className="small">لهامش مستهدف</span><NumInput style={{ width: 80 }} value={target} onChange={(e: any) => setTarget(e.target.value)} data-recipe-target /><span className="small">% يكون سعر البيع قبل الضريبة <b data-recipe-price>{money(suggested)}</b>{price > 0 && <> ({suggested > price + 0.005 ? `أعلى من الحالي بـ ${money(suggested - price)}` : `الحالي يحققه`})</>}</span></div>}
       </>}
     </Modal>
+  );
+}
+
+// ─── food-cost report ────────────────────────────────────────────────────
+/** A thin bar for a cost percentage: green under the target, amber near it, red above. */
+export function PctBar({ v, target }: { v: number | null; target: number }) {
+  if (v === null || v === undefined) return <span className="muted">—</span>;
+  const lvl = v <= target ? "good" : v <= target + 8 ? "watch" : "high";
+  return <div className={"pct-bar " + lvl} title={`${v}%`}><span style={{ width: Math.min(100, Math.max(2, v)) + "%" }} /><i style={{ insetInlineStart: Math.min(100, target) + "%" }} /><b className="num">{v}%</b></div>;
+}
+function FoodCostReport({ onOpen }: { onOpen: (r: any) => void }) {
+  const { can } = useCompanyContext();
+  const [range, setRange] = useState({ from: today().slice(0, 8) + "01", to: today() });
+  const { data, reload } = useFetch<any>(`/restaurant/food-cost?from=${range.from}&to=${range.to}`, [range.from, range.to]);
+  const { run } = useAction();
+  const [view, setView] = useState("dishes");
+  if (!data) return <div className="card"><Loading /></div>;
+  const T = data.totals, lvl = T.costPct === null ? "none" : T.costPct <= data.target ? "good" : T.costPct <= data.target + 8 ? "watch" : "high";
+  const maxDay = Math.max(1, ...data.days.map((d: any) => d.revenue));
+  const maxIng = Math.max(1, ...data.ingredients.map((d: any) => d.soldValue + d.cookedValue + d.lostValue));
+  return (
+    <div className="grid" data-food-cost>
+      <div className="card"><div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <Field label="من"><Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
+        <Field label="إلى"><Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
+        <Field label="النسبة المستهدفة لتكلفة الطعام %"><NumInput style={{ width: 110 }} defaultValue={data.target} disabled={!can("settings.write")} data-fc-target onBlur={(e: any) => { const v = Number(e.target.value); if (v && v !== data.target) run(async () => { await api("/restaurant/food-cost-target", { method: "PUT", body: { target: v } }); reload(); }, "حُفظت النسبة المستهدفة"); }} /></Field>
+        <div className="grow" /><button className="btn ghost" onClick={() => window.print()}>طباعة</button>
+      </div></div>
+      <div className="fc-hero">
+        <div className={"fc-gauge " + lvl} data-fc-gauge>
+          <svg viewBox="0 0 120 70" aria-hidden="true"><path d="M10 60 A50 50 0 0 1 110 60" className="trk" /><path d="M10 60 A50 50 0 0 1 110 60" className="val" style={{ strokeDasharray: `${Math.min(100, T.costPct || 0) * 1.571} 400` }} /></svg>
+          <div className="fc-gauge-v"><b className="num">{T.costPct === null ? "—" : T.costPct + "%"}</b><span>تكلفة الطعام من المبيعات</span><small>المستهدف {data.target}% — {lvl === "good" ? "ضمن المستهدف ✓" : lvl === "watch" ? "قريبة من الحد" : lvl === "high" ? "أعلى من المستهدف" : "لا مبيعات"}</small></div>
+        </div>
+        <div className="fc-kpis">
+          <div className="fc-kpi"><span>مبيعات الأطباق</span><b className="num">{money(T.revenue)}</b></div>
+          <div className="fc-kpi"><span>تكلفة ما خرج من المخزن</span><b className="num">{money(T.cost)}</b></div>
+          <div className="fc-kpi good"><span>مجمل ربح الأطباق</span><b className="num">{money(T.profit)}</b></div>
+          <div className={"fc-kpi" + (T.waste > 0 ? " high" : "")}><span>هالك وتسويات مخزون</span><b className="num">{money(T.waste)}</b><small>{T.wastePct === null ? "" : `${T.wastePct}% من المبيعات — مع الهالك ${T.costWithWastePct}%`}</small></div>
+          <div className="fc-kpi"><span>الطبخات</span><b className="num">{T.batches}</b><small>{T.yieldVsStandardPct === null ? "لا طبخات في الفترة" : `الناتج ${T.yieldVsStandardPct}% من المعياري`}</small></div>
+          <div className="fc-kpi"><span>أصناف مباعة</span><b className="num">{T.dishes}</b></div>
+        </div>
+      </div>
+      {data.days.length > 1 && <div className="card"><div className="card-h"><h3>المبيعات والتكلفة يومياً</h3></div>
+        <div className="fc-days" data-fc-days>{data.days.map((d: any) => <div key={d.date} className="fc-day" title={`${fmtDate(d.date)} — مبيعات ${money(d.revenue)}، تكلفة ${money(d.cost)} (${d.costPct ?? "—"}%)`}><div className="col"><span className="rev" style={{ height: (d.revenue / maxDay) * 100 + "%" }} /><span className="cst" style={{ height: (d.cost / maxDay) * 100 + "%" }} /></div><small className="num">{d.date.slice(8)}</small></div>)}</div>
+        <div className="small muted"><span className="fc-dot rev" /> المبيعات <span className="fc-dot cst" /> التكلفة</div></div>}
+      <Tabs tabs={[{ key: "dishes", label: `الأصناف والأحجام (${data.dishes.length})` }, { key: "cats", label: "التصنيفات" }, { key: "ing", label: `المكونات وأين ذهبت (${data.ingredients.length})` }]} value={view} onChange={setView} />
+      {view === "dishes" && <div className="card">{!data.dishes.length ? <Empty text="لا مبيعات لأصناف لها وصفة في هذه الفترة" /> : <div className="table-wrap"><table className="tbl" data-fc-dishes>
+        <thead><tr><th>الصنف</th><th>الحجم / الإضافات</th><th className="n">المباع</th><th className="n">سعر الوحدة</th><th className="n">تكلفة الوحدة</th><th className="n">المبيعات</th><th className="n">التكلفة</th><th className="n">الربح</th><th style={{ width: 170 }}>نسبة التكلفة</th></tr></thead>
+        <tbody>{data.dishes.map((r: any, i: number) => <tr key={i} className="clickable" onClick={() => onOpen(r)}><td><b>{r.name}</b><div className="small muted">{r.category}</div></td><td>{r.variant || <span className="muted">—</span>}</td><td className="n">{r.qty}</td><td className="n">{r.unitPrice === null ? "—" : <Money v={r.unitPrice} />}</td><td className="n">{r.unitCost === null ? "—" : <Money v={r.unitCost} />}</td><td className="n"><Money v={r.revenue} /></td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.profit} /></td><td><PctBar v={r.costPct} target={data.target} /></td></tr>)}</tbody>
+        <tfoot><tr><td colSpan={5}>الإجمالي</td><td className="n"><Money v={T.revenue} /></td><td className="n"><Money v={T.cost} /></td><td className="n"><Money v={T.profit} /></td><td><PctBar v={T.costPct} target={data.target} /></td></tr></tfoot></table></div>}</div>}
+      {view === "cats" && <div className="card">{!data.categories.length ? <Empty /> : <div className="table-wrap"><table className="tbl" data-fc-cats>
+        <thead><tr><th>التصنيف</th><th className="n">المبيعات</th><th className="n">التكلفة</th><th className="n">الربح</th><th style={{ width: 200 }}>نسبة التكلفة</th></tr></thead>
+        <tbody>{data.categories.map((r: any) => <tr key={r.category}><td><b>{r.category}</b></td><td className="n"><Money v={r.revenue} /></td><td className="n"><Money v={r.cost} /></td><td className="n"><Money v={r.profit} /></td><td><PctBar v={r.costPct} target={data.target} /></td></tr>)}</tbody></table></div>}</div>}
+      {view === "ing" && <div className="card">{!data.ingredients.length ? <Empty text="لا حركة على المكونات في هذه الفترة" /> : <><div className="table-wrap"><table className="tbl" data-fc-ing>
+        <thead><tr><th>المكوّن</th><th className="n">المشترى</th><th className="n">خرج للبيع</th><th className="n">دخل في طبخات</th><th className="n">هالك وتسويات</th><th className="n">الرصيد الآن</th><th className="n">قيمة المستهلك</th><th style={{ width: 160 }}>توزيعه</th></tr></thead>
+        <tbody>{data.ingredients.map((r: any) => { const tot = r.soldValue + r.cookedValue + r.lostValue; return <tr key={r.productId}><td><b>{r.name}</b> <span className="small muted">{r.unit}</span></td><td className="n">{r.boughtQty || "—"}</td><td className="n">{r.soldQty || "—"}</td><td className="n">{r.cookedQty || (r.madeQty ? <span className="pos-val">+{r.madeQty}</span> : "—")}</td><td className="n">{r.lostQty ? <span className="neg-val">{r.lostQty}</span> : "—"}</td><td className="n">{r.onHand < 0 ? <span className="neg-val">{r.onHand}</span> : r.onHand}</td><td className="n"><Money v={tot} /></td>
+          <td><div className="fc-split" title={`بيع ${money(r.soldValue)} · طبخات ${money(r.cookedValue)} · هالك ${money(r.lostValue)}`} style={{ width: Math.max(4, (tot / maxIng) * 100) + "%" }}><span className="s" style={{ flex: r.soldValue }} /><span className="k" style={{ flex: r.cookedValue }} /><span className="l" style={{ flex: r.lostValue }} /></div></td></tr>; })}</tbody></table></div>
+        <div className="small muted mt"><span className="fc-dot s" /> خرج للبيع <span className="fc-dot k" /> دخل في طبخات <span className="fc-dot l" /> هالك وتسويات — الأرقام من كرت الصنف في المخزن.</div></>}</div>}
+    </div>
   );
 }
 

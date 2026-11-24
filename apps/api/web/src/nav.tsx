@@ -22,6 +22,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/recipes", label: "الوصفات وتكلفة الأطباق", perm: "products.read", company: true },
     { to: "/recipes?tab=preps", label: "التحضيرات (وصفة أولية ونهائية)", perm: "products.read", company: true },
     { to: "/recipes?tab=batches", label: "الطبخات (التصنيع)", perm: "products.read", company: true },
+    { to: "/recipes?tab=cost", label: "تقرير تكاليف الطعام", perm: "reports.read", company: true },
     { to: "/recipes?tab=eng", label: "هندسة القائمة", perm: "products.read", company: true },
     { to: "/recipes?tab=guide", label: "كيف تُحسب التكلفة؟ (مثال الشاورما)", perm: "products.read", company: true },
     { to: "/pos/modifiers", label: "الإضافات ورسوم الخدمة", perm: "products.read", company: true },

@@ -73,7 +73,7 @@ export async function posSale(t: Db, company: any, user: { id: string; name: str
   let lines: any[] = base.map(({ p, l, unit, mods }, i) => ({
     productId: p.id, qty: num(l.qty), unitPrice: unit, discountPct: combinePct(num(l.discountPct), hits[i]?.pct || 0, ticketDisc), taxCode: p.taxCode, uomId: l.uomId || null,
     promotionId: hits[i]?.promotionId || null, promoPct: hits[i]?.pct || 0,
-    ...(mods.length ? { description: `${p.name} (${choiceText(mods)})`, modifiers: mods.map((m) => ({ group: m.group, name: m.name, price: m.price, optionId: m.optionId })) } : {}),
+    ...(mods.length ? { description: `${p.name} (${choiceText(mods)})`, modifiers: mods.map((m) => ({ group: m.group, name: m.name, price: m.price, optionId: m.optionId, ...(m.factor ? { factor: m.factor } : {}), ...(m.componentId ? { componentId: m.componentId, componentQty: m.componentQty } : {}) })) } : {}),
   }));
   // service charge of a restaurant order (dine-in by default): a taxable line on what is paid now, after discounts
   const order = s.orderId && /^[0-9a-f-]{36}$/i.test(s.orderId) ? await t.maybe(`SELECT type, guests FROM pos_orders WHERE id=$1 AND company_id=$2`, [s.orderId, companyId]) : null;

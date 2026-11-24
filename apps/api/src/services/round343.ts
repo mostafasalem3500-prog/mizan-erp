@@ -13,6 +13,8 @@ import { stockIn, stockOut } from "../accounting/stock";
 import { applySettlement, saveDraft, postInvoice } from "./invoices";
 import { BASE } from "./currency";
 import { getRun } from "./paymentruns";
+import { saveGroup } from "./modifiers";
+import { openSession, posSale, closeSession } from "./pos";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const iso = (d: any) => (d instanceof Date ? d.toISOString() : String(d)).slice(0, 10);
@@ -234,6 +236,93 @@ export async function recipesOf(t: Db, C: string, productIds: string[]) {
   return out;
 }
 
+/** Stock items an add-on option takes, exploded through direct-method preparations down to what is actually in the warehouse. */
+export async function leavesOf(t: Db, C: string, items: { componentId: string; qty: number }[]) {
+  if (!items.length) return [] as any[];
+  const all = await loadAll(t, C);
+  const acc = new Map<string, number>();
+  for (const it of items) { if (exploded(all.nodes.get(it.componentId))) explode(all, it.componentId, it.qty, acc); else acc.set(it.componentId, (acc.get(it.componentId) || 0) + it.qty); }
+  const ids = [...acc.keys()].filter((id) => !all.infos.has(id));
+  const extra = ids.length ? await t.rows(`SELECT id, name, purchase_price FROM products WHERE company_id=$1 AND id = ANY($2::uuid[])`, [C, ids]) : [];
+  const nm = new Map(extra.map((x: any) => [x.id, x]));
+  return [...acc.entries()].map(([id, q]) => ({ componentId: id, qty: q, name: all.infos.get(id)?.name || (nm.get(id) as any)?.name || "", purchasePrice: all.infos.has(id) ? unitCost(all, id) : Number((nm.get(id) as any)?.purchasePrice || 0) }));
+}
+
+/**
+ * Cost of a dish in each of its sizes and with each of its add-ons: a size multiplies the recipe (factor), an add-on
+ * takes its own ingredient. Price = the dish price + the option's extra price.
+ */
+export async function variantCosts(t: Db, C: string, productId: string) {
+  const r = await getRecipe(t, C, productId);
+  const prod = await t.one(`SELECT category_id FROM products WHERE id=$1`, [productId]);
+  const groups = await t.rows(`SELECT name, options FROM modifier_groups WHERE company_id=$1 AND is_active AND ($2 = ANY(product_ids) OR $3::uuid = ANY(category_ids)) ORDER BY sort, name`, [C, productId, prod.categoryId]);
+  const all = await loadAll(t, C);
+  const rows: any[] = [];
+  for (const g of groups) for (const o of (g.options || []) as any[]) {
+    if (o.active === false) continue;
+    const f = Number(o.factor) > 0 ? Number(o.factor) : 1;
+    let compCost = 0, compName: string | null = null;
+    if (o.componentId) { const i = all.infos.get(o.componentId) || (await t.maybe(`SELECT name, purchase_price, (SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.product_id=p.id AND b.qty>0) avg FROM products p WHERE p.id=$1 AND p.company_id=$2`, [o.componentId, C])); if (i) { compName = i.name; compCost = Number(o.componentQty) * (all.infos.has(o.componentId) ? unitCost(all, o.componentId) : Number((i as any).avg ?? (i as any).purchasePrice ?? 0)); } }
+    const isSize = f !== 1;
+    const cost = isSize ? r2(r.batchCost * f + compCost) : r2(compCost);
+    const price = isSize ? r2(r.salePrice + Number(o.price || 0)) : r2(Number(o.price || 0));
+    rows.push({ group: g.name, option: o.name, kind: isSize ? "SIZE" : "ADDON", factor: f, component: compName, componentQty: o.componentId ? Number(o.componentQty) : null, extraPrice: Number(o.price || 0), cost, price, margin: r2(price - cost), marginPct: price > 0 ? r2(((price - cost) / price) * 100) : null, costPct: price > 0 ? r2((cost / price) * 100) : null });
+  }
+  return { productId, name: r.name, baseCost: r.batchCost, basePrice: r.salePrice, baseCostPct: r.salePrice > 0 ? r2((r.batchCost / r.salePrice) * 100) : null, rows };
+}
+
+/**
+ * Food cost report: what each dish (and each size of it) sold for and what it took out of the warehouse, the food cost
+ * percentage against a target, the trend by day, and where the ingredients went (sold, produced, wasted or adjusted).
+ */
+export async function foodCost(t: Db, C: string, q: { from?: string; to?: string }) {
+  const to = isDate(q.to) ? String(q.to) : today(); const from = isDate(q.from) ? String(q.from) : to.slice(0, 8) + "01";
+  const co = await t.one(`SELECT COALESCE((accounting->'pos'->>'foodCostTarget')::numeric, 30) target FROM companies WHERE id=$1`, [C]);
+  const lines = await t.rows(
+    `SELECT l.product_id id, p.name, COALESCE(c.name,'بلا تصنيف') category, l.description, i.kind,
+            l.qty * COALESCE(l.factor,1) qty, l.net_amount * COALESCE(i.exchange_rate,1) net, l.qty * COALESCE(l.factor,1) * l.unit_cost cost, i.date, i.channel
+       FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id JOIN products p ON p.id=l.product_id LEFT JOIN product_categories c ON c.id=p.category_id
+      WHERE i.company_id=$1 AND i.direction='SALE' AND i.status='POSTED' AND i.kind IN ('INVOICE','CREDIT_NOTE') AND i.date BETWEEN $2 AND $3
+        AND (EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=l.product_id) OR l.modifiers IS NOT NULL)`, [C, from, to]);
+  const dishes = new Map<string, any>(), days = new Map<string, any>(), cats = new Map<string, any>();
+  let revenue = 0, cost = 0;
+  for (const l of lines) {
+    const sg = l.kind === "CREDIT_NOTE" ? -1 : 1, net = sg * Number(l.net), cst = l.kind === "INVOICE" ? Number(l.cost) : 0, qty = sg * Number(l.qty);
+    const variant = String(l.description || "").startsWith(l.name) ? String(l.description).slice(l.name.length).replace(/^\s*\(|\)\s*$/g, "").trim() : "";
+    const key = l.id + "|" + variant;
+    const d = dishes.get(key) || { productId: l.id, name: l.name, variant, category: l.category, qty: 0, revenue: 0, cost: 0 }; d.qty += qty; d.revenue += net; d.cost += cst; dishes.set(key, d);
+    const dk = iso(l.date); const dy = days.get(dk) || { date: dk, revenue: 0, cost: 0 }; dy.revenue += net; dy.cost += cst; days.set(dk, dy);
+    const ck = cats.get(l.category) || { category: l.category, revenue: 0, cost: 0 }; ck.revenue += net; ck.cost += cst; cats.set(l.category, ck);
+    revenue += net; cost += cst;
+  }
+  const pct = (c: number, r: number) => (r > 0 ? r2((c / r) * 100) : null);
+  const fin = (x: any) => ({ ...x, qty: r3(x.qty ?? 0), revenue: r2(x.revenue), cost: r2(x.cost), profit: r2(x.revenue - x.cost), costPct: pct(x.cost, x.revenue), unitCost: x.qty > 0 ? r2(x.cost / x.qty) : null, unitPrice: x.qty > 0 ? r2(x.revenue / x.qty) : null });
+  const dishRows = [...dishes.values()].map(fin).sort((a, b) => b.revenue - a.revenue);
+  for (const d of dishRows) d.level = d.costPct === null ? "none" : d.costPct <= Number(co.target) ? "good" : d.costPct <= Number(co.target) + 8 ? "watch" : "high";
+  // where the ingredients went, from the stock card
+  const mv = await t.rows(
+    `SELECT p.id, p.name, p.unit,
+            -COALESCE(SUM(m.qty) FILTER (WHERE m.source_type IN ('SALE','POS')),0) sold_qty, -COALESCE(SUM(m.value) FILTER (WHERE m.source_type IN ('SALE','POS')),0) sold_val,
+            -COALESCE(SUM(m.qty) FILTER (WHERE m.source_type='PRODUCTION' AND m.qty < 0),0) cooked_qty, -COALESCE(SUM(m.value) FILTER (WHERE m.source_type='PRODUCTION' AND m.qty < 0),0) cooked_val,
+            COALESCE(SUM(m.qty) FILTER (WHERE m.source_type='PRODUCTION' AND m.qty > 0),0) made_qty,
+            -COALESCE(SUM(m.qty) FILTER (WHERE m.source_type NOT IN ('SALE','POS','PRODUCTION','PRODUCTION_CANCEL','PURCHASE','PURCHASE_RETURN','SALE_RETURN','TRANSFER','OPENING') AND m.qty < 0),0) lost_qty,
+            -COALESCE(SUM(m.value) FILTER (WHERE m.source_type NOT IN ('SALE','POS','PRODUCTION','PRODUCTION_CANCEL','PURCHASE','PURCHASE_RETURN','SALE_RETURN','TRANSFER','OPENING') AND m.qty < 0),0) lost_val,
+            COALESCE(SUM(m.qty) FILTER (WHERE m.source_type='PURCHASE'),0) bought_qty, COALESCE(SUM(m.value) FILTER (WHERE m.source_type='PURCHASE'),0) bought_val,
+            (SELECT COALESCE(SUM(b.qty),0) FROM stock_balances b WHERE b.product_id=p.id) on_hand
+       FROM stock_moves m JOIN products p ON p.id=m.product_id
+      WHERE m.company_id=$1 AND m.date BETWEEN $2 AND $3
+        AND (p.id IN (SELECT component_id FROM product_recipes WHERE company_id=$1) OR p.id IN (SELECT product_id FROM product_recipes WHERE company_id=$1)
+             OR EXISTS (SELECT 1 FROM modifier_groups g, jsonb_array_elements(g.options) o WHERE g.company_id=$1 AND o->>'componentId' = p.id::text))
+      GROUP BY p.id ORDER BY 5 DESC`, [C, from, to]);
+  // ::numeric text → number; signs: issues are stored negative in stock_moves
+  const ingredients = mv.map((x: any) => ({ productId: x.id, name: x.name, unit: x.unit, soldQty: r3(Number(x.soldQty)), soldValue: r2(Number(x.soldVal)), cookedQty: r3(Number(x.cookedQty)), cookedValue: r2(Number(x.cookedVal)), madeQty: r3(Number(x.madeQty)), lostQty: r3(Number(x.lostQty)), lostValue: r2(Number(x.lostVal)), boughtQty: r3(Number(x.boughtQty)), boughtValue: r2(Number(x.boughtVal)), onHand: r3(Number(x.onHand)) }));
+  const waste = r2(ingredients.reduce((s: number, x: any) => s + x.lostValue, 0));
+  const batches = await t.one(`SELECT COUNT(*)::int n, COALESCE(SUM(expected_qty),0) exp, COALESCE(SUM(output_qty),0) out FROM prep_batches WHERE company_id=$1 AND status='POSTED' AND date BETWEEN $2 AND $3`, [C, from, to]);
+  return { from, to, target: Number(co.target),
+    totals: { revenue: r2(revenue), cost: r2(cost), profit: r2(revenue - cost), costPct: pct(cost, revenue), waste, wastePct: pct(waste, revenue), costWithWastePct: pct(cost + waste, revenue), dishes: dishRows.length, batches: batches.n, yieldVsStandardPct: Number(batches.exp) > 0 ? r2((Number(batches.out) / Number(batches.exp)) * 100) : null },
+    dishes: dishRows, categories: [...cats.values()].map(fin).sort((a, b) => b.revenue - a.revenue), days: [...days.values()].map(fin).sort((a, b) => a.date.localeCompare(b.date)), ingredients };
+}
+
 /** Dishes (non-stock items with a recipe), with today's cost and margin. */
 export async function recipeList(t: Db, C: string) {
   const ids = await t.rows(`SELECT DISTINCT r.product_id id FROM product_recipes r JOIN products p ON p.id=r.product_id WHERE r.company_id=$1 AND p.type <> 'STOCK'`, [C]);
@@ -316,7 +405,7 @@ export async function cancelBatch(t: Db, C: string, user: string, id: string) {
  * methods side by side — the cooked meat on the batch method, the marinade and the garlic sauce on direct deduction.
  * Everything is flagged as sample data, so «حذف البيانات التجريبية» removes it.
  */
-export async function seedShawarmaExample(t: Db, company: any, user: string) {
+export async function seedShawarmaExample(t: Db, company: any, user: string, userId?: string) {
   const C = company.id;
   if (await t.maybe(`SELECT 1 FROM products WHERE company_id=$1 AND sku='EX-SW'`, [C])) throw conflict("مثال الشاورما محمَّل من قبل — تجده في تبويبي «الوصفات» و«التحضيرات»");
   const eg = BASE === "EGP";
@@ -334,6 +423,22 @@ export async function seedShawarmaExample(t: Db, company: any, user: string) {
   await saveRecipe(t, C, toum.id, { outputQty: 3, method: "DIRECT", lines: [{ componentId: garlic.id, qty: 1 }, { componentId: oil.id, qty: 2 }] });
   await saveRecipe(t, C, sand.id, { lines: [{ componentId: cooked.id, qty: 0.12 }, { componentId: toum.id, qty: 0.03 }, { componentId: bread.id, qty: 1 }, { componentId: pickle.id, qty: 0.02 }] });
   const batch = await createBatch(t, C, user, { productId: cooked.id, inputQty: 24, outputQty: 15, notes: "مثال: سيخ 24 كجم خرج منه 15 كجم بدل 15.6" }, { isDemo: true });
+  // sizes and an add-on, so each size has its own cost: a double takes 1.6 × the recipe; extra garlic sauce takes 20 g of it
+  const size = await saveGroup(t, C, { name: "حجم الساندوتش (مثال)", minSelect: 1, maxSelect: 1, productIds: [sand.id], options: [{ name: "عادي", price: 0 }, { name: "دبل", price: 6, factor: 1.6 }] });
+  const extra = await saveGroup(t, C, { name: "إضافات الشاورما (مثال)", minSelect: 0, maxSelect: 2, productIds: [sand.id], options: [{ name: "ثومية إضافية", price: 1, componentId: toum.id, componentQty: 0.02 }, { name: "بدون مخلل", price: 0 }] });
+  await t.exec(`UPDATE modifier_groups SET is_demo=true WHERE id = ANY($1::uuid[])`, [[size.id, extra.id]]);
+  // a few till sales so the food-cost report has something to show
+  if (userId) try {
+    await t.savepoint(async () => {
+      const u = { id: userId, name: user };
+      const session = await openSession(t, C, u, 0);
+      await t.exec(`UPDATE pos_sessions SET is_demo=true WHERE id=$1`, [session.id]);
+      const O = (g: any, n: string) => g.options.find((o: any) => o.name === n).id;
+      await posSale(t, company, u, { sessionId: session.id, isDemo: true, tenders: [{ method: "CASH", amount: null }], lines: [
+        { productId: sand.id, qty: 30, unitPrice: 15, modifiers: [O(size, "عادي")] }, { productId: sand.id, qty: 12, unitPrice: 15, modifiers: [O(size, "دبل")] }, { productId: sand.id, qty: 8, unitPrice: 15, modifiers: [O(size, "عادي"), O(extra, "ثومية إضافية")] }] } as any);
+      await closeSession(t, C, user, session.id, Number((await t.one(`SELECT cash_sales FROM pos_sessions WHERE id=$1`, [session.id])).cashSales), true);
+    });
+  } catch { /* the sample sales are optional (the user may have a till session open) */ }
   return { ok: true, sandwich: sand.id, cooked: cooked.id, batch: batch.number };
 }
 

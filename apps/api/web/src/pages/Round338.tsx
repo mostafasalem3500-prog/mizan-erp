@@ -61,11 +61,15 @@ function GroupEditor({ g: g0, cats, products, busy, onClose, onSave }: { g: any;
         <Field label="الحالة"><Select value={g.isActive ? "1" : "0"} onChange={(e) => set("isActive", e.target.value === "1")}><option value="1">فعّالة</option><option value="0">موقوفة</option></Select></Field>
       </div>
       <h4 className="mt">الخيارات</h4>
-      <div className="table-wrap"><table className="tbl compact" data-options><thead><tr><th>الخيار</th><th className="n" style={{ width: 130 }}>السعر الإضافي</th><th></th></tr></thead>
+      <div className="table-wrap"><table className="tbl compact" data-options><thead><tr><th>الخيار</th><th className="n" style={{ width: 110 }}>السعر الإضافي</th><th className="n" style={{ width: 100 }} title="للأحجام: يضرب وصفة الصنف (كبير = 1.5). اتركه 1 للإضافات">معامل الوصفة</th><th style={{ minWidth: 190 }} title="مادة مخزنية يخصمها هذا الخيار عند البيع">مكوّن يُخصم</th><th className="n" style={{ width: 100 }}>كميته</th><th></th></tr></thead>
         <tbody>{g.options.map((o: any, i: number) => <tr key={i}><td><Input value={o.name} onChange={(e) => setOpt(i, "name", e.target.value)} placeholder="كبير، جبن إضافي…" aria-label={`اسم الخيار ${i + 1}`} /></td>
           <td className="n"><NumInput value={o.price} onChange={(e) => setOpt(i, "price", e.target.value)} aria-label={`سعر الخيار ${i + 1}`} /></td>
+          <td className="n"><NumInput value={o.factor ?? 1} onChange={(e) => setOpt(i, "factor", e.target.value)} data-opt-factor aria-label={`معامل الوصفة ${i + 1}`} /></td>
+          <td data-opt-comp><Picker value={o.componentId ? { id: o.componentId, name: o.componentName || "مكوّن" } as any : null} onChange={(p: any) => set("options", g.options.map((x: any, j: number) => (j === i ? { ...x, componentId: p ? p.id : null, componentName: p ? p.name : null, componentQty: p ? x.componentQty || 1 : null } : x)))} fetcher={(t: string) => api(`/products${q({ q: t, limit: 20 })}`).then((r: any[]) => r.filter((x) => x.type === "STOCK"))} label={(p: any) => p.name} placeholder="بلا — اختياري" /></td>
+          <td className="n"><NumInput value={o.componentQty ?? ""} disabled={!o.componentId} onChange={(e) => setOpt(i, "componentQty", e.target.value)} data-opt-qty aria-label={`كمية المكوّن ${i + 1}`} /></td>
           <td><button className="btn sm ghost" disabled={g.options.length < 2} onClick={() => set("options", g.options.filter((_: any, j: number) => j !== i))}>✕</button></td></tr>)}</tbody></table></div>
       <button className="btn sm mt" data-add-option onClick={() => set("options", [...g.options, { name: "", price: 0 }])}>＋ خيار</button>
+      <div className="small muted mt">لحساب تكلفة كل حجم: اجعل مجموعة «الحجم» بمعامل وصفة لكل خيار (صغير 0.75، وسط 1، كبير 1.5). ولخصم الإضافة من المخزون اختر مكوّنها وكميته (جرعة إسبريسو = 0.009 كجم بن).</div>
       <h4 className="mt">تُطبَّق على</h4>
       <div className="small muted mb">تصنيف كامل (كل أصنافه)، أو أصناف بعينها.</div>
       <div className="chips mb">{cats.map((c) => <label key={c.id} className={"chip" + (g.categoryIds.includes(c.id) ? " on" : "")}><input type="checkbox" checked={g.categoryIds.includes(c.id)} onChange={() => toggle("categoryIds", c.id)} /> 📁 {c.name}</label>)}</div>

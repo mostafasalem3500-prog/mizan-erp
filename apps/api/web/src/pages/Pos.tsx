@@ -25,6 +25,8 @@ export function PosPage() {
   const oversellOk = React.useRef<Record<string, boolean>>({});
   const canOversell = me.company?.accounting?.pos?.oversell !== "BLOCK";
   const cats = useFetch("/categories");
+  const uiF = useFetch<any>("/pos/ui");
+  const ui = uiF.data?.ui || {}, topIds: string[] = uiF.data?.top || [];
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("all");
   const [cart, setCart] = useLocalState<CartLine[]>("mz_pos_cart", []);
@@ -75,7 +77,7 @@ export function PosPage() {
   const [imgMissing, setImgMissing] = useState(false);
   const [imgEdit, setImgEdit] = useState<any[] | null>(null);
   const canImg = can("products.write");
-  const list = useMemo(() => (products.data || []).filter((p: any) => (cat === "all" || p.categoryId === cat) && (!search || matches(p, search, ["name", "sku", "barcode"]) || p.barcode === search) && (!imgMode || !imgMissing || !p.image)), [products.data, cat, search, imgMode, imgMissing]);
+  const list = useMemo(() => (cat === "top" ? topIds.map((id) => (products.data || []).find((p: any) => p.id === id)).filter(Boolean) : (products.data || [])).filter((p: any) => (search || imgMode || Number(p.salePrice) > 0) && (cat === "all" || cat === "top" || p.categoryId === cat) && (!search || matches(p, search, ["name", "sku", "barcode"]) || p.barcode === search) && (!imgMode || !imgMissing || !p.image)), [products.data, cat, search, imgMode, imgMissing, topIds.length]);
   const imgChosen = (products.data || []).filter((p: any) => imgSel[p.id]);
 
   // customer price list (fixed prices / % discount) — applied when the customer is chosen and on every add
@@ -211,7 +213,7 @@ export function PosPage() {
     );
   }
   return (
-    <div className={"pos" + (showHome ? " pos-home" : "")}><h1 className="sr-only">نقطة البيع</h1>
+    <div className={"pos" + (showHome ? " pos-home" : "") + ` tile-${ui.tile || "M"}` + (ui.cats === "SIDE" ? " cats-side" : "") + (ui.images === false ? " no-img" : "")} style={ui.accent ? ({ "--primary": ui.accent, "--primary-2": ui.accent, "--primary-soft": ui.accent + "1f" } as any) : undefined}><h1 className="sr-only">نقطة البيع</h1>
       {showHome && <RestaurantHome data={restF.data} reload={restF.reload} session={session} online={online} busy={busy} onOpen={openOrder} onClose={() => setCloseOpen(true)} onReturn={() => setReturnOpen(true)} />}
       <div className="catalog" hidden={showHome}>
         <div className="cat-head">
@@ -225,8 +227,9 @@ export function PosPage() {
           <button className="btn sm" onClick={() => setCloseOpen(true)}>إغلاق الوردية</button>
         </div>
         <div className="cats">
-          <button className={cat === "all" ? "active" : ""} onClick={() => setCat("all")}>الكل</button>
-          {(cats.data || []).map((c: any) => <button key={c.id} className={cat === c.id ? "active" : ""} onClick={() => setCat(c.id)} style={cat === c.id && c.color ? { background: c.color, borderColor: c.color } : {}}>{EMOJI[c.name] || "•"} {c.name}</button>)}
+          <button className={cat === "all" ? "active" : ""} onClick={() => setCat("all")}>الكل <span className="cnt">{(products.data || []).filter((p: any) => Number(p.salePrice) > 0).length}</span></button>
+          {topIds.length > 0 && ui.topFirst !== false && <button className={"top" + (cat === "top" ? " active" : "")} data-pos-top onClick={() => setCat("top")}>⭐ الأكثر مبيعاً</button>}
+          {(cats.data || []).map((c: any) => <button key={c.id} className={cat === c.id ? "active" : ""} onClick={() => setCat(c.id)} style={cat === c.id && c.color ? { background: c.color, borderColor: c.color } : c.color ? { borderInlineStart: `4px solid ${c.color}` } : {}}>{EMOJI[c.name] || "•"} {c.name} <span className="cnt">{(products.data || []).filter((p: any) => p.categoryId === c.id && Number(p.salePrice) > 0).length}</span></button>)}
         </div>
         <div className="items">
           {list.map((p: any) => {

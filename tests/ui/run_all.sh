@@ -33,4 +33,6 @@ run SA 3100 r344_ui
 run EG 3200 r344_ui
 run SA 3100 r345_ui
 run EG 3200 r345_ui
+run SA 3100 r346_ui
+run EG 3200 r346_ui
 echo "screen checks passed: $total"; exit $bad

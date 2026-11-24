@@ -13,8 +13,9 @@ import { bad, num, r2 } from "../lib/core";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ids = (x: any) => (Array.isArray(x) ? [...new Set(x.filter((v: any) => UUID.test(String(v || ""))))] as string[] : []);
-export type Option = { id: string; name: string; price: number; active: boolean };
-export type Chosen = { groupId: string; group: string; optionId: string; name: string; price: number };
+/** factor: multiplies the dish's recipe (a large size = 1.5); componentId/componentQty: a stock ingredient this option adds per unit sold */
+export type Option = { id: string; name: string; price: number; active: boolean; factor?: number; componentId?: string | null; componentQty?: number; componentName?: string };
+export type Chosen = { groupId: string; group: string; optionId: string; name: string; price: number; factor?: number; componentId?: string | null; componentQty?: number };
 
 const shape = (g: any) => ({ id: g.id, name: g.name, minSelect: g.minSelect, maxSelect: g.maxSelect, options: (g.options || []) as Option[], productIds: g.productIds || [], categoryIds: g.categoryIds || [], isActive: g.isActive, sort: g.sort });
 
@@ -40,8 +41,15 @@ export async function saveGroup(t: Db, C: string, b: any, id?: string) {
     seen.add(n);
     const price = r2(num(o.price));
     if (price < 0) throw bad(`سعر الخيار «${n}» لا يكون سالباً`);
-    return { id: UUID.test(String(o.id || "")) ? o.id : randomUUID(), name: n, price, active: o.active !== false };
+    const factor = o.factor === undefined || o.factor === null || o.factor === "" ? 1 : Math.round(num(o.factor) * 1000) / 1000;
+    if (!(factor >= 0.1 && factor <= 10)) throw bad(`معامل الوصفة للخيار «${n}» بين 0.1 و10`);
+    const componentId = UUID.test(String(o.componentId || "")) ? String(o.componentId) : null;
+    const componentQty = componentId ? Math.round(num(o.componentQty) * 10000) / 10000 : 0;
+    if (componentId && !(componentQty > 0)) throw bad(`اكتب كمية المكوّن الذي يخصمه الخيار «${n}»`);
+    return { id: UUID.test(String(o.id || "")) ? o.id : randomUUID(), name: n, price, active: o.active !== false, ...(factor !== 1 ? { factor } : {}), ...(componentId ? { componentId, componentQty } : {}) };
   });
+  const compIds = [...new Set(options.map((o) => o.componentId).filter(Boolean))] as string[];
+  if (compIds.length) { const ok = await t.rows(`SELECT id, name FROM products WHERE company_id=$1 AND type='STOCK' AND id = ANY($2::uuid[])`, [C, compIds]); if (ok.length !== compIds.length) throw bad("المكوّن الذي يخصمه الخيار يجب أن يكون صنفاً مخزنياً موجوداً"); for (const o of options) if (o.componentId) o.componentName = ok.find((x: any) => x.id === o.componentId)?.name; }
   if (minSelect > options.filter((o) => o.active).length) throw bad("الحد الأدنى للاختيار أكبر من عدد الخيارات المتاحة");
   const productIds = ids(b.productIds), categoryIds = ids(b.categoryIds);
   if (productIds.length) { const n = await t.one(`SELECT COUNT(*)::int c FROM products WHERE company_id=$1 AND id = ANY($2)`, [C, productIds]); if (n.c !== productIds.length) throw bad("أحد الأصناف غير موجود"); }
@@ -75,7 +83,7 @@ export function resolveChoice(groups: ReturnType<typeof shape>[], p: { id: strin
   const out: Chosen[] = [];
   for (const oid of picked) {
     let hit: Chosen | null = null;
-    for (const g of mine) { const o = g.options.find((x) => x.id === oid && x.active !== false); if (o) { hit = { groupId: g.id, group: g.name, optionId: o.id, name: o.name, price: Number(o.price) }; break; } }
+    for (const g of mine) { const o = g.options.find((x) => x.id === oid && x.active !== false); if (o) { hit = { groupId: g.id, group: g.name, optionId: o.id, name: o.name, price: Number(o.price), ...(o.factor && o.factor !== 1 ? { factor: Number(o.factor) } : {}), ...(o.componentId ? { componentId: o.componentId, componentQty: Number(o.componentQty) } : {}) }; break; } }
     if (!hit) throw bad(`إضافة غير متاحة للصنف «${p.name}»`);
     if (out.some((x) => x.optionId === oid)) continue;
     out.push(hit);

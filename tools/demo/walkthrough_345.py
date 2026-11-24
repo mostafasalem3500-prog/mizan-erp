@@ -34,7 +34,7 @@ pid = lambda s: P[s]['id']
 buy = moves("m.source_type='PURCHASE'")
 show('1) الشراء: ما دخل المخزن', buy)
 ok(eq(qtys(buy), {'EX-CK': 100, 'EX-SP': 10, 'EX-YG': 20, 'EX-OL': 30, 'EX-GR': 10, 'EX-BD': 500, 'EX-PK': 10}) and near(sum(v[1] for v in buy.values()), 3290), 'purchase: 7 raw materials enter the warehouse, worth 3,290')
-ok(near(bal('INVENTORY'), 3290), 'inventory account = 3,290')
+ok(near(bal('INVENTORY'), 3290 - bal('COGS')), 'inventory account = 3,290 less what the sample sales already took')
 b0 = moves("m.source_type='PRODUCTION'")
 show('1) طبخة المثال (24 كجم مدخلات ← 15 كجم مطبوخة)', b0)
 ok(eq(qtys(b0), {'EX-CK': -20, 'EX-SP': -1, 'EX-YG': -2, 'EX-OL': -1, 'EX-CKD': 15}) and near(b0['EX-CKD'][1], 466) and near(sum(v[1] for v in b0.values()), 0), 'sample batch: raw materials worth 466 leave the warehouse and 15 kg of cooked meat enter at 466 — value neither created nor lost')
@@ -47,7 +47,7 @@ show(f"2) طبخة {bt['number']}: 12 كجم مدخلات ← 7.5 كجم", m)
 ok(eq(qtys(m), {'EX-CK': -10, 'EX-SP': -0.5, 'EX-YG': -1, 'EX-OL': -0.5, 'EX-CKD': 7.5}) and near(m['EX-CKD'][1], 233) and near(-m['EX-CK'][1], 200), 'batch: 10 kg chicken (200), 0.5 spice (20), 1 yogurt (8), 0.5 oil (5) drawn; cooked meat enters at 233')
 ok(near(bal('INVENTORY'), iv) and near(bt['unitCost'], 233 / 7.5, 0.001), 'no journal entry: inventory account unchanged; unit cost of this batch 31.0667')
 avg = (466 + 233) / 22.5
-ok(near(float({p['sku']: p for p in c('/products')}['EX-CKD']['avgCost']), avg, 0.001), f'cooked meat in the warehouse: 22.5 kg at an average of {avg:.4f}')
+ok(near(float({p['sku']: p for p in c('/products')}['EX-CKD']['avgCost']), avg, 0.001), f'cooked meat in the warehouse at an average of {avg:.4f} per kg')
 
 # 3 ── an invoice for 20 sandwiches
 cu = c('/partners', {'name': 'زبون', 'isCustomer': True, 'kind': 'INDIVIDUAL', 'phone': '0501234567'})
@@ -63,7 +63,8 @@ ok(near(bal('COGS') - cg, drawn) and near(iv - bal('INVENTORY'), drawn), 'cost o
 
 # 4 ── the till
 sess = c('/pos/session/open', {'openingCash': 0}); iv, cg = bal('INVENTORY'), bal('COGS')
-ps = c('/pos/sale', {'sessionId': sess['id'], 'lines': [{'productId': pid('EX-SW'), 'qty': 3, 'unitPrice': 15}], 'tenders': [{'method': 'CASH', 'amount': None}]})
+G = c('/modifiers'); G = G['rows'] if isinstance(G, dict) else G; REG = [o['id'] for g in G for o in g['options'] if o['name'] == 'عادي'][0]
+ps = c('/pos/sale', {'sessionId': sess['id'], 'lines': [{'productId': pid('EX-SW'), 'qty': 3, 'unitPrice': 15, 'modifiers': [REG]}], 'tenders': [{'method': 'CASH', 'amount': None}]})
 m = moves(f"m.source_id='{ps['id']}'")
 show('4) نقطة البيع: 3 ساندوتش نقداً', m)
 ok(eq(qtys(m), {'EX-CKD': -0.36, 'EX-GR': -0.03, 'EX-OL': -0.06, 'EX-BD': -3, 'EX-PK': -0.06}) and near(bal('COGS') - cg, -sum(v[1] for v in m.values())) and near(iv - bal('INVENTORY'), bal('COGS') - cg), 'till sale: the same draw per sandwich, cost of sales = what left the warehouse')
