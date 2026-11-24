@@ -21,7 +21,7 @@ with sync_playwright() as pw:
     pg.get_by_label('بحث الأصناف').fill(prod['name']); pg.wait_for_timeout(200)
     pg.locator('[data-products] .chip', has_text=prod['name']).first.click()
     pg.click('[data-save-group]'); pg.wait_for_selector('[data-groups] tbody tr')
-    row = pg.inner_text('[data-groups] tbody tr')
+    pg.wait_for_timeout(600); row = pg.locator('[data-groups] tbody tr', has_text=prod['name']).first.inner_text()  # the sample data has its own groups
     ok('الحجم' in row and 'إلزامي' in row and prod['name'] in row and 'كبير' in row, 'group saved: required, two options, attached to the product')
     pg.fill('[data-svc-pct]', '10'); pg.click('[data-svc-save]'); pg.wait_for_timeout(800)
     ok(api.call('/pos/restaurant', tok=t)['settings']['serviceCharge']['pct'] == 10, 'service charge 10% saved')

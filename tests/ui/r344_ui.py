@@ -32,7 +32,7 @@ with sync_playwright() as pw:
     ok('1.25' in pg.inner_text('[data-recipe-cost]'), 'recipe window: 0.2 kg with 25% waste costs 1.25')
     pg.fill('[data-recipe-target]', '75'); pg.wait_for_timeout(200)
     ok('5.00' in pg.inner_text('[data-recipe-price]'), 'for a 75% target margin the suggested price is 5.00')
-    pg.click('[data-recipe-save]'); pg.wait_for_selector('[data-recipe-list]', timeout=20000)
+    pg.click('[data-recipe-save]'); pg.wait_for_selector('.modal', state='detached', timeout=20000); pg.wait_for_selector('[data-recipe-list]', timeout=20000)
     ok(abs(call(f"/products/{fries['id']}/recipe")['lines'][0]['wastePct'] - 25) < 0.001, 'the waste is saved with the recipe')
     inv('SALE', cu['id'], [{'productId': fries['id'], 'qty': 100, 'unitPrice': 10, 'taxCode': 'S'}, {'productId': burger['id'], 'qty': 60, 'unitPrice': 30, 'taxCode': 'S'}])
     pg.locator('.tabs button, .tabs a, [role=tab]', has_text='هندسة القائمة').first.click(); pg.wait_for_selector('[data-menu-eng-table]', timeout=20000)
