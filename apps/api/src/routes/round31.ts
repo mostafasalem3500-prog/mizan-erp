@@ -133,7 +133,7 @@ r31.delete("/pos/floors/:id", perm("settings.write"), h(async (req) => { await t
 r31.post("/pos/tables", perm("settings.write"), h(async (req) => tx((t) => rest.addTables(t, cid(req), req.body || {}))));
 r31.put("/pos/tables/:id", perm("settings.write"), h(async (req) => tx((t) => rest.saveTable(t, cid(req), p(req).id, req.body || {}))));
 r31.delete("/pos/tables/:id", perm("settings.write"), h(async (req) => { await tx((t) => rest.deleteTable(t, cid(req), p(req).id)); return { ok: true }; }));
-r31.get("/pos/kitchen", perm("pos.use"), h(async (req) => rest.kitchen(db, cid(req))));
+r31.get("/pos/kitchen", perm("pos.use"), h(async (req) => { const r: any = await rest.kitchen(db, cid(req), req.query.station ? String(req.query.station) : undefined); return req.query.v === "2" ? { orders: [...r], stations: r.stations } : [...r]; }));
 r31.get("/pos/restaurant/report", perm("pos.use"), h(async (req) => { const to = isDate(req.query.to) ? String(req.query.to) : today(); return rest.report(db, cid(req), isDate(req.query.from) ? String(req.query.from) : to, to); }));
 r31.post("/pos/orders", perm("pos.use"), h(async (req) => tx((t) => rest.openOrder(t, req.company, actor(req), req.body || {}))));
 r31.get("/pos/orders/:id", perm("pos.use"), h(async (req) => rest.getOrder(db, cid(req), p(req).id)));

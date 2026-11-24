@@ -403,6 +403,26 @@ function peakAnswer(r: any): string {
   if (r.untimed) out.push("", `${r.untimed} فاتورة بلا وقت مسجل لم تدخل التوزيع على الساعات.`);
   return out.join("\n");
 }
+function planAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  if (!r.rows?.length) return `لا شيء يحتاج شراءً الآن: كل المكونات تكفي ${r.cover + r.lead} يوماً على الأقل حسب استهلاك آخر ${r.history} يوماً.\n\n[خطة شراء المكونات](/recipes?tab=buy)`;
+  const S: Record<string, string> = { critical: "⚠ ينفد قبل وصول الطلب", low: "يحتاج شراء" };
+  const out = [`**خطة الشراء** (تكفي ${r.cover} أيام + ${r.lead} أيام وصول): ${r.totals.critical} حرج و${r.totals.low} منخفض، قيمة تقديرية ${money(r.totals.value)} ${cur}.`, "", "| الصنف | الاستهلاك اليومي | الرصيد | يكفي | الحالة | المقترح |", "|---|---|---|---|---|---|",
+    ...r.rows.map((x: any) => `| ${x.name} | ${x.daily} ${x.unit || ""} | ${x.onHand} | ${x.coverDays ?? "—"} يوم | ${S[x.status] || x.status} | ${x.isPrep ? "تُطبخ" : x.suggested} |`)];
+  if (r.suppliers?.length) out.push("", "**حسب المورد:**", ...r.suppliers.map((s: any) => `- ${s.supplierName}: ${s.items} صنف بقيمة ${money(s.value)}`));
+  out.push("", "[خطة شراء المكونات — إنشاء أوامر الشراء](/recipes?tab=buy)");
+  return out.join("\n");
+}
+function kitchenAnswer(r: any): string {
+  if (r.error) return r.error;
+  const T = r.totals;
+  if (!T) return "لا أصناف جُهّزت في الفترة. يُسجَّل الوقت عند ضغط «جاهز» في [شاشة المطبخ](/pos/kitchen).";
+  const out = [`**أداء المطبخ** (${r.from} — ${r.to}): ${T.count} صنف، متوسط التجهيز **${T.avg} دقيقة** (الوسيط ${T.median})، وتأخر ${T.late} (${T.latePct}%) أكثر من ${r.lateMinutes} دقيقة.`];
+  if (r.byStation?.length > 1) out.push("", "| المحطة | أصناف | المتوسط | متأخر |", "|---|---|---|---|", ...r.byStation.map((x: any) => `| ${x.key} | ${x.count} | ${x.avg} د | ${x.late} |`));
+  if (r.slowItems?.length) out.push("", "**الأبطأ:** " + r.slowItems.slice(0, 3).map((x: any) => `${x.key} (${x.avg} د)`).join("، "));
+  out.push("", "[تقرير أداء المطبخ](/recipes?tab=kitchen)");
+  return out.join("\n");
+}
 function foodCostAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const T = r.totals;
@@ -648,6 +668,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "sales_breakdown") return say(breakdownAnswer(res, ctx.currency, prev.input.label), res.by === "category" ? ["المبيعات حسب الصنف", "المبيعات حسب الساعة", "قارن هذا الشهر بالشهر الماضي"] : ["المبيعات حسب التصنيف", "متى وقت الذروة؟", "ملاحظاتك على الوضع"]);
     if (prev.name === "smart_insights") return say(insightsAnswer(res), ["المبيعات حسب التصنيف هذا الشهر", "الأصناف الناقصة", "حلّل الوضع المالي"]);
     if (prev.name === "peak_hours") return say(peakAnswer(res), ["المبيعات حسب يوم الأسبوع", "ملخص اليوم"]);
+    if (prev.name === "purchase_plan") return say(planAnswer(res, ctx.currency), ["تكلفة الطعام هذا الشهر", "الأصناف الناقصة"]);
+    if (prev.name === "kitchen_performance") return say(kitchenAnswer(res), ["متى وقت الذروة؟", "تكلفة الطعام هذا الشهر"]);
     if (prev.name === "food_cost") return say(foodCostAnswer(res, ctx.currency), ["هندسة القائمة", "الأصناف الناقصة"]);
     if (prev.name === "menu_engineering") return say(menuAnswer(res, ctx.currency), ["الأصناف الناقصة", "ملخص اليوم"]);
     if (prev.name === "setoff_candidates") return say(setoffAnswer(res, ctx.currency), ["توقع السيولة للأسابيع القادمة", "افحص الدفاتر"]);
@@ -714,6 +736,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     }
     if (/(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|نصايح|توصيات) (علي|على|عن|حول|ل)? ?(ال)?(وضع|الوضع|المنشاه|الشركه|المحل|المطعم|اعمالي|الشغل|اليوم|الحين)|^(وش|ايش|ما|ماذا) (الجديد|تلاحظ|لاحظت)|^(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|توصيات)$|تنبيهات ذكيه/.test(n)) return call("smart_insights", {});
     if (/(وقت|اوقات|ساعه|ساعات|ايام|يوم) (ال)?(ذروه|زحمه|الضغط)|(متي|متى) (يكون |تكون )?(ال)?(زحمه|ذروه|الضغط)|(افضل|اكثر) (يوم|ساعه|وقت) .{0,8}(بيع|مبيعات)|(اي|ايش|وش|ما) (افضل|اكثر) (يوم|ساعه|وقت)/.test(n)) return call("peak_hours", { days: /اسبوع/.test(n) ? 7 : /3 اشهر|ثلاث(ه)? اشهر|ربع/.test(n) ? 90 : 28 });
+    if (/خطه (ال)?(شراء|مشتريات)|(ماذا|ايش|وش|شو|ما|ايه) .{0,12}(اشتري|نشتري|اطلب|نطلب)|(مشتريات|طلبيه|طلبيات) (ال)?(مطبخ|مطعم|مكونات)|(كم|متي|متى) .{0,12}(يكفي|تكفي|يخلص|تخلص) (ال)?(مخزون|مكونات|خامات|رصيد)/.test(n)) return call("purchase_plan", {});
+    if (/(اداء|سرعه|بطء|وقت|اوقات|زمن) (ال)?(مطبخ|تجهيز|تحضير الطلبات)|(كم|قديش) .{0,10}(ياخذ|ياخد|تاخذ|يستغرق) (ال)?(طلب|تجهيز|اوردر)|(الطلبات|الاصناف) (ال)?متاخره/.test(n)) { const per = parsePeriod(n, ctx.today); return call("kitchen_performance", /(اليوم|امس|شهر|اسبوع)/.test(n) ? { from: per.from, to: per.to } : {}); }
     if (/تكلفه (ال)?(طعام|اكل|الاطباق|المطبخ)|نسبه (ال)?تكلفه .{0,10}(الطعام|الاطباق|المطعم|المطبخ)|food ?cost/.test(n)) { const per = parsePeriod(n, ctx.today); return call("food_cost", { from: per.from, to: per.to }); }
     if (/هندسه (القائمه|المنيو)|(تكلفه|تكاليف|ربح|ربحيه|هامش) .{0,12}(الاطباق|الطبق|الوصفات|الوصفه|المنيو|الوجبات)|(اي|ايش|وش|ما) .{0,10}(الاطباق|الوجبات) .{0,15}(تربح|رابحه|خاسره|الاربح)/.test(n)) return call("menu_engineering", {});
     if (/مقاصه|(عميل ومورد|مورد وعميل)/.test(n)) return call("setoff_candidates", {});

@@ -95,7 +95,10 @@ export function KitchenTicket({ ticket, onClose }: { ticket: any; onClose: () =>
       <div className="c" style={{ fontSize: 20, fontWeight: 800 }}>{ticket.tableName || TYPE_AR[ticket.type]}</div>
       <div className="c" style={{ fontSize: 15, fontWeight: 700 }}>طلب #{ticket.number} · {TYPE_AR[ticket.type]}</div>
       <div className="row between"><span className="num">{fmtDT(ticket.at)}</span><span>{ticket.waiter}</span></div>
-      <table style={{ marginTop: 6 }}><tbody>{ticket.items.map((i: any, k: number) => <tr key={k} className={i.cancel ? "kt-x" : ""}><td style={{ fontSize: 18, fontWeight: 800, width: 44 }} className="num">{i.cancel ? "✕" : ""}{i.qty}</td><td style={{ fontSize: 15, fontWeight: 700 }}>{i.cancel ? "إلغاء: " : ""}{i.name}{i.note && <div style={{ fontWeight: 400, fontSize: 13 }}>← {i.note}</div>}</td></tr>)}</tbody></table>
+      {(ticket.stations?.length ? ticket.stations : [{ station: null, items: ticket.items }]).map((g: any, gi: number) => <div key={gi} className={"kt-st" + (ticket.stations?.length > 1 ? " split" : "")} data-ticket-station={g.station || ""}>
+        {g.station && <div className="kt-st-h">{g.icon || "🍳"} {g.station}</div>}
+        <table style={{ marginTop: 6 }}><tbody>{g.items.map((i: any, k: number) => <tr key={k} className={i.cancel ? "kt-x" : ""}><td style={{ fontSize: 18, fontWeight: 800, width: 44 }} className="num">{i.cancel ? "✕" : ""}{i.qty}</td><td style={{ fontSize: 15, fontWeight: 700 }}>{i.cancel ? "إلغاء: " : ""}{i.name}{i.note && <div style={{ fontWeight: 400, fontSize: 13 }}>← {i.note}</div>}</td></tr>)}</tbody></table>
+      </div>)}
       {ticket.notes && <div style={{ marginTop: 6 }}>ملاحظة: {ticket.notes}</div>}
     </div>
   </Modal>;
@@ -149,20 +152,48 @@ export function NoteModal({ name, value, quick, onClose, onSave }: { name: strin
 
 /** Kitchen display: one card per order with what is still to be prepared; the cook taps «جاهز». */
 export function KitchenPage() {
-  const { data, reload, loading } = useFetch<any[]>("/pos/kitchen");
+  const [station, setStation] = useState(() => { try { return localStorage.getItem("mz_kds_station") || "all"; } catch { return "all"; } });
+  const { data, reload, loading } = useFetch<any>(`/pos/kitchen?v=2&station=${station}`, [station]);
   const { run, busy } = useAction();
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const iv = setInterval(() => { setNow(Date.now()); reload(); }, 8000); return () => clearInterval(iv); }, []);
+  useEffect(() => { const iv = setInterval(() => { setNow(Date.now()); reload(); }, 8000); return () => clearInterval(iv); }, [station]);
+  const pick = (k: string) => { setStation(k); try { localStorage.setItem("mz_kds_station", k); } catch { /* blocked */ } };
   if (loading && !data) return <Loading />;
+  const orders: any[] = data?.orders || [], stations: any[] = data?.stations || [];
+  const cur = stations.find((x) => x.id === station);
   return <div className="grid">
-    <div className="card"><div className="card-h"><div><h3>👨‍🍳 شاشة المطبخ</h3><div className="small muted">الأصناف المرسلة من الصالة بترتيب وصولها. تتحدث تلقائياً كل 8 ثوانٍ.</div></div><div className="row"><span className="badge teal">{(data || []).length} طلب قيد التجهيز</span><Link className="btn sm" to="/pos">← نقطة البيع</Link></div></div></div>
-    {!(data || []).length ? <div className="card"><Empty text="لا طلبات بانتظار التجهيز ✓" /></div> : <div className="kds">{(data || []).map((o) => { const m = mins(o.since, now); return (
-      <div key={o.id} className={"card kds-card" + (m >= 20 ? " late" : m >= 10 ? " warn" : "")}>
+    <div className="card"><div className="card-h"><div><h3>👨‍🍳 شاشة المطبخ{cur ? ` — ${cur.icon || ""} ${cur.name}` : station === "_" ? " — عام" : ""}</h3><div className="small muted">الأصناف المرسلة من الصالة بترتيب وصولها. تتحدث تلقائياً كل 8 ثوانٍ؛ البطاقة تصفرّ بعد 10 دقائق وتحمرّ بعد 20.</div></div>
+      <Link className="btn sm ghost" to="/recipes?tab=kitchen">⏱ أداء المطبخ</Link></div>
+      {stations.length > 0 && <div className="card-b"><div className="seg" data-kds-stations><button className={station === "all" ? "on" : ""} onClick={() => pick("all")}>كل المحطات</button>{stations.map((x) => <button key={x.id} className={station === x.id ? "on" : ""} data-kds-station={x.name} onClick={() => pick(x.id)}>{x.icon || ""} {x.name}</button>)}<button className={station === "_" ? "on" : ""} onClick={() => pick("_")}>عام</button></div></div>}
+    </div>
+    {!orders.length ? <div className="card"><Empty text="لا طلبات بانتظار التجهيز ✓" /></div> : <div className="kds">{orders.map((o) => { const m = mins(o.since, now); return (
+      <div key={o.id} className={"card kds-card" + (m >= 20 ? " late" : m >= 10 ? " warn" : "")} data-kds-order={o.number}>
         <div className="kds-h"><b>{o.tableName || TYPE_AR[o.type]}</b><span>#{o.number} · {TYPE_AR[o.type]}</span><span className="num">⏱ {dur(m)}</span></div>
-        <div className="kds-b">{o.items.map((i: any) => <div key={i.key} className="kds-i"><b className="num">{i.qty}×</b><span>{i.name}{i.note && <div className="kds-n">← {i.note}</div>}</span></div>)}{o.notes && <div className="kds-n">ملاحظة: {o.notes}</div>}</div>
-        <button className="btn primary block" disabled={busy} onClick={() => run(async () => { await api(`/pos/orders/${o.id}/ready`, { body: {} }); reload(); })}>✓ جاهز</button>
+        <div className="kds-b">{o.items.map((i: any) => <div key={i.key} className="kds-i"><b className="num">{i.qty}×</b><span>{i.name}{station === "all" && stations.length > 0 && <span className="kds-st">{i.station}</span>}{i.note && <div className="kds-n">← {i.note}</div>}</span></div>)}{o.notes && <div className="kds-n">ملاحظة الطلب: {o.notes}</div>}</div>
+        <button className="btn primary block" disabled={busy} data-kds-ready onClick={() => run(async () => { await api(`/pos/orders/${o.id}/ready`, { body: { keys: o.items.map((i: any) => i.key) } }); reload(); })}>✓ جاهز{cur ? ` (${cur.name})` : ""}</button>
       </div>); })}</div>}
   </div>;
+}
+
+/** Kitchen stations: which categories each station prepares. */
+function StationsCard({ canWrite }: { canWrite: boolean }) {
+  const st = useFetch<any[]>("/pos/stations");
+  const cats = useFetch<any[]>("/categories");
+  const [list, setList] = useState<any[] | null>(null);
+  const { run, busy } = useAction();
+  useEffect(() => { if (st.data && list === null) setList(st.data.map((x) => ({ ...x }))); }, [st.data]);
+  if (!list || !cats.data) return null;
+  const owner = (cid: string, self: number) => list.findIndex((x, k) => k !== self && x.categoryIds.includes(cid));
+  const upd = (k: number, patch: any) => setList(list.map((x, j) => (j === k ? { ...x, ...patch } : x)));
+  return <div className="card" data-stations><div className="card-h"><div><h3>محطات المطبخ</h3><div className="small muted">قسّم المطبخ (شواية، مشروبات، حلويات…) واختر تصنيفات كل محطة؛ التصنيف الرئيسي يشمل فروعه. تذكرة المطبخ تُطبع لكل محطة، وشاشة المطبخ تعرض محطة واحدة.</div></div></div>
+    <div className="card-b grid">
+      {!list.length && <div className="muted small">لا محطات: كل الأصناف تظهر في شاشة مطبخ واحدة.</div>}
+      {list.map((x, k) => <div key={x.id || k} className="station-row" data-station-row={k}>
+        <div className="row" style={{ gap: 8 }}><Input style={{ width: 70 }} value={x.icon || ""} onChange={(e) => upd(k, { icon: e.target.value })} placeholder="🔥" aria-label="أيقونة المحطة" /><Input value={x.name} onChange={(e) => upd(k, { name: e.target.value })} placeholder="اسم المحطة" data-station-name aria-label="اسم المحطة" />{canWrite && <button className="btn sm ghost danger" onClick={() => setList(list.filter((_, j) => j !== k))}>حذف</button>}</div>
+        <div className="chips mt">{cats.data!.map((c: any) => { const on = x.categoryIds.includes(c.id), o = owner(c.id, k); return <button key={c.id} type="button" className={"chip" + (on ? " on" : "")} disabled={!canWrite || (o >= 0 && !on)} title={o >= 0 && !on ? `في محطة «${list[o].name}»` : ""} data-station-cat={c.name} onClick={() => upd(k, { categoryIds: on ? x.categoryIds.filter((y: string) => y !== c.id) : [...x.categoryIds, c.id] })}>{"· ".repeat(c.depth || 0)}{c.icon || ""} {c.name}</button>; })}</div>
+      </div>)}
+      {canWrite && <div className="row" style={{ gap: 8 }}><button className="btn sm" data-station-add onClick={() => setList([...list, { name: "", icon: "", categoryIds: [] }])}>＋ محطة</button><div className="grow" /><button className="btn primary sm" disabled={busy || list.some((x) => !String(x.name).trim())} data-stations-save onClick={() => run(async () => { const r = await api("/pos/stations", { method: "PUT", body: { stations: list } }); setList(r); st.reload(); }, "حُفظت محطات المطبخ")}>حفظ المحطات</button></div>}
+    </div></div>;
 }
 
 /** Point-of-sale setup: the kind of activity, halls and tables, quick kitchen notes, and the restaurant report. */
@@ -183,6 +214,7 @@ export function PosSetupPage() {
   const MODES: [string, string, string, string][] = [["RETAIL", "🛒", "تجزئة وخدمات", "بقالة، ملابس، صيدلية، قطع غيار، مغسلة، صالون: بيع مباشر بالباركود والبحث، تعليق الطلب، وأسعار الجملة."], ["RESTAURANT", "🍽", "مطعم بطاولات", "صالات وطاولات، طلب مفتوح لكل طاولة، إرسال للمطبخ على دفعات، نقل ودمج وتقسيم الفاتورة، وسفري وتوصيل."], ["CAFE", "☕", "كافيه ووجبات سريعة", "طلبات مرقّمة سفري ومحلي وتوصيل بلا طاولات، مع تذكرة تحضير وشاشة المطبخ."]];
   return <div className="grid">
     <PosLook canWrite={W} />
+    <StationsCard canWrite={W} />
     <div className="card"><div className="card-h"><div><h3>نوع النشاط في نقطة البيع</h3><div className="small muted">يحدد شكل شاشة البيع. يمكن تغييره في أي وقت؛ المبيعات والقيود والمخزون واحدة في كل الأنواع.</div></div><Link className="btn sm" to="/pos">← نقطة البيع</Link></div>
       <div className="card-b mode-grid">{MODES.map(([k, ic, t, d]) => <button key={k} className={"mode-card" + (s.mode === k ? " on" : "")} disabled={!W || busy} onClick={() => run(async () => { await api("/pos/restaurant/settings", { method: "PUT", body: { mode: k } }); reload(); }, `نوع النشاط: ${t}`)}><div className="mi">{ic}</div><b>{t}</b><div className="small muted">{d}</div>{s.mode === k && <span className="badge green">المستخدم الآن</span>}</button>)}</div></div>
     {s.mode === "RESTAURANT" && <div className="card"><div className="card-h"><h3>الصالات والطاولات</h3>{W && <div className="row"><Input placeholder="اسم صالة جديدة (مثل: العائلات، الخارجية)" value={floorName} onChange={(e) => setFloorName(e.target.value)} style={{ width: 260 }} /><button className="btn primary sm" disabled={busy || !floorName.trim()} onClick={() => run(async () => { await api("/pos/floors", { body: { name: floorName } }); setFloorName(""); reload(); })}>＋ صالة</button></div>}</div>

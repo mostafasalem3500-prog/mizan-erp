@@ -3,6 +3,7 @@
  * added over time and sent to the kitchen in rounds, and it turns into an ordinary POS sale only when it is paid —
  * so stock, the journal entry and the tax invoice all come from the same posSale used by every activity.
  */
+import { stationMap, splitTicket } from "./round348";
 import { Db } from "../db/pool";
 import { bad, conflict, num, r2 } from "../lib/core";
 import { serviceSettings, cleanService, salesOfModifiers, serviceCollected } from "./modifiers";
@@ -63,7 +64,7 @@ export async function deleteTable(t: Db, C: string, id: string) {
 }
 
 type Mod = { optionId: string; name: string; price: number };
-type Line = { key: string; productId: string; name: string; qty: number; unitPrice: number; discountPct: number; uomId: string | null; uomName: string | null; note: string; sentQty: number; readyQty: number; mods?: Mod[] };
+type Line = { key: string; productId: string; name: string; qty: number; unitPrice: number; discountPct: number; uomId: string | null; uomName: string | null; note: string; sentQty: number; readyQty: number; mods?: Mod[]; sentAt?: string };
 const modsText = (l: Line) => (l.mods?.length ? ` + ${l.mods.map((m) => m.name).join("، ")}` : "");
 function cleanLines(raw: any, prev: Line[] = []): Line[] {
   if (!Array.isArray(raw)) throw bad("سطور الطلب غير صحيحة");
@@ -73,7 +74,7 @@ function cleanLines(raw: any, prev: Line[] = []): Line[] {
     const key = String(l.key || `${l.productId}:${l.uomId || ""}`).slice(0, 90), p = was.get(key);
     // what the kitchen already has is the server's knowledge, never the screen's
     return { key, productId: l.productId, name: String(l.name || "").slice(0, 120), qty: r2(num(l.qty)), unitPrice: r2(num(l.unitPrice)), discountPct: Math.min(100, Math.max(0, num(l.discountPct))), uomId: UUID.test(l.uomId || "") ? l.uomId : null, uomName: l.uomName ? String(l.uomName).slice(0, 30) : null, note: String(l.note || "").slice(0, 160), sentQty: p ? num(p.sentQty) : 0, readyQty: p ? num(p.readyQty) : 0,
-      mods: Array.isArray(l.mods) ? l.mods.filter((m: any) => UUID.test(m?.optionId || "")).slice(0, 30).map((m: any) => ({ optionId: m.optionId, name: String(m.name || "").slice(0, 60), price: r2(num(m.price)) })) : [] };
+      ...(p?.sentAt ? { sentAt: p.sentAt } : {}), mods: Array.isArray(l.mods) ? l.mods.filter((m: any) => UUID.test(m?.optionId || "")).slice(0, 30).map((m: any) => ({ optionId: m.optionId, name: String(m.name || "").slice(0, 60), price: r2(num(m.price)) })) : [] };
   });
 }
 const totalOf = (lines: Line[]) => r2(lines.reduce((a, l) => a + l.qty * l.unitPrice * (1 - l.discountPct / 100), 0));
@@ -108,11 +109,13 @@ export async function sendToKitchen(t: Db, C: string, id: string, b: any) {
   let o = await locked(t, C, id); mustOpen(o);
   const before = new Map((o.lines as Line[]).map((l) => [l.key, l]));
   const lines = b?.lines === undefined ? (o.lines as Line[]) : cleanLines(b.lines, o.lines);
-  const items: { name: string; qty: number; note: string; cancel?: boolean }[] = [];
-  for (const l of lines) { const d = r2(l.qty - l.sentQty); if (d > 0) items.push({ name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: d, note: l.note }); else if (d < 0) items.push({ name: l.name + modsText(l), qty: -d, note: "", cancel: true }); l.sentQty = l.qty; l.readyQty = Math.min(l.readyQty, l.qty); }
-  for (const [k, l] of before) if (!lines.some((x) => x.key === k) && l.sentQty > 0) items.push({ name: l.name + modsText(l), qty: l.sentQty, note: "", cancel: true });
+  const items: { productId?: string; name: string; qty: number; note: string; cancel?: boolean }[] = [];
+  const now = new Date().toISOString();
+  for (const l of lines) { const d = r2(l.qty - l.sentQty); if (d > 0) { items.push({ productId: l.productId, name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: d, note: l.note }); if (l.readyQty >= l.sentQty) l.sentAt = now; else l.sentAt = l.sentAt || now; } else if (d < 0) items.push({ productId: l.productId, name: l.name + modsText(l), qty: -d, note: "", cancel: true }); l.sentQty = l.qty; l.readyQty = Math.min(l.readyQty, l.qty); }
+  for (const [k, l] of before) if (!lines.some((x) => x.key === k) && l.sentQty > 0) items.push({ productId: l.productId, name: l.name + modsText(l), qty: l.sentQty, note: "", cancel: true });
   o = await t.update("pos_orders", { id, companyId: C }, { lines: JSON.stringify(lines), total: totalOf(lines), updatedAt: new Date() });
-  return { order: full(o), ticket: items.length ? { number: o.number, type: o.type, tableName: o.tableName, guests: o.guests, waiter: o.waiter, at: new Date().toISOString(), items, notes: o.notes } : null };
+  const stations = items.length ? await splitTicket(t, C, items) : null;
+  return { order: full(o), ticket: items.length ? { number: o.number, type: o.type, tableName: o.tableName, guests: o.guests, waiter: o.waiter, at: new Date().toISOString(), items, notes: o.notes, ...(stations && stations.length ? { stations } : {}) } : null };
 }
 export async function moveOrder(t: Db, C: string, id: string, tableId: string) {
   const o = await locked(t, C, id); mustOpen(o);
@@ -149,13 +152,29 @@ export async function settle(t: Db, C: string, orderId: string, invoice: any, pa
   return { closed: done, tableName: o.tableName, type: o.type, number: o.number };
 }
 /** Kitchen screen: every round that was sent and is not marked ready yet, oldest first. */
-export async function kitchen(t: Db, C: string) {
+export async function kitchen(t: Db, C: string, station?: string) {
   const orders = await t.rows(`SELECT id, number, type, table_name, waiter, notes, lines, opened_at, updated_at FROM pos_orders WHERE company_id=$1 AND status='OPEN' ORDER BY updated_at`, [C]);
-  return orders.map((o) => ({ id: o.id, number: o.number, type: o.type, tableName: o.tableName, waiter: o.waiter, notes: o.notes, since: o.updatedAt, items: (o.lines as Line[]).filter((l) => l.sentQty > l.readyQty).map((l) => ({ key: l.key, name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: r2(l.sentQty - l.readyQty), note: l.note })) })).filter((o) => o.items.length);
+  const m = await stationMap(t, C, orders.flatMap((o: any) => (o.lines as Line[]).map((l) => l.productId)));
+  const want = station && station !== "all" ? station : null;
+  const out = orders.map((o: any) => {
+    const items = (o.lines as Line[]).filter((l) => l.sentQty > l.readyQty).map((l) => { const s = m.of(l.productId); return { key: l.key, name: l.name + (l.uomName ? ` (${l.uomName})` : "") + modsText(l), qty: r2(l.sentQty - l.readyQty), note: l.note, stationId: s?.id || "_", station: s?.name || "عام", since: l.sentAt || o.updatedAt }; })
+      .filter((i) => !want || i.stationId === want);
+    const since = items.reduce((a: any, i: any) => (!a || String(i.since) < String(a) ? i.since : a), null);
+    return { id: o.id, number: o.number, type: o.type, tableName: o.tableName, waiter: o.waiter, notes: o.notes, since: since || o.updatedAt, items };
+  }).filter((o: any) => o.items.length).sort((a: any, b: any) => String(a.since).localeCompare(String(b.since)));
+  return Object.assign(out, { stations: m.stations });
 }
 export async function markReady(t: Db, C: string, id: string, keys?: string[]) {
   const o = await locked(t, C, id); mustOpen(o);
+  const m = await stationMap(t, C, (o.lines as Line[]).map((l) => l.productId));
+  const now = Date.now();
   const lines = (o.lines as Line[]).map((l) => (!keys?.length || keys.includes(l.key) ? { ...l, readyQty: l.sentQty } : l));
+  // how long each item waited, for the kitchen performance report
+  for (const l of o.lines as Line[]) {
+    if ((keys?.length && !keys.includes(l.key)) || !(l.sentQty > l.readyQty)) continue;
+    const sent = l.sentAt ? Date.parse(l.sentAt) : Date.parse(String(o.updatedAt));
+    await t.insert("kitchen_log", { companyId: C, orderId: o.id, orderNo: o.number, productId: l.productId, name: l.name, station: m.of(l.productId)?.name || null, qty: r2(l.sentQty - l.readyQty), sentAt: new Date(sent), readyAt: new Date(now), minutes: r2(Math.max(0, (now - sent) / 60000)) });
+  }
   await t.update("pos_orders", { id, companyId: C }, { lines: JSON.stringify(lines) });
   return { ok: true };
 }

@@ -1,6 +1,7 @@
 /** 3.43.0 screens: customer/supplier set-off, recipes (ingredients and cost of a dish), the bank file of a payment run. */
 import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { PurchasePlan, KitchenPerformance } from "./Round348";
 import { api, useFetch, Money, money, Loading, Empty, Modal, Field, Input, NumInput, Picker, productFetcher, Tabs, useAction, useToast, useCompanyContext, fmtDate, confirmDlg, today } from "../lib";
 
 // ─── set-off between what a party owes us and what we owe it ─────────────
@@ -70,7 +71,7 @@ export function RecipesPage() {
   const [edit, setEdit] = useState<any>(null);
   const [pick, setPick] = useState<any>(null);
   const [sp, setSp] = useSearchParams();
-  const tab = ["preps", "batches", "eng", "guide", "cost"].includes(sp.get("tab") || "") ? String(sp.get("tab")) : "list";
+  const tab = ["preps", "batches", "eng", "guide", "cost", "buy", "kitchen"].includes(sp.get("tab") || "") ? String(sp.get("tab")) : "list";
   const setTab = (k: string) => setSp(k === "list" ? {} : { tab: k });
   const [days, setDays] = useState(30);
   const eng = useFetch<any>(tab === "eng" ? `/recipes/engineering?days=${days}` : null, [tab, days]);
@@ -91,7 +92,9 @@ export function RecipesPage() {
         <div style={{ minWidth: 280, flex: 1 }}><Field label="فتح وصفة صنف (طبق أو تحضيرة)"><Picker value={pick} onChange={setPick} fetcher={productFetcher} label={(p: any) => `${p.sku || ""} ${p.name}`} placeholder="ابحث عن الطبق أو الباقة" /></Field></div>
         <button className="btn primary" disabled={!pick} data-recipe-new onClick={() => { setEdit(pick); setPick(null); }}>＋ فتح الوصفة</button></div></div>}
       </>}
-      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "preps", label: "التحضيرات" }, { key: "batches", label: "الطبخات (التصنيع)" }, { key: "cost", label: "تقرير تكاليف الطعام" }, { key: "eng", label: "هندسة القائمة" }, { key: "guide", label: "كيف تُحسب التكلفة؟" }]} value={tab} onChange={setTab} />
+      <Tabs tabs={[{ key: "list", label: "الوصفات" }, { key: "preps", label: "التحضيرات" }, { key: "batches", label: "الطبخات (التصنيع)" }, { key: "cost", label: "تقرير تكاليف الطعام" }, { key: "buy", label: "خطة شراء المكونات" }, { key: "kitchen", label: "أداء المطبخ" }, { key: "eng", label: "هندسة القائمة" }, { key: "guide", label: "كيف تُحسب التكلفة؟" }]} value={tab} onChange={setTab} />
+      {tab === "buy" && <PurchasePlan />}
+      {tab === "kitchen" && <KitchenPerformance />}
       {tab === "cost" && <FoodCostReport onOpen={(r) => setEdit({ id: r.productId, name: r.name })} />}
       {tab === "preps" && <div className="card" data-preps>{!preps.data ? <Loading /> : !preps.data.rows.length ? <Empty text="لا تحضيرات بعد — التحضيرة صنف مخزني له وصفة (مثل الشاورما المطبوخة أو الثومية). افتح وصفتها من الأعلى، أو حمّل مثال الشاورما من تبويب «كيف تُحسب التكلفة؟»" /> : <div className="table-wrap"><table className="tbl" data-prep-list>
         <thead><tr><th>التحضيرة</th><th>الطريقة</th><th className="n">وزن المدخلات</th><th className="n">الناتج</th><th className="n">نسبة الناتج</th><th className="n">تكلفة الوحدة</th><th className="n">الرصيد</th><th /></tr></thead>

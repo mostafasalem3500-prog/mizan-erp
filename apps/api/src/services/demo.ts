@@ -3,6 +3,7 @@
  * the real engine (so all reports reconcile), every row tagged is_demo=true → purgeable.
  */
 import { seedShawarmaExample } from "./round343";
+import { saveStations } from "./round348";
 import { reverseReturn } from "./round340";
 import { clearingView, createBatch } from "./clearing";
 import { IS_EG, BASE_CURRENCY } from "../lib/country";
@@ -53,7 +54,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 23; // 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 24; // 24: kitchen stations and a week of kitchen times; 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -471,6 +472,30 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     await t.exec(`UPDATE product_categories SET icon = CASE name WHEN 'مواد غذائية' THEN '🍚' WHEN 'مشروبات' THEN '🥤' WHEN 'منظفات' THEN '🧴' WHEN 'قرطاسية' THEN '📎' WHEN 'إلكترونيات' THEN '💻' WHEN 'خدمات' THEN '🛠' WHEN 'أدوية ومستلزمات' THEN '💊' ELSE icon END WHERE company_id=$1 AND is_demo AND icon IS NULL`, [companyId]);
     // example: restaurant costing — shawarma from raw materials to the sandwich, batch and direct methods side by side
     try { await t.savepoint(async () => { await seedShawarmaExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName, userId); }); } catch { /* the example is optional */ }
+    // example: kitchen stations (meals to the grill, drinks to the bar) and a week of kitchen times for the performance report
+    try {
+      await t.savepoint(async () => {
+        const drinks = await t.maybe(`SELECT id FROM product_categories WHERE company_id=$1 AND is_demo AND name='مشروبات'`, [companyId]);
+        const meals = await t.insert("product_categories", { companyId, name: "وجبات", color: "#ea580c", icon: "🌯", isDemo: true });
+        await t.exec(`UPDATE products SET category_id=$2 WHERE company_id=$1 AND is_demo AND category_id IS NULL AND (sku LIKE 'EX-SW%' OR sku='RCP-DEMO')`, [companyId, meals.id]);
+        const has = await t.one(`SELECT jsonb_array_length(COALESCE(accounting->'pos'->'stations','[]'::jsonb))::int n FROM companies WHERE id=$1`, [companyId]);
+        if (!has.n && drinks) await saveStations(t, companyId, [{ name: "الشواية", icon: "🔥", categoryIds: [meals.id] }, { name: "المشروبات", icon: "🥤", categoryIds: [drinks.id] }]);
+        const sw = await t.maybe(`SELECT id, name FROM products WHERE company_id=$1 AND is_demo AND category_id=$2 ORDER BY sku LIMIT 1`, [companyId, meals.id]);
+        const dr = drinks ? await t.maybe(`SELECT id, name FROM products WHERE company_id=$1 AND is_demo AND category_id=$2 ORDER BY sku LIMIT 1`, [companyId, drinks.id]) : null;
+        if (sw && dr) {
+          let seed = 7; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+          for (let day = 6; day >= 0; day--) for (let k = 0; k < 6; k++) {
+            const hour = [12, 13, 13, 14, 20, 21][k], lunch = hour < 16;
+            const sent = new Date(Date.now() - day * 864e5); sent.setUTCHours(hour - 3, Math.floor(rnd() * 50), 0, 0);
+            if (sent.getTime() > Date.now()) continue;
+            for (const [p, st, base, spread] of [[sw, "الشواية", lunch ? 9 : 7, lunch ? 14 : 8], [dr, "المشروبات", 2, 4]] as const) {
+              const minutes = Math.round((base + rnd() * spread) * 100) / 100;
+              await t.insert("kitchen_log", { companyId, orderNo: String(100 + day * 10 + k), productId: p.id, name: p.name, station: st, qty: 1 + Math.floor(rnd() * 3), sentAt: sent, readyAt: new Date(sent.getTime() + minutes * 60000), minutes, isDemo: true });
+            }
+          }
+        }
+      });
+    } catch { /* the example is optional */ }
     if (IS_EG) await egLocalizeDemo(t, companyId);
     await t.exec(`UPDATE companies SET demo_loaded=true, demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step: "اكتمل التحميل", pct: 100, done: true, version: DEMO_VERSION, at: new Date() })]);
   });
@@ -508,6 +533,9 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM clearing_batches WHERE company_id=$1 AND (is_demo OR id IN (SELECT l.batch_id FROM clearing_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.is_demo))`, [companyId]);
     // a payment run prepared on sample bills goes with them (its lines point at the bills)
     await t.exec(`DELETE FROM modifier_groups WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM kitchen_log WHERE company_id=$1 AND is_demo`, [companyId]);
+    // stations that only took sample categories go with them
+    await t.exec(`UPDATE companies SET accounting = jsonb_set(accounting, '{pos,stations}', COALESCE((SELECT jsonb_agg(s) FROM jsonb_array_elements(accounting->'pos'->'stations') s WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(s->'categoryIds') c WHERE c::uuid NOT IN (SELECT id FROM product_categories WHERE company_id=$1 AND is_demo)) OR jsonb_array_length(s->'categoryIds')=0), '[]'::jsonb)) WHERE id=$1 AND jsonb_typeof(accounting->'pos'->'stations')='array'`, [companyId]);
     await t.exec(`DELETE FROM prep_batches WHERE company_id=$1 AND (is_demo OR product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);
     await t.exec(`DELETE FROM partner_setoffs WHERE company_id=$1 AND (is_demo OR partner_id IN (SELECT id FROM partners WHERE company_id=$1 AND is_demo))`, [companyId]);
     await t.exec(`DELETE FROM product_recipes WHERE company_id=$1 AND (product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo) OR component_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);

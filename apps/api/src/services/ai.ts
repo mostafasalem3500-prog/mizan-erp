@@ -5,6 +5,7 @@
  */
 import { menuEngineering, setoffCandidates, foodCost } from "./round343";
 import { salesBreakdown, insights, heatmap } from "./round347";
+import { purchasePlan, kitchenPerformance } from "./round348";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -181,6 +182,16 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
     const r = await heatmap(t, C, { days: num(input.days) || 28 });
     return { days: r.days, peak: r.peak, bestDay: r.bestDay, quietHour: r.quietHour, byDay: r.byDay, byHour: r.byHour.filter((h: any) => h.docs > 0), timed: r.timed, untimed: r.untimed };
+  }
+  if (name === "purchase_plan") {
+    if (!perms(auth, "inventory.read")) return { error: "صلاحيتك لا تسمح بعرض المخزون" };
+    const r = await purchasePlan(t, C, { cover: num(input.cover) || 7, lead: num(input.lead) || 2, onlyRecipe: input.onlyRecipe !== false });
+    return { cover: r.cover, lead: r.lead, history: r.history, totals: r.totals, rows: r.rows.filter((x: any) => x.status === "critical" || x.status === "low").slice(0, 15).map((x: any) => ({ name: x.name, unit: x.unit, daily: x.daily, onHand: x.onHand, coverDays: x.coverDays, status: x.status, suggested: x.suggested, supplier: x.supplierName, isPrep: x.isPrep })), suppliers: r.suppliers.slice(0, 6) };
+  }
+  if (name === "kitchen_performance") {
+    if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
+    const r = await kitchenPerformance(t, C, { from: input.from, to: input.to, late: num(input.late) || 15 });
+    return { from: r.from, to: r.to, lateMinutes: r.lateMinutes, totals: r.totals, byStation: r.byStation, slowItems: r.byItem.slice(0, 5) };
   }
   if (name === "food_cost") {
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
