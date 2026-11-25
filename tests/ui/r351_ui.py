@@ -41,7 +41,9 @@ with sync_playwright() as pw:
     ok('فوق حد الفترة' in pg.inner_text('[data-checkin-ok]'), 'the third: above the quota, charged on the next invoice')
     # upgrade
     pg.goto(B + f'/subs/{sid}'); pg.wait_for_selector('[data-sub-change]', timeout=30000); pg.click('[data-sub-change]')
-    pg.wait_for_selector('[data-change-plan]'); pg.select_option('[data-change-plan]', label='عضوية ذهبية — 450.00 شهري') if pg.locator('[data-change-plan] option', has_text='عضوية ذهبية').count() else None
+    # the plans load after the window opens: wait for the gold plan before choosing it (CI is slower than a laptop)
+    pg.wait_for_selector('[data-change-plan] option:has-text("عضوية ذهبية")', state='attached', timeout=30000)
+    pg.select_option('[data-change-plan]', label='عضوية ذهبية — 450.00 شهري')
     pg.wait_for_timeout(300); note = pg.inner_text('[data-change-note]')
     ok('ترقية الآن' in note and '150' in note, 'upgrade note: the difference for the days left ' + note[:80])
     pg.click('[data-change-save]'); pg.wait_for_timeout(1500)
