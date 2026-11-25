@@ -167,7 +167,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 /* toolbar */
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar .input { width: auto; min-width: 160px; }
-.search { position: relative; }
+.toolbar .input, .search .input { max-width: 100%; } /* a search box never wider than the phone */
+@media (max-width: 700px) { .toolbar .search { flex: 1 1 100%; } .toolbar .search .input { width: 100%; } }
+.search { position: relative; max-width: 100%; }
 .search input { padding-inline-start: 32px; }
 .search .ic { position: absolute; inset-inline-start: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
 
@@ -979,3 +981,12 @@ tr.plan-critical td:first-child { box-shadow: inset 4px 0 0 #ef4444; } tr.plan-l
 .floor-card .btn { flex: 1; padding: 10px; font-size: 15px; }
 .sched td { min-width: 46px; }
 @media print { .floor-card .btn { display: none; } }
+
+/* 3.53.0 employee self-service (/e/:token): one column on the phone */
+.emp-portal { max-width: 680px; margin: 0 auto; padding: 12px; display: grid; gap: 12px; }
+.emp-portal .field { display: grid; gap: 4px; } .emp-portal .field > span:first-child { font-size: 13px; color: var(--muted); }
+.emp-tabs { display: flex; overflow-x: auto; } .emp-tabs button { flex: 1 0 auto; }
+@media print { .emp-portal { max-width: none; padding: 0; } .emp-portal .slip { break-inside: avoid; } }
+
+/* 3.53.0: tablets — the top bar keeps its icons and drops the button words so nothing is pushed off the screen */
+@media (max-width: 1100px) { .topbar .pos-t, .topbar .quick-t { display: none; } .topbar { gap: 8px; padding-inline: 14px; } }

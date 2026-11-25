@@ -9,6 +9,7 @@ import { manualJournal } from "../services/misc";
 import { suggestMatches, statementSummary } from "../services/bankimport";
 import * as s from "../services/round31";
 import * as pay from "../services/payroll";
+import { payrollEmployees } from "../services/hrcore";
 import * as hr from "../services/hr";
 import * as att from "../services/attendance";
 import * as rest from "../services/restaurant";
@@ -93,7 +94,7 @@ r31.get("/reports/cvp", perm("reports.read"), h(async (req) => s.cvp(db, cid(req
 r31.put("/accounts/:id/cost-behavior", perm("accounting.write"), h(async (req) => s.setBehavior(db, cid(req), p(req).id, req.body?.behavior)));
 
 // ── payroll transactions, run preview / recalculation, loans ──
-r31.get("/payroll-items", perm("accounting.read"), h(async (req) => {
+r31.get("/payroll-items", perm("hr.read"), h(async (req) => {
   const q: any = req.query; const params: any[] = [cid(req)]; const w = ["i.company_id=$1"];
   if (/^\d{4}-\d{2}$/.test(q.period || "")) { params.push(q.period); w.push(`i.period=$${params.length}`); }
   if (q.employeeId) { params.push(String(q.employeeId)); w.push(`i.employee_id=$${params.length}`); }
@@ -101,22 +102,22 @@ r31.get("/payroll-items", perm("accounting.read"), h(async (req) => {
   const rows = await db.rows(`SELECT i.*, e.name employee_name, e.code employee_code, r.period run_period, r.status run_status FROM payroll_items i JOIN employees e ON e.id=i.employee_id LEFT JOIN payroll_runs r ON r.id=i.run_id WHERE ${w.join(" AND ")} ORDER BY i.date DESC, i.created_at DESC LIMIT 1000`, params);
   return { rows, kinds: pay.ITEM_KINDS, overtimeFactor: pay.OVERTIME_FACTOR, overtimeRates: pay.OVERTIME_RATES };
 }));
-r31.post("/payroll-items/quote", perm("accounting.read"), h(async (req) => { const e = await db.one(`SELECT * FROM employees WHERE id=$1 AND company_id=$2`, [req.body?.employeeId, cid(req)], "الموظف غير موجود"); const wage = Number(e.basic) + Number(e.housing) + Number(e.transport) + Number(e.otherAllow); return { amount: pay.itemAmount(e, String(req.body?.kind), Number(req.body?.qty) || 0, Number(req.body?.factor) || null), wage, daily: Math.round((wage / 30) * 100) / 100, hourly: Math.round((wage / 240) * 100) / 100 }; }));
-r31.post("/payroll-items", perm("accounting.write"), h(async (req) => { const r = await tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "payroll", r.id, { kind: r.kind, amount: r.amount }); return r; }));
-r31.put("/payroll-items/:id", perm("accounting.write"), h(async (req) => tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {}, p(req).id))));
-r31.delete("/payroll-items/:id", perm("accounting.write"), h(async (req) => { await tx((t) => pay.deleteItem(t, cid(req), p(req).id)); return { ok: true }; }));
+r31.post("/payroll-items/quote", perm("hr.read"), h(async (req) => { const e = await db.one(`SELECT * FROM employees WHERE id=$1 AND company_id=$2`, [req.body?.employeeId, cid(req)], "الموظف غير موجود"); const wage = Number(e.basic) + Number(e.housing) + Number(e.transport) + Number(e.otherAllow); return { amount: pay.itemAmount(e, String(req.body?.kind), Number(req.body?.qty) || 0, Number(req.body?.factor) || null), wage, daily: Math.round((wage / 30) * 100) / 100, hourly: Math.round((wage / 240) * 100) / 100 }; }));
+r31.post("/payroll-items", perm("hr.write"), h(async (req) => { const r = await tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {})); await audit(req, "CREATE", "payroll", r.id, { kind: r.kind, amount: r.amount }); return r; }));
+r31.put("/payroll-items/:id", perm("hr.write"), h(async (req) => tx((t) => pay.saveItem(t, cid(req), actor(req), req.body || {}, p(req).id))));
+r31.delete("/payroll-items/:id", perm("hr.write"), h(async (req) => { await tx((t) => pay.deleteItem(t, cid(req), p(req).id)); return { ok: true }; }));
 /** What the month's run would contain right now (fixed pay + open transactions + loan instalments). */
-r31.get("/payroll/preview2", perm("accounting.read"), h(async (req) => { const emps = await db.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [cid(req)]); return pay.buildLines(db, cid(req), String(req.query.period || ""), emps, {}); }));
-r31.post("/payroll/:id/recalc", perm("accounting.write"), h(async (req) => tx((t) => pay.recalcRun(t, cid(req), p(req).id))));
+r31.get("/payroll/preview2", perm("hr.read"), h(async (req) => { const period = /^\d{4}-\d{2}$/.test(String(req.query.period || "")) ? String(req.query.period) : new Date().toISOString().slice(0, 7); return pay.buildLines(db, cid(req), period, await payrollEmployees(db, cid(req), period), {}); }));
+r31.post("/payroll/:id/recalc", perm("hr.write"), h(async (req) => tx((t) => pay.recalcRun(t, cid(req), p(req).id))));
 r31.post("/hr/loans/:id/repay", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.repayLoan(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, r); return r; }));
 r31.put("/hr/loans/:id", perm("payments.write"), h(async (req) => { const r = await tx((t) => hr.rescheduleLoan(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "loan", p(req).id, { installment: r.installment, startPeriod: r.startPeriod }); return r; }));
 
 // ── attendance ──
-r31.get("/attendance", perm("accounting.read"), h(async (req) => att.monthSheet(db, req.company, String(req.query.period || ""))));
-r31.put("/attendance/day", perm("accounting.write"), h(async (req) => tx((t) => att.saveDay(t, req.company, actor(req), String(req.body?.date || ""), req.body?.rows || []))));
-r31.post("/attendance/import", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.importRows(t, req.company, actor(req), req.body?.rows)); await audit(req, "IMPORT", "attendance", cid(req), { saved: r.saved, skipped: r.skipped }); return r; }));
+r31.get("/attendance", perm("hr.read"), h(async (req) => att.monthSheet(db, req.company, String(req.query.period || ""))));
+r31.put("/attendance/day", perm("hr.write"), h(async (req) => tx((t) => att.saveDay(t, req.company, actor(req), String(req.body?.date || ""), req.body?.rows || []))));
+r31.post("/attendance/import", perm("hr.write"), h(async (req) => { const r = await tx((t) => att.importRows(t, req.company, actor(req), req.body?.rows)); await audit(req, "IMPORT", "attendance", cid(req), { saved: r.saved, skipped: r.skipped }); return r; }));
 r31.put("/attendance/settings", perm("settings.write"), h(async (req) => tx((t) => att.saveSettings(t, cid(req), req.body || {}))));
-r31.post("/attendance/post", perm("accounting.write"), h(async (req) => { const r = await tx((t) => att.postToPayroll(t, req.company, actor(req), String(req.body?.period || ""))); await audit(req, "CREATE", "payroll", cid(req), { attendance: req.body?.period, items: r.created }); return r; }));
+r31.post("/attendance/post", perm("hr.write"), h(async (req) => { const r = await tx((t) => att.postToPayroll(t, req.company, actor(req), String(req.body?.period || ""))); await audit(req, "CREATE", "payroll", cid(req), { attendance: req.body?.period, items: r.created }); return r; }));
 // ── cost centres and projects ──
 r31.get("/projects", perm("reports.read"), h(async (req) => prj.listCentres(db, cid(req), req.query)));
 r31.get("/projects/:id", perm("reports.read"), h(async (req) => prj.centreDetail(db, cid(req), p(req).id, req.query)));

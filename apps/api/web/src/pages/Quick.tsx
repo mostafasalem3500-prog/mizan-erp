@@ -72,7 +72,7 @@ export function QuickPage() {
   const [form, setForm] = useState<Tile | null>(null);
   const [done, setDone] = useState<any>(null);
   const [q, setQ] = useState("");
-  const brief = useFetch<any>("/brief");
+  const brief = useFetch<any>(can("reports.read") ? "/brief" : null);
   const nq = (s: string) => s.replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
   const show = (t: Tile) => !q.trim() || nq(t.t + " " + t.d).includes(nq(q.trim()));
   return (

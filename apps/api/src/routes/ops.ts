@@ -102,7 +102,7 @@ ops.post("/payments/preview-entry", perm("payments.write"), h(async (req) => pre
 ops.get("/reports/notes", perm("reports.read"), h(async (req) => notes.financialNotes(db, cid(req), req.query)));
 ops.get("/reports/combined", perm("reports.read"), h(async (req) => notes.combinedStatements(db, req.auth.userId, String(req.query.companies || "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)), req.query)));
 ops.get("/reports/daily", perm("reports.read"), h(async (req) => daily.dailyReport(db, cid(req), String(req.query.date || ""))));
-ops.get("/brief", perm("dashboard.read"), h(async (req) => daily.brief(db, cid(req))));
+ops.get("/brief", perm("reports.read"), h(async (req) => daily.brief(db, cid(req))));
 ops.get("/quick-entry/kinds", perm("dashboard.read"), h(async () => Object.entries(daily.QUICK_KINDS).map(([kind, k]) => ({ kind, ar: k.ar, dir: k.dir, why: k.why }))));
 ops.post("/quick-entry/preview", perm("payments.write"), h(async (req) => previewEntry(async (t) => { const e: any = await misc.manualJournal(t, cid(req), actor(req), await daily.quickLines(t, cid(req), req.body || {})); return { journalId: e.id }; })));
 ops.post("/quick-entry", perm("payments.write"), h(async (req) => {
@@ -243,7 +243,9 @@ ops.post("/pos/return", perm("pos.use"), h(async (req) => {
 }));
 
 // ─── reports ───────────────────────────────────────────────────────────────
-ops.get("/dashboard", perm("dashboard.read"), h(async (req) => rep.dashboard(db, cid(req), req.query.branchId ? String(req.query.branchId) : null)));
+// 3.53.0: the money figures (cash, receivables, VAT, profit) are for roles that read reports; the cashier, storekeeper,
+// sales rep and HR officer get their own home built from their screens
+ops.get("/dashboard", perm("reports.read"), h(async (req) => rep.dashboard(db, cid(req), req.query.branchId ? String(req.query.branchId) : null)));
 ops.get("/reports/trial-balance", perm("reports.read"), h(async (req) => rep.trialBalance(db, cid(req), req.query)));
 ops.get("/reports/ledger", perm("reports.read"), h(async (req) => rep.generalLedger(db, cid(req), req.query)));
 ops.get("/reports/income", perm("reports.read"), h(async (req) => rep.incomeStatement(db, cid(req), req.query)));

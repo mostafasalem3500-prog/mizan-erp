@@ -65,12 +65,18 @@ const BankPage = lz(() => import("./pages/Bank"), "BankPage");
 const ChequesPage = lz(() => import("./pages/Round3"), "ChequesPage");
 const RecurringPage = lz(() => import("./pages/Round3"), "RecurringPage");
 const PayrollPage = lz(() => import("./pages/Payroll"), "PayrollPage");
+const HrDashboard = lz(() => import("./pages/HrCenter"), "HrDashboard");
+const EmployeeProfile = lz(() => import("./pages/HrCenter"), "EmployeeProfile");
+const LeavesCenter = lz(() => import("./pages/HrCenter"), "LeavesCenter");
+const DocumentsCenter = lz(() => import("./pages/HrCenter"), "DocumentsCenter");
+const GosiPage = lz(() => import("./pages/HrCenter"), "GosiPage");
 const BudgetsPage = lz(() => import("./pages/Budgets"), "BudgetsPage");
 const PriceListsPage = lz(() => import("./pages/Pricing"), "PriceListsPage");
 const LabelsPage = lz(() => import("./pages/Stock"), "LabelsPage");
 const ReorderPage = lz(() => import("./pages/Stock"), "ReorderPage");
 const CollectionsPage = lz(() => import("./pages/Collections"), "CollectionsPage");
 const CustomerPortal = lz(() => import("./pages/Integrations"), "CustomerPortal");
+const EmployeePortal = lz(() => import("./pages/EmpPortal"), "EmployeePortal");
 const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
@@ -145,12 +151,13 @@ const ROLE_PERMS: Record<string, string[]> = {
   CASHIER: ["pos.use", "products.read", "partners.read", "partners.write", "sales.read", "dashboard.read"],
   STOREKEEPER: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read", "mfg.read", "mfg.write"],
   PRODUCTION: ["mfg.read", "mfg.write", "products.read", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"],
+  HR: ["hr.read", "hr.write", "dashboard.read"],
   VIEWER: ["*.read"],
 };
 function canRole(role: string | null, perm: string, superAdmin = false) {
   if (superAdmin) return true;
   const ps = ROLE_PERMS[role || ""] || [];
-  return ps.includes("*") || ps.includes(perm) || (perm.endsWith(".read") && ps.includes("*.read"));
+  return ps.includes("*") || ps.includes(perm) || (perm.endsWith(".read") && ps.includes("*.read")) || (perm === "hr.read" && ps.includes("accounting.read")) || (perm === "hr.write" && ps.includes("accounting.write"));
 }
 
 function PageTitle({ can, lockedBranch }: { can: (p: string) => boolean; lockedBranch: boolean }) {
@@ -186,6 +193,7 @@ export function App() {
   if (loc.pathname.startsWith("/p/")) return <React.Suspense fallback={Wait}><Routes><Route path="/p/:token" element={<PublicInvoice />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/v/")) return <React.Suspense fallback={Wait}><Routes><Route path="/v/:token" element={<DonationVerify />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
+  if (loc.pathname.startsWith("/e/")) return <React.Suspense fallback={Wait}><Routes><Route path="/e/:token" element={<EmployeePortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
   if (!me) return <React.Suspense fallback={null}><Routes><Route path="/privacy" element={<LegalPage kind="privacy" />} /><Route path="/terms" element={<LegalPage kind="terms" />} /><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes></React.Suspense>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
@@ -226,8 +234,8 @@ export function App() {
               <ThemeToggle />
               <LangToggle />
               <CompanySwitcher me={me} onSwitched={reload} />
-              <NavLink to="/quick" className="btn sm quick-btn" title="سجّل عملية بكلماتك دون معرفة المدين والدائن">⚡ سجّل عملية</NavLink>
-              <NavLink to="/pos" className="btn primary sm" title="نقطة البيع" aria-label="نقطة البيع">🛒<span className="pos-t"> نقطة البيع</span></NavLink>
+              <NavLink to="/quick" className="btn sm quick-btn" title="سجّل عملية بكلماتك دون معرفة المدين والدائن" aria-label="سجّل عملية">⚡<span className="quick-t"> سجّل عملية</span></NavLink>
+              {can("pos.use") && <NavLink to="/pos" className="btn primary sm" title="نقطة البيع" aria-label="نقطة البيع">🛒<span className="pos-t"> نقطة البيع</span></NavLink>}
             </div>
             <NetBar /><OfflineNote />
             <div className="content" id="content" role="main" tabIndex={-1}>
@@ -266,6 +274,11 @@ export function App() {
                 <Route path="/cheques" element={<ChequesPage />} />
                 <Route path="/recurring" element={<RecurringPage />} />
                 <Route path="/payroll" element={<PayrollPage />} />
+                <Route path="/hr" element={<HrDashboard />} />
+                <Route path="/hr/employees/:id" element={<EmployeeProfile />} />
+                <Route path="/hr/leaves" element={<LeavesCenter />} />
+                <Route path="/hr/documents" element={<DocumentsCenter />} />
+                <Route path="/hr/gosi" element={<GosiPage />} />
                 <Route path="/payroll/remittances" element={<RemittancesPage />} />
                 <Route path="/payroll/:tab" element={<PayrollPage />} />
                 <Route path="/periods" element={<PeriodsPage />} />

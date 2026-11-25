@@ -5,6 +5,8 @@ import { useFetch, Money, money, Loading, BarChart, Badge, KIND_AR, fmtDate, ZAT
 
 import { isEn, tr } from "../i18n";
 import { Pulse, AskBox, Insights, PeakHours, CustomizeHome, useHomeSections } from "./Home347";
+import { useNav } from "../nav";
+const HrDashboard = React.lazy(() => import("./HrCenter").then((m) => ({ default: m.HrDashboard })));
 const M_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const mLabel = (m: string) => { const n = M_AR[Number(m.slice(5, 7)) - 1]; return isEn() ? tr(n).slice(0, 3) : n.slice(0, 5); };
 
@@ -45,7 +47,29 @@ function Readiness() {
   );
 }
 
+/** Home for roles that do not read the company's figures (cashier, storekeeper, sales rep, production, HR officer):
+ * their own screens and the alerts that concern them, without cash, receivables or profit. */
+function RoleHome() {
+  const { me, can } = useCompanyContext();
+  const { tree } = useNav(can, !!me.lockedBranch);
+  const alerts = useFetch<any>("/alerts");
+  const groups = tree.filter((g) => g.key !== "home" && (g.items || g.to));
+  const actions = groups.flatMap((g) => (g.items || []).filter((i) => i.action)).slice(0, 6);
+  return <div className="grid" data-role-home>
+    <div className="card"><div className="card-b"><h3 style={{ margin: 0 }}>أهلاً {me.user.fullName}</h3><div className="small muted">{me.company.nameAr} · {me.roles?.[me.role] || me.role}</div>
+      {!!actions.length && <div className="row mt" style={{ gap: 8, flexWrap: "wrap" }}>{can("pos.use") && <Link className="btn primary" to="/pos">🛒 نقطة البيع</Link>}{actions.map((a) => <Link key={a.to} className="btn" to={a.to}>＋ {a.label}</Link>)}</div>}
+      {!actions.length && can("pos.use") && <div className="row mt"><Link className="btn primary" to="/pos">🛒 نقطة البيع</Link></div>}</div></div>
+    {!!alerts.data?.items?.length && <div className="card"><div className="card-h"><h3>يحتاج متابعتك</h3></div><div className="ok-list">{alerts.data.items.map((a: any, i: number) => <Link key={i} to={a.to || "/"} className="item" style={{ textDecoration: "none", color: "inherit" }}><span className={"badge " + (a.level === "err" ? "red" : a.level === "warn" ? "amber" : "blue")}>{a.count ?? "!"}</span> {a.text}</Link>)}</div></div>}
+    {can("hr.read") && <React.Suspense fallback={<Loading />}><HrDashboard /></React.Suspense>}
+    <div className="grid c3">{groups.filter((g) => g.items).map((g) => <div key={g.key} className="card"><div className="card-h"><h3>{g.ic} {g.label}</h3></div><div className="card-b"><div className="ok-list">{g.items!.filter((i) => !i.action).slice(0, 7).map((i) => <Link key={i.to} to={i.to} className="item" style={{ textDecoration: "none", color: "inherit" }}>{i.label}</Link>)}</div></div></div>)}</div>
+  </div>;
+}
+
 export function Dashboard() {
+  const { can } = useCompanyContext();
+  return can("reports.read") ? <FullDashboard /> : <RoleHome />;
+}
+function FullDashboard() {
   const { data, loading } = useFetch("/dashboard");
   const { me } = useCompanyContext();
   const brief = useFetch<any>("/brief");

@@ -416,6 +416,20 @@ function rentalAnswer(r: any, cur: string): string {
   out.push("", "[لوحة التأجير](/rentals) · [تقويم الإشغال](/rentals/calendar)");
   return out.join("\n");
 }
+function hrFileAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const H = r.headcount;
+  if (!H.active) return "لا موظفين بعد. أضفهم من [الموظفون](/payroll/employees).";
+  const out = [`**الموارد البشرية:** ${H.active} موظف على رأس العمل${H.saudizationPct !== undefined ? ` (التوطين ${H.saudizationPct}%)` : ""}، رواتب ثابتة ${money(r.monthlyPayroll)} ${cur} شهرياً. مخصص نهاية الخدمة ${money(r.liabilities.eosb)} والإجازات ${money(r.liabilities.leave)}.`];
+  if (r.pending?.length) out.push("", "**طلبات إجازة بانتظار قرارك:** " + r.pending.map((l: any) => `${l.name} — ${l.type} ${l.days} يوم من ${l.from}`).join("، "));
+  if (r.onLeave?.length) out.push("", "**في إجازة اليوم:** " + r.onLeave.map((l: any) => `${l.name} (${l.type} حتى ${l.until})`).join("، "));
+  if (r.expired?.length) out.push("", "**وثائق منتهية:** " + r.expired.map((x: any) => `${x.doc} ${x.name} منذ ${x.days} يوم`).join("، "));
+  if (r.soon?.length) out.push("", "**تنتهي قريباً:** " + r.soon.map((x: any) => `${x.doc} ${x.name} بعد ${x.days} يوم`).join("، "));
+  if (r.contracts?.length) out.push("", "**عقود تنتهي خلال 60 يوماً:** " + r.contracts.map((x: any) => `${x.name} في ${x.date}`).join("، "));
+  if (r.missing?.iban || r.missing?.idNumber) out.push("", `⚠ قبل ملف حماية الأجور: ${r.missing.iban} بلا IBAN صحيح، ${r.missing.idNumber} بلا رقم هوية.`);
+  out.push("", "[لوحة الموارد البشرية](/hr) · [الإجازات](/hr/leaves) · [الوثائق](/hr/documents)");
+  return out.join("\n");
+}
 function subAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const K = r.counts;
@@ -717,6 +731,7 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "sales_breakdown") return say(breakdownAnswer(res, ctx.currency, prev.input.label), res.by === "category" ? ["المبيعات حسب الصنف", "المبيعات حسب الساعة", "قارن هذا الشهر بالشهر الماضي"] : ["المبيعات حسب التصنيف", "متى وقت الذروة؟", "ملاحظاتك على الوضع"]);
     if (prev.name === "smart_insights") return say(insightsAnswer(res), ["المبيعات حسب التصنيف هذا الشهر", "الأصناف الناقصة", "حلّل الوضع المالي"]);
     if (prev.name === "peak_hours") return say(peakAnswer(res), ["المبيعات حسب يوم الأسبوع", "ملخص اليوم"]);
+    if (prev.name === "hr_status") return say(hrFileAnswer(res, ctx.currency), ["مسير الرواتب", "ما حالة الاشتراكات؟"]);
     if (prev.name === "subscription_status") return say(subAnswer(res, ctx.currency), ["من لم يسدد؟", "ما المؤجر الآن؟"]);
     if (prev.name === "rental_status") return say(rentalAnswer(res, ctx.currency), ["تقويم الإشغال", "حالة التصنيع"]);
     if (prev.name === "manufacturing_status") return say(mfgAnswer(res, ctx.currency), ["ماذا أشتري للمطبخ؟", "تقارير التصنيع"]);
@@ -791,6 +806,7 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     }
     if (/(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|نصايح|توصيات) (علي|على|عن|حول|ل)? ?(ال)?(وضع|الوضع|المنشاه|الشركه|المحل|المطعم|اعمالي|الشغل|اليوم|الحين)|^(وش|ايش|ما|ماذا) (الجديد|تلاحظ|لاحظت)|^(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|توصيات)$|تنبيهات ذكيه/.test(n)) return call("smart_insights", {});
     if (/(وقت|اوقات|ساعه|ساعات|ايام|يوم) (ال)?(ذروه|زحمه|الضغط)|(متي|متى) (يكون |تكون )?(ال)?(زحمه|ذروه|الضغط)|(افضل|اكثر) (يوم|ساعه|وقت) .{0,8}(بيع|مبيعات)|(اي|ايش|وش|ما) (افضل|اكثر) (يوم|ساعه|وقت)/.test(n)) return call("peak_hours", { days: /اسبوع/.test(n) ? 7 : /3 اشهر|ثلاث(ه)? اشهر|ربع/.test(n) ? 90 : 28 });
+    if (/(حاله|وضع|ملخص|تقرير) (ال)?(موارد البشريه|موظفين|شؤون الموظفين)|(من|مين) .{0,6}(في|ف) (ال)?اجاز|(طلبات|طلب) (ال)?اجاز|(الاقامات|الاقامه|الوثائق|الجوازات) .{0,12}(تنتهي|منتهي|المنتهيه)|نسبه (ال)?توطين|نطاقات/.test(n)) return call("hr_status", {});
     if (/(حاله|وضع|اخبار|ملخص|تقرير) (ال)?(اشتراكات|مشتركين|العضويات)|\bmrr\b|\barr\b|الايراد (الشهري )?المتكرر|معدل (الالغاء|التسرب)|(كم|عدد) (ال)?(مشتركين|مشترك|اشتراك)|(المشتركين|اشتراكات) (المتاخر|المتاخره|المتاخرين)/.test(n)) return call("subscription_status", {});
     if (/(حاله|وضع|اخبار) (ال)?(تاجير|ايجار|المعدات المؤجره)|(اي|ايش|وش|ما|ماذا) .{0,12}(مؤجر|متاح للتاجير|المؤجره)|(المتاخر|المتاخره|متاخر) .{0,10}(الارجاع|ارجاع|التسليم)|(العقود|عقود) (ال)?(ايجار|تاجير)/.test(n)) return call("rental_status", {});
     if (/(اوامر|امر) (ال)?(تصنيع|انتاج)|(حاله|وضع|اخبار) (ال)?(تصنيع|انتاج|مصنع|ورشه)|(ماذا|ايش|وش|شو) (في|علي|عند) (ال)?(ورشه|مصنع)|تحت التشغيل/.test(n)) return call("manufacturing_status", {});

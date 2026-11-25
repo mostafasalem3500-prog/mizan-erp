@@ -630,6 +630,15 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });
+  // 3.53.0: the HR file — lapsed or lapsing documents (iqama, work permit, insurance…), leave waiting for a decision, contracts ending
+  const hrd = await t.one(`SELECT COUNT(*) FILTER (WHERE d.expiry_date < $2)::int expired, COUNT(*) FILTER (WHERE d.expiry_date >= $2 AND d.expiry_date <= ($2::date + 30))::int soon
+    FROM hr_documents d JOIN employees e ON e.id=d.employee_id AND e.is_active WHERE d.company_id=$1 AND d.expiry_date IS NOT NULL`, [companyId, td]);
+  if (hrd.expired) items.push({ level: "err", text: `${hrd.expired} وثيقة موظف منتهية (إقامة أو رخصة عمل أو تأمين…) — جدّدها`, to: "/hr/documents", count: hrd.expired });
+  if (hrd.soon) items.push({ level: "warn", text: `${hrd.soon} وثيقة موظف تنتهي خلال 30 يوماً`, to: "/hr/documents", count: hrd.soon });
+  const hrl = await t.one(`SELECT COUNT(*)::int c FROM employee_leaves WHERE company_id=$1 AND status='PENDING'`, [companyId]);
+  if (hrl.c) items.push({ level: "info", text: `${hrl.c} طلب إجازة بانتظار القرار`, to: "/hr/leaves", count: hrl.c });
+  const hrc = await t.one(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND contract_end IS NOT NULL AND contract_end >= $2 AND contract_end <= ($2::date + 30)`, [companyId, td]);
+  if (hrc.c) items.push({ level: "warn", text: `${hrc.c} عقد عمل محدد المدة ينتهي خلال 30 يوماً — جدّده أو أبلغ الموظف`, to: "/hr", count: hrc.c });
   for (const a of await remitAlerts(t, companyId)) items.push(a);
   for (const a of await clearingAlerts(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]))) items.push(a);
   const negStock = await n(`SELECT COUNT(DISTINCT b.product_id)::int c FROM stock_balances b JOIN products p ON p.id=b.product_id WHERE b.company_id=$1 AND b.qty < -0.0005 AND p.is_active`, [companyId]);

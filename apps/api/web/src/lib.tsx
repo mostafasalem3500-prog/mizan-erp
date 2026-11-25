@@ -45,6 +45,23 @@ async function apiCall<T = any>(path: string, opts: { method?: string; body?: an
   return data;
 }
 
+/** Downloads a file from the API with the session header (the token never goes in a URL, where history and logs keep it). */
+export function DownloadBtn({ path, name, className = "btn sm", children }: { path: string; name: string; className?: string; children: React.ReactNode }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  return <button type="button" className={className} disabled={busy} title={err || undefined} onClick={async () => {
+    setBusy(true); setErr("");
+    try {
+      const r: Response = await api(path, { raw: true });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || `HTTP ${r.status}`); }
+      const cd = r.headers.get("Content-Disposition") || ""; const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(cd);
+      const url = URL.createObjectURL(await r.blob()); const a = document.createElement("a");
+      a.href = url; a.download = m ? decodeURIComponent(m[1] || m[2]) : name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e: any) { setErr(e.message); alert(e.message); } finally { setBusy(false); }
+  }}>{children}</button>;
+}
+
 export const q = (o: Record<string, any>) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
@@ -393,7 +410,7 @@ export function Th({ k, s, children, n }: { k: string; s: { sort: SortState; tog
 
 export function SearchBox({ value, onChange, placeholder = "بحث", autoFocus, width }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; width?: number }) {
   return (
-    <div className="search" style={width ? { minWidth: width } : undefined}>
+    <div className="search" style={width ? { minWidth: `min(${width}px, 100%)` } : undefined}>
       <span className="ic">🔍</span>
       <Input placeholder={placeholder} value={value} autoFocus={autoFocus} onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape" && value) { e.stopPropagation(); onChange(""); } }} />
       {value && <button type="button" className="search-x" title="مسح" onClick={() => onChange("")}>✕</button>}

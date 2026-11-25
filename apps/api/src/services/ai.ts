@@ -9,6 +9,7 @@ import { purchasePlan, kitchenPerformance } from "./round348";
 import { dashboard as mfgDashboard, listOrders as mfgOrders, costByName } from "./manufacturing";
 import { dashboard as rentalDashboard, listAssets as rentalAssets } from "./rentals";
 import { dashboard as subDashboard } from "./subscriptions";
+import { hrDashboard } from "./hrcore";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -191,6 +192,11 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     const d = await rentalDashboard(t, C);
     const assets = (await rentalAssets(t, C)).filter((a: any) => a.isActive).map((a: any) => ({ name: a.name, status: a.status, until: a.current?.endDate || null, customer: a.current?.number || null, next: a.nextBooking?.startDate || null }));
     return { ...d, overdue: d.overdue.map((c: any) => ({ number: c.number, customer: c.partnerName, assets: c.assets, lateDays: c.lateDays })), dueToday: d.dueToday.map((c: any) => ({ number: c.number, customer: c.partnerName, assets: c.assets })), startingSoon: d.startingSoon.map((c: any) => ({ number: c.number, customer: c.partnerName, from: c.startDate })), toSettle: d.toSettle.map((c: any) => ({ number: c.number, held: c.depositHeld })), assetsList: assets };
+  }
+  if (name === "hr_status") {
+    if (!perms(auth, "hr.read")) return { error: "صلاحيتك لا تسمح بعرض الموارد البشرية" };
+    const d = await hrDashboard(t, C);
+    return { headcount: d.headcount, monthlyPayroll: d.monthlyPayroll, liabilities: d.liabilities, pending: d.pendingLeaves.map((l: any) => ({ name: l.employeeName, type: l.typeName, days: l.days, from: l.fromDate })), onLeave: d.onLeaveToday.map((l: any) => ({ name: l.employeeName, type: l.typeName, until: l.toDate })), expired: d.documents.expired.map((x: any) => ({ name: x.employeeName, doc: x.kindAr, days: -x.daysLeft })), soon: d.documents.soon.slice(0, 10).map((x: any) => ({ name: x.employeeName, doc: x.kindAr, days: x.daysLeft })), contracts: d.contractsEnding, probation: d.probationEnding, missing: d.missing };
   }
   if (name === "subscription_status") {
     if (!perms(auth, "sales.read")) return { error: "صلاحيتك لا تسمح بعرض الاشتراكات" };

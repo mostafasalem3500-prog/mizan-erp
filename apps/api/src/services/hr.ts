@@ -12,7 +12,7 @@ import { bad, conflict, r2, r3, D, num, isDate, today, monthEnd, addDays } from 
 import { post, nextNumber, reverse } from "../accounting/engine";
 import { IS_EG } from "../lib/country";
 
-const SA_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART80: "فصل وفق المادة 80 (بدون مكافأة)" };
+const SA_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART87: "استقالة مستحقة للمكافأة كاملة (المادة 87: قوة قاهرة، أو الموظفة خلال 6 أشهر من الزواج أو 3 أشهر من الوضع)", ART81: "ترك العمل وفق المادة 81 (إخلال صاحب العمل)", ART80: "فصل وفق المادة 80 (بدون مكافأة)" };
 /** Egypt (Labour Law 14/2025): no end-of-service gratuity for insured staff — the pension is paid by social insurance; a gratuity is due only for service after age 60. */
 const EG_REASONS: Record<string, string> = { TERMINATION: "إنهاء من صاحب العمل", CONTRACT_END: "انتهاء العقد", RESIGNATION: "استقالة", ART80: "فصل بحكم المحكمة العمالية (خطأ جسيم)", RETIREMENT: "بلوغ سن التقاعد" };
 export const SETTLEMENT_REASONS: Record<string, string> = IS_EG ? EG_REASONS : SA_REASONS;
@@ -79,7 +79,7 @@ export function leaveAccruedDays(e: any, asOf: string) {
 
 export async function leaveTakenDays(t: Db, companyId: string, employeeId: string, e: any, asOf: string) {
   const start = e.leaveBalanceDate ? String(e.leaveBalanceDate).slice(0, 10) : "1900-01-01";
-  const r = await t.one(`SELECT COALESCE(SUM(days),0) d FROM employee_leaves WHERE company_id=$1 AND employee_id=$2 AND type='ANNUAL' AND from_date >= $3 AND from_date <= $4`, [companyId, employeeId, start, asOf]);
+  const r = await t.one(`SELECT COALESCE(SUM(days),0) d FROM employee_leaves WHERE company_id=$1 AND employee_id=$2 AND type='ANNUAL' AND status='APPROVED' AND from_date >= $3 AND from_date <= $4`, [companyId, employeeId, start, asOf]);
   return r3(r.d);
 }
 
@@ -97,8 +97,9 @@ export async function loansOutstanding(t: Db, companyId: string, employeeId: str
 export async function employeePosition(t: Db, companyId: string, e: any, asOf: string) {
   const wage = wageOf(e);
   const hire = e.hireDate ? String(e.hireDate).slice(0, 10) : null;
-  const years = hire ? r3(yearsBetween(hire, asOf)) : 0;
-  const eosbDue = eosbOf(e, wage, years, asOf);
+  // service in years: exact for the award and the thresholds, rounded only for display (round in the last step)
+  const yearsExact = hire ? yearsBetween(hire, asOf) : 0, years = r3(yearsExact);
+  const eosbDue = eosbOf(e, wage, yearsExact, asOf);
   const eosbBal = await provisionBalance(t, companyId, e.id, "EOSB");
   const accrued = leaveAccruedDays(e, asOf);
   const taken = await leaveTakenDays(t, companyId, e.id, e, asOf);
@@ -106,7 +107,7 @@ export async function employeePosition(t: Db, companyId: string, e: any, asOf: s
   const leaveDue = r2(D(wage).div(30).times(leaveDays));
   const leaveBal = await provisionBalance(t, companyId, e.id, "LEAVE");
   const loans = await loansOutstanding(t, companyId, e.id);
-  return { employeeId: e.id, code: e.code, name: e.name, hireDate: hire, wage, years, eosbDue, eosbBal, leaveAccrued: accrued, leaveTaken: taken, leaveDays, leaveDue, leaveBal, loans };
+  return { employeeId: e.id, code: e.code, name: e.name, hireDate: hire, wage, years, yearsExact, eosbDue, eosbBal, leaveAccrued: accrued, leaveTaken: taken, leaveDays, leaveDue, leaveBal, loans };
 }
 
 // ─── leaves ────────────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ export async function computeSettlement(t: Db, companyId: string, b: any) {
   const date = isDate(b.date) ? b.date : today();
   const reason = SETTLEMENT_REASONS[b.reason] ? b.reason : "TERMINATION";
   const p = await employeePosition(t, companyId, e, date);
-  const eosbDue = eosbByReason(p.eosbDue, p.years, reason);
+  const eosbDue = eosbByReason(p.eosbDue, p.yearsExact, reason);
   const salaryDays = Math.max(0, Math.min(31, num(b.salaryDays)));
   const salaryAmount = r2(D(p.wage).div(30).times(salaryDays));
   const otherAdditions = r2(num(b.otherAdditions)), otherDeductions = r2(num(b.otherDeductions));

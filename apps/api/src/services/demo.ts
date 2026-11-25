@@ -7,6 +7,8 @@ import { saveStations } from "./round348";
 import { seedManufacturingExample } from "./mfgExample";
 import { seedRentalExample } from "./rentalExample";
 import { seedSubscriptionExample } from "./subExample";
+import { makeIban } from "./hrcore";
+import { seedHrExample } from "./hrExample";
 import { reverseReturn } from "./round340";
 import { clearingView, createBatch } from "./clearing";
 import { IS_EG, BASE_CURRENCY } from "../lib/country";
@@ -57,7 +59,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 27; // 27: subscriptions example (gym, cloud software, coffee box); 26: rentals example; 25: manufacturing example (furniture workshop, detergent plant); 24: kitchen stations and a week of kitchen times; 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 28; // 28: HR file (documents, leave requests, a pending raise, valid IBANs and IDs); 27: subscriptions example (gym, cloud software, coffee box); 26: rentals example; 25: manufacturing example (furniture workshop, detergent plant); 24: kitchen stations and a week of kitchen times; 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -359,7 +361,8 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     const HIRE = ["2019-02-01", "2022-06-15", "2024-01-10", "2021-09-01", "2020-05-20"];
     const emps: any[] = [];
     for (const [i, [name, job, dept, nat, basic, housing, transport, leaveOpen]] of EMPS.entries()) {
-      emps.push(await t.insert("employees", { companyId, code: `E-D${String(i + 1).padStart(3, "0")}`, name, jobTitle: job, department: dept, nationality: nat, hireDate: HIRE[i], iban: `SA${between(10, 99)}80000${between(100000000, 999999999)}${between(100000, 999999)}`, bankName: pick(["مصرف الراجحي", "البنك الأهلي السعودي", "بنك الرياض"]), basic, housing, transport, otherAllow: 0, gosi: true, leaveDaysPerYear: 21, leaveOpening: leaveOpen, leaveBalanceDate: addDays(start, -1), isDemo: true }));
+      const saudi = nat === "SAUDI";
+      emps.push(await t.insert("employees", { companyId, code: `E-D${String(i + 1).padStart(3, "0")}`, name, jobTitle: job, department: dept, nationality: nat, hireDate: HIRE[i], iban: makeIban("SA", `80000${between(100000000, 999999999)}${between(100000, 999999)}`), idType: saudi ? "NATIONAL_ID" : "IQAMA", idNumber: `${saudi ? 1 : 2}0${between(10000000, 99999999)}`, gender: i === 1 ? "F" : "M", gosiRegDate: HIRE[i], contractType: saudi ? "INDEFINITE" : "FIXED", phone: `05${between(10000000, 99999999)}`, country: saudi ? "السعودية" : i === 3 ? "الهند" : "الفلبين", bankName: pick(["مصرف الراجحي", "البنك الأهلي السعودي", "بنك الرياض"]), basic, housing, transport, otherAllow: 0, gosi: true, leaveDaysPerYear: 21, leaveOpening: leaveOpen, leaveBalanceDate: addDays(start, -1), isDemo: true }));
     }
     // opening provision balances as at the day before the window (Dr opening equity / Cr provisions), mirrored in the employee ledger
     const dayBefore = addDays(start, -1);
@@ -479,6 +482,8 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     try { await t.savepoint(async () => { await seedManufacturingExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] manufacturing example", (e as any)?.message); }
     // example: rentals — equipment, a car, a furnished unit and a tent, with contracts in every state
     try { await t.savepoint(async () => { await seedRentalExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] rental example", (e as any)?.message); }
+    // example: the HR file — documents about to lapse, leave requests waiting for approval, a raise from next month
+    try { await t.savepoint(async () => { await seedHrExample(t, companyId, userName); }); } catch (e) { console.error("[demo] hr example", (e as any)?.message); }
     // example: subscriptions — a gym, cloud software per user and a quarterly box, subscribers in every state
     try { await t.savepoint(async () => { await seedSubscriptionExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] subscription example", (e as any)?.message); }
     // example: kitchen stations (meals to the grill, drinks to the bar) and a week of kitchen times for the performance report
@@ -568,6 +573,8 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM employee_provision_ledger WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employee_loans WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employee_leaves WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM hr_documents WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM hr_salary_changes WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM payroll_runs WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM employees WHERE company_id=$1 AND is_demo`, [companyId]);
     await t.exec(`DELETE FROM budgets WHERE company_id=$1 AND is_demo`, [companyId]);

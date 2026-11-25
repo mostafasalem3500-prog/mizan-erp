@@ -46,6 +46,9 @@ export const ROLES: Record<string, { ar: string; perms: string[] }> = {
   CASHIER: { ar: "كاشير", perms: ["pos.use", "products.read", "partners.read", "partners.write", "sales.read", "dashboard.read"] },
   STOREKEEPER: { ar: "أمين مستودع", perms: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read", "mfg.read", "mfg.write"] },
   PRODUCTION: { ar: "مشرف إنتاج", perms: ["mfg.read", "mfg.write", "products.read", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"] },
+  // 3.53.0: keeps the employee files, leave, documents, attendance and prepares/approves payroll; posting the run and
+  // paying it stay with accounting and payments
+  HR: { ar: "مسؤول الموارد البشرية", perms: ["hr.read", "hr.write", "dashboard.read"] },
   VIEWER: { ar: "مشاهد / مدقق", perms: ["*.read"] },
 };
 
@@ -54,6 +57,9 @@ export function can(role: string | null, perm: string): boolean {
   const perms = ROLES[role]?.perms || [];
   if (perms.includes("*") || perms.includes(perm)) return true;
   if (perm.endsWith(".read") && perms.includes("*.read")) return true;
+  // HR screens were under accounting before 3.53.0: whoever kept them (the accountant) keeps them
+  if (perm === "hr.read" && perms.includes("accounting.read")) return true;
+  if (perm === "hr.write" && perms.includes("accounting.write")) return true;
   return false;
 }
 
@@ -67,7 +73,8 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   if ((req as any)._authDone) return next();
   try {
     const hdr = req.headers.authorization || "";
-    const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : (req.query.token as string) || "";
+    // 3.53.0: the session token is read from the header only — a token in a URL stays in history, proxies and logs
+    const token = hdr.startsWith("Bearer ") ? hdr.slice(7) : "";
     if (!token) throw new AppError(401, "يلزم تسجيل الدخول", "UNAUTHENTICATED");
     let payload: AuthCtx;
     try {

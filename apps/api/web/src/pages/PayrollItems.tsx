@@ -15,7 +15,7 @@ export function PayrollItemsTab({ emps }: { emps: any[] }) {
   const [kind, setKind] = useState("");
   const { data, loading, reload } = useFetch<any>(`/payroll-items${q({ period })}`, [period]);
   const [edit, setEdit] = useState<any>(null);
-  const W = can("accounting.write");
+  const W = can("hr.write");
   const rows = (data?.rows || []).filter((r: any) => matches(r, text, ["employeeName", "employeeCode", "note"]) && (!kind || r.kind === kind));
   const tot = (ks: string[]) => rows.filter((r: any) => ks.includes(r.kind)).reduce((a: number, r: any) => a + Number(r.amount), 0);
   const earn = tot(EARN), ded = rows.reduce((a: number, r: any) => a + Number(r.amount), 0) - earn;

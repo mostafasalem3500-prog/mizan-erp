@@ -19,7 +19,7 @@ export function AttendanceTab() {
   const [dirty, setDirty] = useState(false);
   const [cfg, setCfg] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const W = can("accounting.write");
+  const W = can("hr.write");
   useEffect(() => { if (day.slice(0, 7) !== period) setDay(period === today().slice(0, 7) ? today() : `${period}-01`); }, [period]);
   useEffect(() => { if (!data) return; const m: Record<string, any> = {}; for (const e of data.employees) { const d = e.days[day]; m[e.id] = d ? { status: d.status, timeIn: d.timeIn || "", timeOut: d.timeOut || "" } : { status: "", timeIn: "", timeOut: "" }; } setRows(m); setDirty(false); }, [data, day]);
   const s = data?.settings; const dayInfo = data?.days.find((d: any) => d.date === day);

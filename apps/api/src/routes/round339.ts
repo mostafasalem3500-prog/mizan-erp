@@ -16,7 +16,7 @@ r339.use(authenticate);
 r339.get("/payroll/remittances", perm("accounting.read"), h(async (req) => rm.remitSummary(db, cid(req), req.query)));
 r339.post("/payroll/remittances", perm("accounting.write"), h(async (req) => { const r = await tx((t) => rm.remit(t, cid(req), actor(req), req.body || {})); await audit(req, "PAYROLL_REMIT", "payroll_remittance", r.id, { kind: r.kind, period: r.period, amount: r.amount }); return r; }));
 r339.post("/payroll/remittances/:id/cancel", perm("accounting.write"), h(async (req) => { const r = await tx((t) => rm.cancelRemit(t, cid(req), actor(req), p(req).id)); await audit(req, "CANCEL_PAYROLL_REMIT", "payroll_remittance", p(req).id); return r; }));
-r339.get("/payroll/overtime-rates", perm("accounting.read"), h(async () => ({ rates: OVERTIME_RATES })));
+r339.get("/payroll/overtime-rates", perm("hr.read"), h(async () => ({ rates: OVERTIME_RATES })));
 
 // ─── Egypt only ──────────────────────────────────────────────────────────
 const eg = Router();

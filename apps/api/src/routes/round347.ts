@@ -19,7 +19,7 @@ r347.put("/categories/:id", perm("products.write"), h(async (req) => { const r =
 r347.post("/categories/:id/merge", perm("products.write"), h(async (req) => { const r = await tx((t) => s.mergeCategory(t, cid(req), p(req).id, req.body?.into)); await audit(req, "UPDATE", "category", p(req).id, r); return r; }));
 r347.delete("/categories/:id", perm("products.write"), h(async (req) => { const r = await tx((t) => s.deleteCategory(t, cid(req), p(req).id)); await audit(req, "DELETE", "category", p(req).id, {}); return r; }));
 
-r347.get("/dashboard/pulse", perm("dashboard.read"), h(async (req) => s.pulse(db, cid(req), { period: String(req.query.period || "month"), branchId: branch(req) })));
+r347.get("/dashboard/pulse", perm("reports.read"), h(async (req) => s.pulse(db, cid(req), { period: String(req.query.period || "month"), branchId: branch(req) })));
 r347.get("/dashboard/insights", perm("reports.read"), h(async (req) => s.insights(db, cid(req))));
 r347.get("/analytics/heatmap", perm("reports.read"), h(async (req) => s.heatmap(db, cid(req), { days: Number(req.query.days || 28), branchId: branch(req) })));
 r347.get("/analytics/breakdown", perm("reports.read"), h(async (req) => s.salesBreakdown(db, cid(req), req.query as any)));

@@ -5,9 +5,10 @@ import { post } from "../accounting/engine";
 import { loanInstallments, applyLoanInstallments } from "./hr";
 import { IS_EG } from "../lib/country";
 import { computeLineEG } from "./egypt";
+import { gosiTable, GosiTable, prorateOf, payrollEmployees, unpaidLeaveDays } from "./hrcore";
 
-// GOSI (2024+ new rates for Saudis: total 21.5% on basic+housing → 9.75% employee / 11.75% employer incl. hazards & SANED;
-// non-Saudis: 2% occupational hazards, employer only). Rates are configurable per company later; sane defaults here.
+// GOSI: the rates come from the effective-dated table hr_gosi_rates (old scheme / new law by first registration);
+// these are only the fallback for a call without the table (old scheme: 9.75% employee, 11.75% employer).
 export const GOSI = { SAUDI: { employee: 0.0975, employer: 0.1175 }, NON_SAUDI: { employee: 0, employer: 0.02 } };
 
 export interface RunInput {
@@ -18,7 +19,7 @@ export interface RunInput {
   isDemo?: boolean;
 }
 
-export function computeLine(e: any, adj: any = {}, loans: { id: string; amount: number }[] = []) {
+export function computeLine(e: any, adj: any = {}, loans: { id: string; amount: number }[] = [], G?: GosiTable) {
   const basic = Number(e.basic), housing = Number(e.housing), transport = Number(e.transport), other = Number(e.otherAllow);
   const bonus = r2(num(adj.bonus)), overtime = r2(num(adj.overtime)), deduction = r2(num(adj.deduction)), absence = r2(num(adj.absence));
   const autoLoan = r2(loans.reduce((a, l) => a + l.amount, 0));
@@ -26,12 +27,14 @@ export function computeLine(e: any, adj: any = {}, loans: { id: string; amount: 
   // spread an overridden (smaller) installment over the loans in order
   let rem = loan; const loanItems = loans.map((l) => { const a = r2(Math.min(l.amount, rem)); rem = r2(rem - a); return { id: l.id, amount: a }; }).filter((l) => l.amount > 0);
   const gross = r2(D(basic).plus(housing).plus(transport).plus(other).plus(bonus).plus(overtime));
-  const rates = e.gosi ? (GOSI as any)[e.nationality] || GOSI.NON_SAUDI : { employee: 0, employer: 0 };
-  const gosiBase = Math.min(r2(D(basic).plus(housing)), 45000); // GOSI ceiling
-  const gosiEmp = r2(gosiBase * rates.employee);
-  const gosiEr = r2(gosiBase * rates.employer);
+  const rt: any = !e.gosi ? { scheme: null, employee: 0, employer: 0, branches: [] } : G ? G.rate(e) : { scheme: "OLD", ...((GOSI as any)[e.nationality] || GOSI.NON_SAUDI), branches: [] };
+  const raw = r2(D(basic).plus(housing)), cap = G ? G.maxBase * (e._prorate ?? 1) : 45000, floor = G && raw > 0 ? G.minBase * (e._prorate ?? 1) : 0;
+  const gosiBase = r2(Math.min(Math.max(raw, floor), cap)); // the wage subject to GOSI: basic + housing, within the limits
+  const gosiEmp = r2(gosiBase * rt.employee);
+  const gosiEr = r2(gosiBase * rt.employer);
+  const gosiBranches = (rt.branches || []).map((b: any) => ({ branch: b.branch, employee: r2(gosiBase * b.employee), employer: r2(gosiBase * b.employer), employeePct: r2(b.employee * 100 * 1000) / 1000, employerPct: r2(b.employer * 100 * 1000) / 1000 }));
   const net = r2(D(gross).minus(gosiEmp).minus(deduction).minus(absence).minus(loan));
-  return { employeeId: e.id, code: e.code, name: e.name, iban: e.iban, bankName: e.bankName, nationality: e.nationality, basic, housing, transport, other, bonus, overtime, deduction, absence, loan, loanItems, gross, gosiBase, gosiEmp, gosiEr, net, note: adj.note || null };
+  return { employeeId: e.id, code: e.code, name: e.name, iban: e.iban, bankName: e.bankName, idNumber: e.idNumber || null, nationality: e.nationality, basic, housing, transport, other, bonus, overtime, deduction, absence, loan, loanItems, gross, gosiBase, gosiEmp, gosiEr, gosiScheme: rt.scheme, gosiBranches, net, note: adj.note || null };
 }
 
 export async function createRun(t: Db, companyId: string, user: string, r: RunInput) {
@@ -39,8 +42,8 @@ export async function createRun(t: Db, companyId: string, user: string, r: RunIn
   const date = r.date && isDate(r.date) ? r.date : monthEnd(r.period + "-01");
   const dup = await t.maybe(`SELECT id FROM payroll_runs WHERE company_id=$1 AND period=$2`, [companyId, r.period]);
   if (dup) throw conflict(`يوجد مسير رواتب لشهر ${r.period} مسبقاً`);
-  const emps = await t.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [companyId]);
-  if (!emps.length) throw bad("لا يوجد موظفون نشطون");
+  const emps = await payrollEmployees(t, companyId, r.period);
+  if (!emps.length) throw bad("لا يوجد موظفون نشطون في هذا الشهر");
   const lines = await buildLines(t, companyId, r.period, emps, r.adjustments || {});
   const sum = (k: string) => r2(lines.reduce((a, l: any) => a + l[k], 0));
   const run = await t.insert("payroll_runs", { companyId, period: r.period, date, lines, totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence") + sum("loan")), totalNet: sum("net"), totalSalaryTax: IS_EG ? sum("salaryTax") : 0, totalMartyrs: IS_EG ? sum("martyrs") : 0, notes: r.notes || null, isDemo: !!r.isDemo, createdBy: user });
@@ -100,12 +103,21 @@ export async function deleteItem(t: Db, companyId: string, itemId: string) {
 /** The month's lines: fixed pay, the open transactions up to that month, manual adjustments typed on the run, and loan instalments. */
 export async function buildLines(t: Db, companyId: string, period: string, emps: any[], manual: Record<string, any>) {
   const loans = await loanInstallments(t, companyId, period);
+  const G = IS_EG ? undefined : await gosiTable(t, companyId, period + "-01");
+  const unpaid = /^\d{4}-\d{2}$/.test(period) ? await unpaidLeaveDays(t, companyId, period) : {};
   const items = await t.rows(`SELECT id, employee_id, kind, qty, factor, amount, note, date, period FROM payroll_items WHERE company_id=$1 AND status='OPEN' AND period <= $2 ORDER BY date, created_at`, [companyId, period]);
   return emps.map((e) => {
     const mine = items.filter((i) => i.employeeId === e.id); const m = manual?.[e.id] || {};
     const bucket = (k: string) => r2(mine.filter((i) => ITEM_KINDS[i.kind]?.bucket === k).reduce((a, i) => a + Number(i.amount), 0) + num(m[k]));
-    const adj = { bonus: bucket("bonus"), overtime: bucket("overtime"), deduction: bucket("deduction"), absence: bucket("absence"), loan: m.loan, note: m.note };
-    const line: any = IS_EG ? computeLineEG(e, adj, loans[e.id] || [], period) : computeLine(e, adj, loans[e.id] || []);
+    // joiners and leavers are paid for their days in the month; unpaid leave days come off at a 30th of the fixed pay
+    const pr = /^\d{4}-\d{2}$/.test(period) ? prorateOf(e, period) : { factor: 1, days: 0, of: 0 };
+    const f = pr.factor, ep = f === 1 ? e : { ...e, basic: r2(Number(e.basic) * f), housing: r2(Number(e.housing) * f), transport: r2(Number(e.transport) * f), otherAllow: r2(Number(e.otherAllow) * f), _prorate: f };
+    const ul = (unpaid as any)[e.id], leaveDeduction = ul ? r2(((Number(e.basic) + Number(e.housing) + Number(e.transport) + Number(e.otherAllow)) / 30) * ul.days) : 0;
+    const adj = { bonus: bucket("bonus"), overtime: bucket("overtime"), deduction: bucket("deduction"), absence: r2(bucket("absence") + leaveDeduction), loan: m.loan, note: m.note };
+    const line: any = IS_EG ? computeLineEG(ep, adj, loans[e.id] || [], period) : computeLine(ep, adj, loans[e.id] || [], G);
+    line.idNumber = e.idNumber || null;
+    if (f < 1) line.prorate = { days: pr.days, of: pr.of, from: (pr as any).from, to: (pr as any).to };
+    if (leaveDeduction) line.leaveDeduction = { amount: leaveDeduction, days: ul.days, items: ul.items };
     line.items = mine.map((i) => ({ id: i.id, kind: i.kind, qty: i.qty === null ? null : Number(i.qty), factor: i.factor === null ? null : Number(i.factor), amount: Number(i.amount), note: i.note, date: String(i.date instanceof Date ? i.date.toISOString() : i.date).slice(0, 10) }));
     line.manual = { bonus: r2(num(m.bonus)), overtime: r2(num(m.overtime)), deduction: r2(num(m.deduction)), absence: r2(num(m.absence)), loan: m.loan === undefined || m.loan === null || m.loan === "" ? null : r2(num(m.loan)) };
     line.costCenterId = e.costCenterId || null; line.jobTitle = e.jobTitle || null; line.department = e.department || null;
@@ -122,10 +134,10 @@ async function claimItems(t: Db, companyId: string, runId: string, lines: any[])
 /** A draft run is recomputed from today's employees, transactions and loans — keeping what was typed on the run itself. */
 export async function recalcRun(t: Db, companyId: string, id: string) {
   const run = await t.one(`SELECT * FROM payroll_runs WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المسير غير موجود");
-  if (run.status !== "DRAFT") throw conflict("المسير مرحّل — لا يُعاد احتسابه");
+  if (run.status !== "DRAFT") throw conflict(run.status === "APPROVED" ? "المسير معتمد — ألغِ الاعتماد أولاً لإعادة الاحتساب" : "المسير مرحّل — لا يُعاد احتسابه");
   await t.exec(`UPDATE payroll_items SET status='OPEN', run_id=NULL WHERE company_id=$1 AND run_id=$2`, [companyId, id]);
   const manual: Record<string, any> = {}; for (const l of run.lines as any[]) if (l.manual) manual[l.employeeId] = { ...l.manual, loan: l.manual.loan ?? undefined, note: l.note };
-  const emps = await t.rows(`SELECT * FROM employees WHERE company_id=$1 AND is_active ORDER BY code`, [companyId]);
+  const emps = await payrollEmployees(t, companyId, run.period);
   const lines = await buildLines(t, companyId, run.period, emps, manual);
   const sum = (k: string) => r2(lines.reduce((a, l: any) => a + l[k], 0));
   const r = await t.update("payroll_runs", { id }, { lines: JSON.stringify(lines), totalGross: sum("gross"), totalGosiEmp: sum("gosiEmp"), totalGosiEr: sum("gosiEr"), totalDeductions: r2(sum("deduction") + sum("absence") + sum("loan")), totalNet: sum("net"), totalSalaryTax: IS_EG ? sum("salaryTax") : 0, totalMartyrs: IS_EG ? sum("martyrs") : 0 });
@@ -147,7 +159,9 @@ async function ensureExpense(t: Db, companyId: string, key: string, nameAr: stri
 /** Accrual: Dr salaries (basic) + allowances + GOSI employer / Cr salaries payable (net) + GOSI payable (emp+er) + other deductions → salaries payable is net only; deductions reduce expense? No: deductions/absence reduce the expense (unpaid days). */
 export async function postRun(t: Db, companyId: string, user: string, id: string) {
   const run = await t.one(`SELECT * FROM payroll_runs WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المسير غير موجود");
-  if (run.status !== "DRAFT") throw conflict("المسير مرحّل مسبقاً");
+  if (!["DRAFT", "APPROVED"].includes(run.status)) throw conflict("المسير مرحّل مسبقاً");
+  const co = await t.one(`SELECT accounting FROM companies WHERE id=$1`, [companyId]);
+  if (co.accounting?.hr?.requireApproval && run.status !== "APPROVED") throw conflict("سياسة المنشأة: يُعتمد المسير قبل ترحيله");
   const L: any[] = run.lines;
   const gosiEmp = Number(run.totalGosiEmp), gosiEr = Number(run.totalGosiEr), net = Number(run.totalNet);
   const loans = r2(L.reduce((a, l) => a + (l.loan || 0), 0));
@@ -191,7 +205,7 @@ export async function payRun(t: Db, companyId: string, user: string, id: string,
 
 export async function deleteRun(t: Db, companyId: string, id: string) {
   const run = await t.one(`SELECT * FROM payroll_runs WHERE id=$1 AND company_id=$2`, [id, companyId], "المسير غير موجود");
-  if (run.status !== "DRAFT") throw conflict("لا يمكن حذف مسير مرحّل — اعكس قيده من دفتر اليومية");
+  if (!["DRAFT", "APPROVED"].includes(run.status)) throw conflict("لا يمكن حذف مسير مرحّل — اعكس قيده من دفتر اليومية");
   await t.exec(`UPDATE payroll_items SET status='OPEN', run_id=NULL WHERE company_id=$1 AND run_id=$2`, [companyId, id]);
   await t.exec(`DELETE FROM payroll_runs WHERE id=$1`, [id]);
 }
@@ -199,8 +213,22 @@ export async function deleteRun(t: Db, companyId: string, id: string) {
 /** WPS (Wage Protection System) salary file — the common bank CSV layout (Mudad/SARIE style columns). */
 export function wpsCsv(company: any, run: any): string {
   const L: any[] = run.lines;
-  const head = ["Employee Name", "Employee ID", "IBAN", "Bank Name", "Basic Salary", "Housing Allowance", "Other Earnings", "Deductions", "Net Salary", "Period", "Employer Name", "Employer CR", "Establishment ID"];
-  const rows = L.map((l) => [l.name, l.code, l.iban || "", l.bankName || "", l.basic.toFixed(2), l.housing.toFixed(2), (l.transport + l.other + l.bonus + l.overtime).toFixed(2), (l.gosiEmp + l.deduction + l.absence + (l.loan || 0)).toFixed(2), l.net.toFixed(2), run.period, company.nameAr, company.crNumber || "", ""]);
+  const head = ["Employee Name", "Employee ID", "National ID / Iqama", "IBAN", "Bank Name", "Basic Salary", "Housing Allowance", "Other Earnings", "Deductions", "Net Salary", "Period", "Employer Name", "Employer CR", "Establishment ID"];
+  const rows = L.map((l) => [l.name, l.code, l.idNumber || "", String(l.iban || "").replace(/\s+/g, "").toUpperCase(), l.bankName || "", l.basic.toFixed(2), l.housing.toFixed(2), (l.transport + l.other + l.bonus + l.overtime).toFixed(2), (l.gosiEmp + l.deduction + l.absence + (l.loan || 0)).toFixed(2), l.net.toFixed(2), run.period, company.nameAr, company.crNumber || "", ""]);
   const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   return "﻿" + [head, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+}
+
+/** Approval before posting (four eyes): whoever approves is recorded; it can be withdrawn while the run is unposted. */
+export async function approveRun(t: Db, companyId: string, user: string, id: string, undo = false) {
+  const run = await t.one(`SELECT * FROM payroll_runs WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, companyId], "المسير غير موجود");
+  if (undo) { if (run.status !== "APPROVED") throw conflict("المسير غير معتمد"); return t.update("payroll_runs", { id }, { status: "DRAFT", approvedBy: null, approvedAt: null }); }
+  if (run.status !== "DRAFT") throw conflict("يُعتمد المسير وهو مسودة فقط");
+  // under the approval policy the run is checked by someone other than whoever prepared it (one-person establishments excepted)
+  const co = await t.one(`SELECT accounting FROM companies WHERE id=$1`, [companyId]);
+  if (co.accounting?.hr?.requireApproval && run.createdBy && run.createdBy === user) {
+    const others = await t.one(`SELECT COUNT(*)::int c FROM memberships WHERE company_id=$1 AND is_active`, [companyId]);
+    if (others.c > 1) throw conflict("سياسة المنشأة: يعتمد المسيرَ مستخدمٌ غير من أعدّه");
+  }
+  return t.update("payroll_runs", { id }, { status: "APPROVED", approvedBy: user, approvedAt: new Date() });
 }

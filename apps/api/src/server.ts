@@ -22,6 +22,7 @@ import { r348 } from "./routes/round348";
 import { mfg } from "./routes/manufacturing";
 import { rentals } from "./routes/rentals";
 import { subscriptions } from "./routes/subscriptions";
+import { hrx, empPortal } from "./routes/hrx";
 import { startDigestScheduler } from "./services/digest";
 import { r15 } from "./routes/round15";
 import { media } from "./routes/media";
@@ -142,6 +143,7 @@ process.on("unhandledRejection", (e: any) => { console.error("[unhandledRejectio
 app.use("/api/media", media);
 app.use("/api/public", pub);
 app.use("/api/public", portal);
+app.use("/api/public", empPortal);
 app.use("/api/public", assocPublic);
 // public description of the REST API: the OpenAPI file and a readable page (before the API-key check)
 const originOf = (req: express.Request) => `${req.protocol}://${req.get("host")}`;
@@ -186,6 +188,7 @@ app.use("/api", r348);
 app.use("/api", mfg);
 app.use("/api", rentals);
 app.use("/api", subscriptions);
+app.use("/api", hrx);
 app.use("/api", egr);
 
 app.use("/api", (_req, res) => res.status(404).json({ message: "المسار غير موجود", code: "NOT_FOUND" }));

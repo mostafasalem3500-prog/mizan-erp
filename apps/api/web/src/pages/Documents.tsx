@@ -10,7 +10,7 @@ export const etaQrText = (d: any) => !d?.etaUuid ? "" : d.etaKind === "RECEIPT"
   ? `https://invoicing.eta.gov.eg/receipts/search/${d.etaUuid}/share/${(d.issuedAt ? new Date(d.issuedAt) : new Date(d.date + "T10:00:00+02:00")).toISOString().replace(/\.\d{3}Z$/, "Z")}#Total:${Number(d.total).toFixed(2)},IssuerRIN:${d.company?.vatNumber || ""}`
   : `https://invoicing.eta.gov.eg/documents/${d.etaUuid}/share/${d.etaLongId || ""}`;
 import { amountToArabicWords } from "../shared/tafqeet";
-import { useBase, api, q, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
+import { useBase, api, q, DownloadBtn, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
 import { PartnerStatement } from "./Statements";
 import { InvoicePaper } from "./InvoicePaper";
 import { ReverseReturnModal } from "./Round340";
@@ -366,7 +366,7 @@ export function DocumentView() {
         {isSale && d.status === "POSTED" && CFG.country === "EG" && d.etaStatus && <><EtaBadge s={d.etaStatus} /><button className="btn sm" onClick={() => setEtaOpen(true)}>منظومة الضرائب</button></>}
         {etaOpen && <EtaDocModal id={d.id} onClose={(ch) => { setEtaOpen(false); if (ch) reload(); }} />}
         {d.partnerId && can("reports.read") && <button className="btn sm" onClick={() => setPstmt(true)}>📄 كشف حساب {isSale ? "العميل" : "المورد"}</button>}
-        {isSale && d.xml && <a className="btn sm" href={`/api/zatca/xml/${d.id}?token=${localStorage.getItem("mz_token")}`}>XML</a>}
+        {isSale && d.xml && <DownloadBtn path={`/zatca/xml/${d.id}`} name={`${d.number || d.id}.xml`}>XML</DownloadBtn>}
         <Select value={layout} onChange={(e) => setLayout(e.target.value)} style={{ width: 190 }} title="قالب الطباعة" aria-label="قالب الطباعة"><option value="">القالب الافتراضي</option>{(["A4", "A5", "T80", "T58"] as const).map((sz) => <optgroup key={sz} label={SIZE_AR[sz]}>{allTemplates(d.company?.invoiceTemplate).filter((t) => t.opts.size === sz).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>)}</Select>
         {can("settings.write") && <Link className="btn sm ghost" to="/settings/templates" title="تصميم قوالب الطباعة">🎨</Link>}
         <PrintBtn />
