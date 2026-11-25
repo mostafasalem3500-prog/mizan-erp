@@ -33,8 +33,10 @@ with sync_playwright() as pw:
     ok(len(inv) == 1 and inv[0]['issuerNo'] == '2044', 'after confirming the sale is posted, flagged, and carries the staff number')
     pg.keyboard.press('Escape'); pg.wait_for_timeout(300)
     # ── who issued a return; reversing it ──
-    orig = [r for r in call('/invoices?direction=SALE&kind=INVOICE&status=POSTED&limit=200')['rows'] if r['channel'] != 'POS' and r['paymentStatus'] != 'PAID' and float(r['amountPaid']) == 0][0]
-    full = call(f"/invoices/{orig['id']}"); ln = [l for l in full['lines'] if l.get('productId')][0]
+    # an unpaid invoice of goods (subscription and rental invoices carry service lines only)
+    for orig in [r for r in call('/invoices?direction=SALE&kind=INVOICE&status=POSTED&limit=200')['rows'] if r['channel'] != 'POS' and r['paymentStatus'] != 'PAID' and float(r['amountPaid']) == 0]:
+        full = call(f"/invoices/{orig['id']}"); goods = [l for l in full['lines'] if l.get('productId')]
+        if goods: ln = goods[0]; break
     cn = call('/invoices', {'direction': 'SALE', 'kind': 'CREDIT_NOTE', 'date': full['date'][:10] if False else __import__('datetime').date.today().isoformat(), 'partnerId': full['partnerId'], 'originId': full['id'], 'reason': 'اختبار', 'lines': [{'productId': ln['productId'], 'qty': 1, 'unitPrice': float(ln['unitPrice']), 'taxCode': ln['taxCode']}]})
     cn = call(f"/invoices/{cn['id']}/post", {})
     pg.goto(B + '/sales/credit-notes'); pg.wait_for_selector('table.tbl tbody tr', timeout=60000)

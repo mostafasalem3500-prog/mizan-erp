@@ -1,6 +1,7 @@
 /** Financial reports, all computed from journal_lines (single source of truth). */
 import { remitAlerts } from "./payremit";
 import { wipCheck } from "./manufacturing";
+import { depositCheck } from "./rentals";
 import { clearingAlerts } from "./clearing";
 import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
@@ -526,6 +527,8 @@ export async function integrity(t: Db, companyId: string) {
     if (assocUse.coop) for (const c of await assocChecks(t, companyId)) checks.push({ name: c.name, ok: c.ok, a: c.actual, b: c.expected });
   }
   const wip = await wipCheck(t, companyId);
+  const dep = await depositCheck(t, companyId);
+  if (dep) checks.push({ name: "تأمينات المستأجرين في عقود الإيجار = حساب التأمينات المستلمة", ok: Math.abs(dep.held - dep.ledger) < 0.01, a: dep.held, b: dep.ledger });
   if (wip) checks.push({ name: "إنتاج تحت التشغيل في أوامر التصنيع المفتوحة = حساب إنتاج تحت التشغيل", ok: Math.abs(wip.orders - wip.ledger) < 0.01, a: wip.orders, b: wip.ledger });
   return { ok: checks.every((c) => c.ok), checks };
 }

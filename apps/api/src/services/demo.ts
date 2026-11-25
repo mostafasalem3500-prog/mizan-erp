@@ -5,6 +5,8 @@
 import { seedShawarmaExample } from "./round343";
 import { saveStations } from "./round348";
 import { seedManufacturingExample } from "./mfgExample";
+import { seedRentalExample } from "./rentalExample";
+import { seedSubscriptionExample } from "./subExample";
 import { reverseReturn } from "./round340";
 import { clearingView, createBatch } from "./clearing";
 import { IS_EG, BASE_CURRENCY } from "../lib/country";
@@ -55,7 +57,7 @@ const PRODUCTS: [string, string, number, number, number, string, string?][] = [
 ];
 
 /** Bump when the generated dataset changes materially; the showcase account reloads on boot when older. */
-export const DEMO_VERSION = 25; // 25: manufacturing example (furniture workshop, detergent plant); 24: kitchen stations and a week of kitchen times; 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
+export const DEMO_VERSION = 27; // 27: subscriptions example (gym, cloud software, coffee box); 26: rentals example; 25: manufacturing example (furniture workshop, detergent plant); 24: kitchen stations and a week of kitchen times; 23: sample sales carry a time of day (peak hours); 22: shawarma sizes and add-on with till sales (food-cost report); 21: shawarma costing example (preparations, a production batch); 20: a dish with a recipe; 19: recurring rent and subscription templates (cash-flow forecast); 18: examples — a reversed return, a till sale past zero stock, a statement line with no sale, staff number; 17: weekly card-terminal deposits with the bank's fee; 16: association demo — budgets, supporting documents, custody, in-kind, requests, a run with its decision, a closed campaign, Salla store and payout, weekly closings; 15: association demo — meetings, decisions, a grant; supplier payments by transfer
 
 async function log(companyId: string, step: string, pct: number) {
   await pool.query(`UPDATE companies SET demo_job=$2 WHERE id=$1`, [companyId, JSON.stringify({ step, pct, at: new Date() })]);
@@ -475,6 +477,10 @@ export async function loadDemo(companyId: string, userId: string, userName: stri
     try { await t.savepoint(async () => { await seedShawarmaExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName, userId); }); } catch { /* the example is optional */ }
     // example: manufacturing — a furniture workshop and a detergent plant, with orders in every state
     try { await t.savepoint(async () => { await seedManufacturingExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] manufacturing example", (e as any)?.message); }
+    // example: rentals — equipment, a car, a furnished unit and a tent, with contracts in every state
+    try { await t.savepoint(async () => { await seedRentalExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] rental example", (e as any)?.message); }
+    // example: subscriptions — a gym, cloud software per user and a quarterly box, subscribers in every state
+    try { await t.savepoint(async () => { await seedSubscriptionExample(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [companyId]), userName); }); } catch (e) { console.error("[demo] subscription example", (e as any)?.message); }
     // example: kitchen stations (meals to the grill, drinks to the bar) and a week of kitchen times for the performance report
     try {
       await t.savepoint(async () => {
@@ -541,6 +547,11 @@ export async function purgeDemo(companyId: string) {
     await t.exec(`DELETE FROM mfg_orders WHERE company_id=$1 AND (is_demo OR product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);
     await t.exec(`DELETE FROM mfg_boms WHERE company_id=$1 AND (is_demo OR product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);
     await t.exec(`DELETE FROM mfg_work_centers WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM subscriptions WHERE company_id=$1 AND (is_demo OR partner_id IN (SELECT id FROM partners WHERE company_id=$1 AND is_demo))`, [companyId]);
+    await t.exec(`DELETE FROM sub_plans WHERE company_id=$1 AND is_demo AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.plan_id=sub_plans.id)`, [companyId]);
+    await t.exec(`DELETE FROM rental_contracts WHERE company_id=$1 AND (is_demo OR partner_id IN (SELECT id FROM partners WHERE company_id=$1 AND is_demo))`, [companyId]);
+    await t.exec(`DELETE FROM rental_maintenance WHERE company_id=$1 AND is_demo`, [companyId]);
+    await t.exec(`DELETE FROM rental_assets WHERE company_id=$1 AND is_demo`, [companyId]);
     // stations that only took sample categories go with them
     await t.exec(`UPDATE companies SET accounting = jsonb_set(accounting, '{pos,stations}', COALESCE((SELECT jsonb_agg(s) FROM jsonb_array_elements(accounting->'pos'->'stations') s WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(s->'categoryIds') c WHERE c::uuid NOT IN (SELECT id FROM product_categories WHERE company_id=$1 AND is_demo)) OR jsonb_array_length(s->'categoryIds')=0), '[]'::jsonb)) WHERE id=$1 AND jsonb_typeof(accounting->'pos'->'stations')='array'`, [companyId]);
     await t.exec(`DELETE FROM prep_batches WHERE company_id=$1 AND (is_demo OR product_id IN (SELECT id FROM products WHERE company_id=$1 AND is_demo))`, [companyId]);

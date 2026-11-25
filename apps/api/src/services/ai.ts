@@ -7,6 +7,8 @@ import { menuEngineering, setoffCandidates, foodCost } from "./round343";
 import { salesBreakdown, insights, heatmap } from "./round347";
 import { purchasePlan, kitchenPerformance } from "./round348";
 import { dashboard as mfgDashboard, listOrders as mfgOrders, costByName } from "./manufacturing";
+import { dashboard as rentalDashboard, listAssets as rentalAssets } from "./rentals";
+import { dashboard as subDashboard } from "./subscriptions";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -183,6 +185,18 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
     const r = await heatmap(t, C, { days: num(input.days) || 28 });
     return { days: r.days, peak: r.peak, bestDay: r.bestDay, quietHour: r.quietHour, byDay: r.byDay, byHour: r.byHour.filter((h: any) => h.docs > 0), timed: r.timed, untimed: r.untimed };
+  }
+  if (name === "rental_status") {
+    if (!perms(auth, "sales.read")) return { error: "صلاحيتك لا تسمح بعرض التأجير" };
+    const d = await rentalDashboard(t, C);
+    const assets = (await rentalAssets(t, C)).filter((a: any) => a.isActive).map((a: any) => ({ name: a.name, status: a.status, until: a.current?.endDate || null, customer: a.current?.number || null, next: a.nextBooking?.startDate || null }));
+    return { ...d, overdue: d.overdue.map((c: any) => ({ number: c.number, customer: c.partnerName, assets: c.assets, lateDays: c.lateDays })), dueToday: d.dueToday.map((c: any) => ({ number: c.number, customer: c.partnerName, assets: c.assets })), startingSoon: d.startingSoon.map((c: any) => ({ number: c.number, customer: c.partnerName, from: c.startDate })), toSettle: d.toSettle.map((c: any) => ({ number: c.number, held: c.depositHeld })), assetsList: assets };
+  }
+  if (name === "subscription_status") {
+    if (!perms(auth, "sales.read")) return { error: "صلاحيتك لا تسمح بعرض الاشتراكات" };
+    const d = await subDashboard(t, C);
+    const pick = (l: any[]) => l.slice(0, 10).map((s: any) => ({ number: s.number, customer: s.partnerName, plan: s.planName, until: s.currentTo, due: s.due, trialEnd: s.trialEnd, ending: s.ending }));
+    return { mrr: d.mrr, arr: d.arr, arpu: d.arpu, counts: d.counts, churn: d.churn, fresh: d.fresh, month: d.month, deferredLeft: d.deferredLeft, trend: d.trend, byPlan: d.byPlan, pastDue: pick(d.pastDue), renewSoon: pick(d.renewSoon), trialsEnding: pick(d.trialsEnding), paused: pick(d.paused) };
   }
   if (name === "manufacturing_status") {
     if (!perms(auth, "mfg.read")) return { error: "صلاحيتك لا تسمح بعرض التصنيع" };

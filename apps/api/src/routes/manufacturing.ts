@@ -22,6 +22,8 @@ mfg.get("/mfg/boms/:id", R, h(async (req) => s.getBom(db, cid(req), p(req).id)))
 mfg.post("/mfg/boms", W, h(async (req) => { const r = await tx((t) => s.saveBom(t, cid(req), req.body || {})); await audit(req, "CREATE", "bom", r.id, { code: r.code }); return r; }));
 mfg.put("/mfg/boms/:id", W, h(async (req) => { const r = await tx((t) => s.saveBom(t, cid(req), req.body || {}, p(req).id)); await audit(req, "UPDATE", "bom", r.id, { code: r.code }); return r; }));
 mfg.delete("/mfg/boms/:id", W, h(async (req) => tx((t) => s.deleteBom(t, cid(req), p(req).id))));
+mfg.post("/mfg/boms/:id/freeze", W, h(async (req) => { const r = await tx((t) => s.freezeBom(t, cid(req), p(req).id, !!req.body?.release)); await audit(req, req.body?.release ? "UNFREEZE" : "FREEZE", "bom", r.id, { frozenCost: r.frozenCost }); return r; }));
+mfg.get("/mfg/trace", R, h(async (req) => s.trace(db, cid(req), req.query)));
 mfg.get("/mfg/cost", R, h(async (req) => s.costFor(db, cid(req), req.query)));
 
 mfg.get("/mfg/orders", R, h(async (req) => s.listOrders(db, cid(req), req.query)));
@@ -31,7 +33,7 @@ mfg.put("/mfg/orders/:id", W, h(async (req) => tx(async (t) => { await s.updateD
 mfg.post("/mfg/orders/:id/confirm", W, h(async (req) => tx(async (t) => { await s.confirmOrder(t, cid(req), p(req).id); return s.getOrder(t, cid(req), p(req).id); })));
 mfg.post("/mfg/orders/:id/issue", W, h(async (req) => tx((t) => s.issue(t, cid(req), actor(req), p(req).id, req.body || {}))));
 mfg.post("/mfg/orders/:id/return", W, h(async (req) => tx((t) => s.returnMaterials(t, cid(req), actor(req), p(req).id, req.body || {}))));
-mfg.post("/mfg/orders/:id/ops/:seq", W, h(async (req) => tx((t) => s.opAction(t, cid(req), actor(req), p(req).id, Number(p(req).seq), req.body || {}))));
+mfg.post("/mfg/orders/:id/ops/:seq", W, h(async (req) => tx((t) => s.opAction(t, cid(req), actor(req), p(req).id, Number(p(req).seq), req.body || {}, req.company))));
 mfg.post("/mfg/orders/:id/produce", W, h(async (req) => { const r = await tx((t) => s.produce(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "PRODUCE", "mfg_order", r.id, { number: r.number, qty: req.body?.qty, scrap: req.body?.scrapQty }); return r; }));
 mfg.post("/mfg/orders/:id/close", W, h(async (req) => { const r = await tx((t) => s.closeOrder(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "CLOSE", "mfg_order", r.id, { number: r.number, variance: r.sheet.variance }); return r; }));
 mfg.post("/mfg/orders/:id/cancel", W, h(async (req) => { const r = await tx((t) => s.cancelOrder(t, cid(req), actor(req), p(req).id, req.body || {})); await audit(req, "CANCEL", "mfg_order", r.id, { number: r.number }); return r; }));

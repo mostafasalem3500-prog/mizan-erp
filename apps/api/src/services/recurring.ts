@@ -3,6 +3,8 @@ import { Db, tx, pool, db } from "../db/pool";
 import { runAmortization, companiesWithDueAmortization } from "./amortization";
 import { runPeriodicReports } from "./periodic";
 import { runLeases, companiesWithDueLeases } from "./leases";
+import { billDue as billRentals, companiesWithDueRentals } from "./rentals";
+import { billDue as billSubscriptions, companiesWithDueSubscriptions } from "./subscriptions";
 import { DEMO_LOADING } from "../lib/core";
 import { beat } from "./monitor";
 import { bad, isDate, today, addDays, addMonths } from "../lib/core";
@@ -55,6 +57,10 @@ export function startRecurringScheduler() {
       for (const C of await companiesWithDueAmortization(db)) await tx((t) => runAmortization(t, C, "النظام (إطفاء شهري)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[amortization]", C, e.message));
       // leases: depreciation of the right-of-use asset and interest on the liability, each month as soon as it has ended
       for (const C of await companiesWithDueLeases(db, DEMO_LOADING)) await tx((t) => runLeases(t, C, "النظام (عقود الإيجار)", today(), undefined, { autoOnly: true })).catch((e) => console.error("[leases]", C, e.message));
+      // rentals billed month by month: each month as soon as it starts
+      for (const C of await companiesWithDueRentals(db)) await tx(async (t) => billRentals(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [C]), "النظام (فوترة الإيجار)")).catch((e) => console.error("[rentals]", C, e.message));
+      // subscriptions: trials ending, renewals on their first day, period-end cancellations, pauses ending
+      for (const C of await companiesWithDueSubscriptions(db)) await tx(async (t) => billSubscriptions(t, await t.one(`SELECT * FROM companies WHERE id=$1`, [C]), "النظام (فوترة الاشتراكات)")).catch((e) => console.error("[subscriptions]", C, e.message));
       // monthly / quarterly / annual written reports once the period has ended (a few establishments per pass)
       await runPeriodicReports().catch((e) => console.error("[periodic-reports]", e.message));
     } catch (e) {

@@ -10,9 +10,12 @@ y=today_=time.strftime('%Y'); d=c(f'/analytics/executive?from={y}-01-01&to={y}-1
 k=d['kpis']; inc=c(f'/reports/income-statement?from={y}-01-01&to={y}-12-31') if False else None
 print('kpis',{x:k[x] for x in ('sales','cost','grossProfit','margin','invoices','purchases','expenses')})
 tb={r['code']:r for r in c(f'/reports/trial-balance?from={y}-01-01&to={y}-12-31')['rows']}
-sales_gl=sum(float(tb[x]['credit'])-float(tb[x]['debit']) for x in tb if x in('4101','4102','4103'))
+keys={a.get('systemKey'):a['code'] for a in c('/accounts')['rows'] if a.get('systemKey')}
+sales_gl=sum(float(tb[x]['credit'])-float(tb[x]['debit']) for x in tb if x in('4101','4102','4103',keys.get('RENTAL_REVENUE'),keys.get('SUBSCRIPTION_REVENUE')))
 # revenue recognised month by month from a contract received in advance is in the ledger but is not an invoice sale
 deferred=sum(l['amount'] for a in c('/amortizations') if a['kind']=='DEFERRED' for l in c(f"/amortizations/{a['id']}")['lines'] if l['posted'] and l['periodEnd'][:4]==y)
+# a subscription paid for a year is a sale when invoiced (to deferred revenue), and its months then move to revenue
+deferred-=sum(a['total'] for a in c('/amortizations') if a['kind']=='DEFERRED' and (a['name'].startswith('اشتراك ') or a['name'].startswith('ترقية اشتراك ')) and str(a['startDate'])[:4]==y)
 ok(near(k['sales'],sales_gl-deferred,1.0),f"sales KPI {k['sales']} = ledger revenue {round(sales_gl,2)} − recognised deferred revenue {deferred}")
 cogs=float(tb['5101']['debit'])-float(tb['5101']['credit']); ok(near(k['cost'],cogs,1.0),f"cost KPI {k['cost']} = COGS ledger {round(cogs,2)}")
 ok(near(sum(p['v'] for p in d['categories']), sum(p['net'] for p in d['topProducts']) if len(d['topProducts'])<15 else sum(p['v'] for p in d['categories'])),'categories total consistent')

@@ -403,6 +403,33 @@ function peakAnswer(r: any): string {
   if (r.untimed) out.push("", `${r.untimed} فاتورة بلا وقت مسجل لم تدخل التوزيع على الساعات.`);
   return out.join("\n");
 }
+function rentalAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const A = r.assets;
+  if (!A.total) return "لا أصول للتأجير بعد. ابدأ من [لوحة التأجير](/rentals) — أو حمّل المثال الجاهز منها.";
+  const ST: Record<string, string> = { AVAILABLE: "متاح", RENTED: "مؤجر", MAINTENANCE: "صيانة", RETIRED: "خارج الخدمة" };
+  const out = [`**التأجير الآن:** ${A.rented} من ${A.total} أصل مؤجر (إشغال ${A.utilizationPct}%)، ${A.available} متاح${A.maintenance ? `، ${A.maintenance} في الصيانة` : ""}. إيراد هذا الشهر ${money(r.month.billed)} ${cur}.`, `- تأمينات محتفظ بها ${money(r.deposits.held)}${r.deposits.match ? " (مطابقة للحساب)" : ` — الحساب ${money(r.deposits.ledger)}: غير مطابق`}.`];
+  if (r.overdue?.length) out.push("", "**متأخر عن الإرجاع:** " + r.overdue.map((c: any) => `${c.number} — ${c.customer} (${c.assets}) منذ ${c.lateDays} يوم`).join("، "));
+  if (r.dueToday?.length) out.push("", "**يُرجع اليوم:** " + r.dueToday.map((c: any) => `${c.number} — ${c.customer}`).join("، "));
+  if (r.startingSoon?.length) out.push("", "**حجوزات قريبة:** " + r.startingSoon.map((c: any) => `${c.number} من ${c.from}`).join("، "));
+  out.push("", "| الأصل | الحالة | حتى | الحجز القادم |", "|---|---|---|---|", ...r.assetsList.slice(0, 15).map((a: any) => `| ${a.name} | ${ST[a.status] || a.status} | ${a.until || "—"} | ${a.next || "—"} |`));
+  out.push("", "[لوحة التأجير](/rentals) · [تقويم الإشغال](/rentals/calendar)");
+  return out.join("\n");
+}
+function subAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const K = r.counts;
+  if (!K.live && !K.ended) return "لا مشتركين بعد. ابدأ من [لوحة الاشتراكات](/subs): خطة، ثم مشترك — أو حمّل المثال الجاهز منها.";
+  const out = [`**الاشتراكات:** الإيراد الشهري المتكرر ${money(r.mrr)} ${cur} (سنوياً ${money(r.arr)}) من ${K.active} مشترك نشط${K.trial ? `، و${K.trial} في التجربة` : ""}${K.paused ? `، و${K.paused} موقوف مؤقتاً` : ""}. متوسط المشترك ${money(r.arpu)} شهرياً.`,
+    `- آخر 30 يوماً: ${r.fresh} جديد، و${r.churn.lost} ألغى أو انتهى (معدل الإلغاء ${r.churn.ratePct}%${r.churn.lostMrr ? `، فقدنا ${money(r.churn.lostMrr)} شهرياً` : ""}).`,
+    `- إيراد الاشتراكات هذا الشهر ${money(r.month.revenue)}${r.deferredLeft ? `، وإيراد مؤجل لم يُستحق بعد ${money(r.deferredLeft)}` : ""}.`];
+  if (r.pastDue?.length) out.push("", "**متأخرون عن السداد:** " + r.pastDue.map((s: any) => `${s.number} — ${s.customer} (${money(s.due)})`).join("، "));
+  if (r.renewSoon?.length) out.push("", "**تجديد خلال 7 أيام:** " + r.renewSoon.map((s: any) => `${s.number} — ${s.customer} في ${s.until}${s.ending ? " (لن يتجدد)" : ""}`).join("، "));
+  if (r.trialsEnding?.length) out.push("", "**تجارب تنتهي قريباً:** " + r.trialsEnding.map((s: any) => `${s.customer} في ${s.trialEnd}`).join("، "));
+  if (r.byPlan?.length) out.push("", "| الخطة | المشتركون | الإيراد الشهري |", "|---|---|---|", ...r.byPlan.slice(0, 10).map((p: any) => `| ${p.name} | ${p.subscribers} | ${money(p.mrr)} |`));
+  out.push("", "[لوحة الاشتراكات](/subs) · [المشتركون](/subs/list)");
+  return out.join("\n");
+}
 function mfgAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   const C = r.counts;
@@ -690,6 +717,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "sales_breakdown") return say(breakdownAnswer(res, ctx.currency, prev.input.label), res.by === "category" ? ["المبيعات حسب الصنف", "المبيعات حسب الساعة", "قارن هذا الشهر بالشهر الماضي"] : ["المبيعات حسب التصنيف", "متى وقت الذروة؟", "ملاحظاتك على الوضع"]);
     if (prev.name === "smart_insights") return say(insightsAnswer(res), ["المبيعات حسب التصنيف هذا الشهر", "الأصناف الناقصة", "حلّل الوضع المالي"]);
     if (prev.name === "peak_hours") return say(peakAnswer(res), ["المبيعات حسب يوم الأسبوع", "ملخص اليوم"]);
+    if (prev.name === "subscription_status") return say(subAnswer(res, ctx.currency), ["من لم يسدد؟", "ما المؤجر الآن؟"]);
+    if (prev.name === "rental_status") return say(rentalAnswer(res, ctx.currency), ["تقويم الإشغال", "حالة التصنيع"]);
     if (prev.name === "manufacturing_status") return say(mfgAnswer(res, ctx.currency), ["ماذا أشتري للمطبخ؟", "تقارير التصنيع"]);
     if (prev.name === "manufacturing_cost") return say(mfgCostAnswer(res, ctx.currency), ["حالة التصنيع", "الأصناف الناقصة"]);
     if (prev.name === "purchase_plan") return say(planAnswer(res, ctx.currency), ["تكلفة الطعام هذا الشهر", "الأصناف الناقصة"]);
@@ -739,7 +768,7 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   if (/^(مرحبا|السلام|اهلا|هلا|صباح|مساء|هاي|hi|hello)|ماذا تستطيع|ماذا تفعل|ما الذي تستطيع|ساعدني$|^مساعده$|من انت/.test(n) && !a.amount) return say(ABOUT);
 
   // the subscription or licence of this establishment
-  if (/(اشتراكي|اشتراكنا|اشتراك (ال)?(برنامج|نظام|ميزان)|(متي|متى) ينتهي (ال)?اشتراك|(تجديد|حاله|مده|نوع) (ال)?اشتراك|ترخيصي|ترخيص (ال)?(برنامج|نظام|ميزان)|(مفتاح|نقل|تفعيل|حاله) (ال)?ترخيص|باقتي|خطتي|باقه (ال)?(برنامج|نظام)|(ال)?(نسخه|فتره) (ال)?تجريبيه|التجربه المجانيه|مفتاح التفعيل|السيريال|الرقم التسلسلي|معرف (ال)?جهاز)/.test(n) && !a.amount && !(a.kind && wantsRecord(n))) return say(subscriptionAnswer(ctx));
+  if (/(اشتراكي|اشتراكنا|اشتراك (ال)?(برنامج|نظام|ميزان)|(متي|متى) ينتهي (ال)?اشتراك|(تجديد|حاله|مده|نوع) (ال)?اشتراك(?!ات)|ترخيصي|ترخيص (ال)?(برنامج|نظام|ميزان)|(مفتاح|نقل|تفعيل|حاله) (ال)?ترخيص|باقتي|خطتي|باقه (ال)?(برنامج|نظام)|(ال)?(نسخه|فتره) (ال)?تجريبيه|التجربه المجانيه|مفتاح التفعيل|السيريال|الرقم التسلسلي|معرف (ال)?جهاز)/.test(n) && !a.amount && !(a.kind && wantsRecord(n))) return say(subscriptionAnswer(ctx));
   // «افتح … / أين شاشة …»: the screen itself, as a link
   { const nv = n.match(/^(?:افتح|افتحي|اذهب (?:الي|الى|ل)|انتقل (?:الي|الى|ل)|خذني (?:الي|الى|ل)|وديني (?:ل|علي|على)|اين (?:اجد|شاشه|صفحه)|وين (?:الاقي|شاشه|صفحه)|اريد فتح|ابغي افتح) ?(?:شاشه|صفحه|قائمه)? ?(.+?)\s*[؟?]?$/);
     if (nv && nv[1].length > 2 && !a.amount) { const hits = screensFor(nv[1], ctx.vatRate === 14); if (hits.length) return say(hits.length === 1 ? `[افتح ${hits[0].label}](${hits[0].to})` : `أقرب الشاشات لما طلبت:\n${hits.map((x) => `- [${x.label}](${x.to})`).join("\n")}`); } }
@@ -762,6 +791,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     }
     if (/(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|نصايح|توصيات) (علي|على|عن|حول|ل)? ?(ال)?(وضع|الوضع|المنشاه|الشركه|المحل|المطعم|اعمالي|الشغل|اليوم|الحين)|^(وش|ايش|ما|ماذا) (الجديد|تلاحظ|لاحظت)|^(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|توصيات)$|تنبيهات ذكيه/.test(n)) return call("smart_insights", {});
     if (/(وقت|اوقات|ساعه|ساعات|ايام|يوم) (ال)?(ذروه|زحمه|الضغط)|(متي|متى) (يكون |تكون )?(ال)?(زحمه|ذروه|الضغط)|(افضل|اكثر) (يوم|ساعه|وقت) .{0,8}(بيع|مبيعات)|(اي|ايش|وش|ما) (افضل|اكثر) (يوم|ساعه|وقت)/.test(n)) return call("peak_hours", { days: /اسبوع/.test(n) ? 7 : /3 اشهر|ثلاث(ه)? اشهر|ربع/.test(n) ? 90 : 28 });
+    if (/(حاله|وضع|اخبار|ملخص|تقرير) (ال)?(اشتراكات|مشتركين|العضويات)|\bmrr\b|\barr\b|الايراد (الشهري )?المتكرر|معدل (الالغاء|التسرب)|(كم|عدد) (ال)?(مشتركين|مشترك|اشتراك)|(المشتركين|اشتراكات) (المتاخر|المتاخره|المتاخرين)/.test(n)) return call("subscription_status", {});
+    if (/(حاله|وضع|اخبار) (ال)?(تاجير|ايجار|المعدات المؤجره)|(اي|ايش|وش|ما|ماذا) .{0,12}(مؤجر|متاح للتاجير|المؤجره)|(المتاخر|المتاخره|متاخر) .{0,10}(الارجاع|ارجاع|التسليم)|(العقود|عقود) (ال)?(ايجار|تاجير)/.test(n)) return call("rental_status", {});
     if (/(اوامر|امر) (ال)?(تصنيع|انتاج)|(حاله|وضع|اخبار) (ال)?(تصنيع|انتاج|مصنع|ورشه)|(ماذا|ايش|وش|شو) (في|علي|عند) (ال)?(ورشه|مصنع)|تحت التشغيل/.test(n)) return call("manufacturing_status", {});
     if (/خطه (ال)?(شراء|مشتريات)|(ماذا|ايش|وش|شو|ما|ايه) .{0,12}(اشتري|نشتري|اطلب|نطلب)|(مشتريات|طلبيه|طلبيات) (ال)?(مطبخ|مطعم|مكونات)|(كم|متي|متى) .{0,12}(يكفي|تكفي|يخلص|تخلص) (ال)?(مخزون|مكونات|خامات|رصيد)/.test(n)) return call("purchase_plan", {});
     if (/(اداء|سرعه|بطء|وقت|اوقات|زمن) (ال)?(مطبخ|تجهيز|تحضير الطلبات)|(كم|قديش) .{0,10}(ياخذ|ياخد|تاخذ|يستغرق) (ال)?(طلب|تجهيز|اوردر)|(الطلبات|الاصناف) (ال)?متاخره/.test(n)) { const per = parsePeriod(n, ctx.today); return call("kitchen_performance", /(اليوم|امس|شهر|اسبوع)/.test(n) ? { from: per.from, to: per.to } : {}); }

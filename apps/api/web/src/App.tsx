@@ -95,6 +95,19 @@ const MfgPlanPage = lz(() => import("./pages/Manufacturing"), "MfgPlanPage");
 const MfgSchedulePage = lz(() => import("./pages/Manufacturing"), "MfgSchedulePage");
 const MfgUnbuildPage = lz(() => import("./pages/Manufacturing"), "MfgUnbuildPage");
 const MfgReportsPage = lz(() => import("./pages/Manufacturing"), "MfgReportsPage");
+const MfgTracePage = lz(() => import("./pages/Manufacturing"), "MfgTracePage");
+const RentalsDashboard = lz(() => import("./pages/Rentals"), "RentalsDashboard");
+const RentalAssetsPage = lz(() => import("./pages/Rentals"), "RentalAssetsPage");
+const RentalContractsPage = lz(() => import("./pages/Rentals"), "RentalContractsPage");
+const RentalContractPage = lz(() => import("./pages/Rentals"), "RentalContractPage");
+const RentalCalendarPage = lz(() => import("./pages/Rentals"), "RentalCalendarPage");
+const RentalReportsPage = lz(() => import("./pages/Rentals"), "RentalReportsPage");
+const SubsDashboard = lz(() => import("./pages/Subscriptions"), "SubsDashboard");
+const SubPlansPage = lz(() => import("./pages/Subscriptions"), "SubPlansPage");
+const SubsListPage = lz(() => import("./pages/Subscriptions"), "SubsListPage");
+const SubPage = lz(() => import("./pages/Subscriptions"), "SubPage");
+const SubCheckinPage = lz(() => import("./pages/Subscriptions"), "SubCheckinPage");
+const SubUsagePage = lz(() => import("./pages/Subscriptions"), "SubUsagePage");
 const PrintTemplatesPage = lz(() => import("./pages/PrintTemplates"), "PrintTemplatesPage");
 const ZatcaPage = lz(() => import("./pages/Settings"), "ZatcaPage");
 const AdminPage = lz(() => import("./pages/Settings"), "AdminPage");
@@ -322,6 +335,19 @@ export function App() {
                 <Route path="/mfg/schedule" element={<MfgSchedulePage />} />
                 <Route path="/mfg/unbuild" element={<MfgUnbuildPage />} />
                 <Route path="/mfg/reports" element={<MfgReportsPage />} />
+                <Route path="/mfg/trace" element={<MfgTracePage />} />
+                <Route path="/rentals" element={<RentalsDashboard />} />
+                <Route path="/subs" element={<SubsDashboard />} />
+                <Route path="/subs/plans" element={<SubPlansPage />} />
+                <Route path="/subs/list" element={<SubsListPage />} />
+                <Route path="/subs/checkin" element={<SubCheckinPage />} />
+                <Route path="/subs/usage" element={<SubUsagePage />} />
+                <Route path="/subs/:id" element={<SubPage />} />
+                <Route path="/rentals/assets" element={<RentalAssetsPage />} />
+                <Route path="/rentals/contracts" element={<RentalContractsPage />} />
+                <Route path="/rentals/contracts/:id" element={<RentalContractPage />} />
+                <Route path="/rentals/calendar" element={<RentalCalendarPage />} />
+                <Route path="/rentals/reports" element={<RentalReportsPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />
                 <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />

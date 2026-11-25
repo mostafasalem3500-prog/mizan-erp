@@ -46,7 +46,7 @@ fy=[y for y in c('/fiscal-years')['years'] if y['startDate']<=d<=y['endDate']]
 ch=c(f"/fiscal-years/{fy[0]['id']}/close-check"); items={i.get('key') or i.get('id'):i for i in (ch.get('items') or ch.get('checks') or [])}
 ok('ecl' in items,'year-end check has the doubtful-debts line')
 # ── the demo dataset now has amortisation schedules ──
-am=c('/amortizations')
+am=[a for a in c('/amortizations') if not a['name'].startswith('اشتراك')]  # the subscriptions example adds its own schedules
 ok(len(am)==2 and {a['kind'] for a in am}=={'PREPAID','DEFERRED'} and all(a['postedMonths']==5 and a['dueMonths']==0 for a in am),'demo: a prepaid insurance and a deferred maintenance contract, five months posted, nothing due')
 pre=[a for a in am if a['kind']=='PREPAID'][0]
 ok(near(pre['remaining'],9600-5*800) and near(bal(K['PREPAID']['id']),pre['remaining']),'demo prepaid balance in the books = schedule remaining')

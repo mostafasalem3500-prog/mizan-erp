@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, useFetch, useAction, useToast, useCompanyContext, Modal, Field, Input, Select, NumInput, Badge, Money, money, Loading, Empty, Tabs, DateRange, ExportBtn, PrintBtn, Picker, productFetcher, fmtDT, today, useNewParam, useTabParam, confirmDlg } from "../lib";
+import { api, useFetch, useAction, useToast, useCompanyContext, Modal, Field, Input, Select, NumInput, Badge, Money, money, Loading, Empty, Tabs, DateRange, ExportBtn, PrintBtn, Picker, productFetcher, partnerFetcher, fmtDT, today, useNewParam, useTabParam, confirmDlg } from "../lib";
 
 export const MO_ST: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", IN_PROGRESS: "قيد التنفيذ", DONE: "منتهٍ", CANCELLED: "ملغى" };
 const MO_COLOR: Record<string, string> = { DRAFT: "gray", CONFIRMED: "blue", IN_PROGRESS: "amber", DONE: "green", CANCELLED: "red" };
@@ -13,7 +13,7 @@ const OP_ST: Record<string, [string, string]> = { PENDING: ["لم تبدأ", "gr
 const AV: Record<string, [string, string]> = { OK: ["المواد متوفرة", "green"], PARTIAL: ["متوفرة جزئياً", "amber"], SHORT: ["مواد ناقصة", "red"], ISSUED: ["مصروفة", "teal"] };
 const PRI: Record<number, string> = { 1: "عاجل", 2: "عادي", 3: "منخفض" };
 export const WC_KIND: Record<string, string> = { MACHINE: "آلة", LABOR: "فريق عمل", LINE: "خط إنتاج", ASSEMBLY: "تجميع", OUTSOURCE: "ورشة خارجية" };
-const KIND_MV: Record<string, string> = { ISSUE: "صرف مواد", RETURN: "إرجاع مواد", LABOR: "وقت مرحلة", RECEIPT: "استلام إنتاج", BYPRODUCT: "منتج ثانوي", SCRAP: "تالف", CLOSE: "إقفال (انحراف)", CANCEL: "إلغاء" };
+const KIND_MV: Record<string, string> = { SUBCONTRACT: "فاتورة ورشة خارجية", ISSUE: "صرف مواد", RETURN: "إرجاع مواد", LABOR: "وقت مرحلة", RECEIPT: "استلام إنتاج", BYPRODUCT: "منتج ثانوي", SCRAP: "تالف", CLOSE: "إقفال (انحراف)", CANCEL: "إلغاء" };
 const stockFetcher = async (s: string) => ((await productFetcher(s)) as any[]).filter((p) => p.type === "STOCK");
 const q3 = (x: any) => (x === null || x === undefined ? "—" : Number(Number(x).toFixed(3)).toLocaleString("en-US"));
 const mins = (m: any) => { const v = Number(m) || 0; if (v < 60) return `${q3(v)} د`; const h = Math.floor(v / 60), r = Math.round(v % 60); return r ? `${h} س ${r} د` : `${h} س`; };
@@ -128,7 +128,7 @@ export function NewOrderModal({ init, onClose, onDone }: { init: any; onClose: (
         <Field label="مستودع المواد"><Select value={f.warehouseId} onChange={(e) => setF({ ...f, warehouseId: e.target.value })}><option value="">الافتراضي</option>{(wh.data || []).map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select></Field>
         <Field label="مستودع المنتج التام"><Select value={f.outputWarehouseId} onChange={(e) => setF({ ...f, outputWarehouseId: e.target.value })}><option value="">نفس مستودع المواد</option>{(wh.data || []).map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select></Field>
         <Field label="رقم الدفعة للإنتاج" hint="فارغ = رقم الأمر"><Input value={f.lotNo} onChange={(e) => setF({ ...f, lotNo: e.target.value })} /></Field>
-        <Field label="لعميل (تصنيع حسب الطلب)" span2><Picker value={partner} onChange={setPartner} fetcher={async (s: string) => (await api(`/partners?q=${encodeURIComponent(s)}&role=CUSTOMER`)).rows || []} label={(p: any) => p.name} placeholder="اختياري" /></Field>
+        <Field label="لعميل (تصنيع حسب الطلب)" span2><Picker value={partner} onChange={setPartner} fetcher={partnerFetcher("CUSTOMER")} label={(p: any) => p.name} placeholder="اختياري" /></Field>
         <Field label="مرجع طلب العميل"><Input value={f.salesRef} onChange={(e) => setF({ ...f, salesRef: e.target.value })} /></Field>
         <Field label="ملاحظات" span3><Input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       </div>
@@ -196,15 +196,17 @@ export function MfgOrderPage() {
           <td className="small">{op.operator || "—"}{op.startedAt && <div className="muted">بدأ {fmtDT(op.startedAt)}</div>}</td>
           <td className="row" style={{ gap: 4 }}>{W && open && op.status !== "DONE" && <>
             {op.status !== "RUNNING" && <button className="btn sm" data-op-start onClick={() => act(`ops/${op.seq}`, { action: "start" }, `بدأت مرحلة ${op.name}`)}>بدء</button>}
-            <button className="btn sm primary" data-op-finish onClick={() => setModal({ k: "op", op })}>إنهاء</button></>}</td></tr>)}</tbody></table></div>
+            {op.outsourced && <button className="btn sm" data-op-sub onClick={() => setModal({ k: "sub", op })}>فاتورة الورشة</button>}
+            <button className="btn sm primary" data-op-finish onClick={() => setModal({ k: "op", op })}>إنهاء</button></>}{op.qcResults && <div className="small muted">{op.qcResults.map((r: any) => `${r.name}: ${r.value}${r.unit ? " " + r.unit : ""}${r.ok ? " ✓" : " ✗"}`).join(" · ")}</div>}{op.subcontracted > 0 && <div className="small muted">ورشة خارجية {op.supplier}: {money(op.subcontracted)}</div>}</td></tr>)}</tbody></table></div>
         {!o.ops.length && <Empty text="قائمة المواد بلا مراحل: التكلفة من المواد فقط" />}</div>}
       {tab === "cost" && <CostTab o={o} />}
       {tab === "moves" && <div className="card"><div className="table-wrap"><table className="tbl compact" data-mo-moves><thead><tr><th>التاريخ</th><th>الحركة</th><th>الصنف / المرحلة</th><th className="n">الكمية</th><th className="n">القيمة</th><th>القيد</th><th>ملاحظة</th></tr></thead>
-        <tbody>{o.moves.map((m: any) => <tr key={m.id}><td className="small">{m.date}</td><td>{KIND_MV[m.kind] || m.kind}</td><td>{m.productName || (m.opSeq ? (o.ops.find((x: any) => x.seq === m.opSeq)?.name || `مرحلة ${m.opSeq}`) : "—")}{m.minutes !== null && <span className="small muted"> · {mins(m.minutes)}</span>}</td><td className="n">{m.qty ? q3(m.qty) : "—"}</td><td className="n"><Money v={m.value} /></td><td>{m.entryId ? <Link to={`/journals/${m.entryId}`} className="num">{m.entryNumber}</Link> : "—"}</td><td className="small">{m.notes || ""}{m.createdBy ? <span className="muted"> · {m.createdBy}</span> : ""}</td></tr>)}</tbody></table></div>
+        <tbody>{o.moves.map((m: any) => <tr key={m.id}><td className="small">{m.date}</td><td>{KIND_MV[m.kind] || m.kind}</td><td>{m.productName || (m.opSeq ? (o.ops.find((x: any) => x.seq === m.opSeq)?.name || `مرحلة ${m.opSeq}`) : "—")}{m.minutes !== null && <span className="small muted"> · {mins(m.minutes)}</span>}</td><td className="n">{m.qty ? q3(m.qty) : "—"}</td><td className="n"><Money v={m.value} /></td><td>{m.entryId ? <Link to={`/journals/${m.entryId}`} className="num">{m.entryNumber}</Link> : "—"}</td><td className="small">{m.notes || ""}{m.operator ? <span> · المشغّل {m.operator}</span> : ""}{m.createdBy ? <span className="muted"> · {m.createdBy}</span> : ""}{m.serials?.length ? <details><summary>{m.serials.length} رقم تسلسلي</summary><div className="num">{m.serials.join("، ")}</div></details> : null}</td></tr>)}</tbody></table></div>
         {!o.moves.length && <Empty text="لم تُسجَّل حركات بعد" />}</div>}
       {o.children.length > 0 && <div className="card"><div className="card-h"><h3>أوامر التجميع الفرعي</h3></div><div className="table-wrap"><table className="tbl compact"><tbody>{o.children.map((c: any) => <tr key={c.id} className="clickable" onClick={() => nav(`/mfg/orders/${c.id}`)}><td className="num">{c.number}</td><td>{c.name}</td><td className="n">{q3(c.producedQty)} / {q3(c.qty)}</td><td><MoBadge s={c.status} /></td></tr>)}</tbody></table></div></div>}
       {modal?.k === "produce" && <ProduceModal o={o} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal?.k === "op" && <OpModal o={o} op={modal.op} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
+      {modal?.k === "sub" && <SubcontractModal o={o} op={modal.op} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
       {modal?.k === "close" && <CloseModal o={o} onClose={() => setModal(null)} onDone={() => { setModal(null); reload(); }} />}
     </div>
   );
@@ -274,11 +276,11 @@ function CostTab({ o }: { o: any }) {
 
 function ProduceModal({ o, onClose, onDone }: { o: any; onClose: () => void; onDone: () => void }) {
   const left = Math.max(0, o.qty - o.producedQty - o.scrapQty);
-  const [f, setF] = useState<any>({ qty: left, scrapQty: 0, scrapKind: "NORMAL", lotNo: o.lotNo || "", expiryDate: o.expiryDate || "", backflush: true, date: today(), final: false });
+  const [f, setF] = useState<any>({ qty: left, scrapQty: 0, scrapKind: "NORMAL", lotNo: o.lotNo || "", expiryDate: o.expiryDate || "", backflush: true, date: today(), final: false, serialize: false, serialText: "" });
   const { run, busy } = useAction();
   const willFinish = f.final || Number(f.qty || 0) + Number(f.scrapQty || 0) + o.producedQty + o.scrapQty >= o.qty - 1e-9;
   return (
-    <Modal title={`تسجيل إنتاج — ${o.number}`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary" data-produce-save disabled={busy || !(Number(f.qty) + Number(f.scrapQty) > 0)} onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/produce`, { body: { ...f, qty: Number(f.qty) || 0, scrapQty: Number(f.scrapQty) || 0 } }); onDone(); }, willFinish ? "اكتمل الأمر واستُلم الإنتاج" : "استُلم الإنتاج")}>{willFinish ? "استلام وإنهاء الأمر" : "استلام"}</button></>}>
+    <Modal title={`تسجيل إنتاج — ${o.number}`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary" data-produce-save disabled={busy || !(Number(f.qty) + Number(f.scrapQty) > 0)} onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/produce`, { body: { ...f, qty: Number(f.qty) || 0, scrapQty: Number(f.scrapQty) || 0, serials: f.serialize && f.serialText.trim() ? f.serialText.split(/[\n,،]+/).map((x: string) => x.trim()).filter(Boolean) : undefined } }); onDone(); }, willFinish ? "اكتمل الأمر واستُلم الإنتاج" : "استُلم الإنتاج")}>{willFinish ? "استلام وإنهاء الأمر" : "استلام"}</button></>}>
       <div className="grid c2">
         <Field label={`الكمية السليمة (${o.unit || ""})`} hint={`المتبقي ${q3(left)}`}><NumInput value={f.qty} onChange={(e: any) => setF({ ...f, qty: e.target.value })} data-produce-qty /></Field>
         <Field label="التاريخ"><Input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
@@ -287,6 +289,8 @@ function ProduceModal({ o, onClose, onDone }: { o: any; onClose: () => void; onD
         <Field label="رقم الدفعة"><Input value={f.lotNo} onChange={(e) => setF({ ...f, lotNo: e.target.value })} placeholder={o.number} /></Field>
         <Field label="تاريخ الانتهاء (إن وجد)"><Input type="date" value={f.expiryDate} onChange={(e) => setF({ ...f, expiryDate: e.target.value })} /></Field>
       </div>
+      <label className="check mt"><input type="checkbox" checked={f.serialize} onChange={(e) => setF({ ...f, serialize: e.target.checked })} data-produce-serial /> رقم تسلسلي لكل قطعة (تتبّع القطعة حتى العميل)</label>
+      {f.serialize && <Field label="الأرقام التسلسلية" hint={`فارغ = تلقائياً ${f.lotNo || o.number}-001 …؛ أو سطر لكل قطعة (${q3(f.qty)} قطعة)`}><textarea className="input" rows={3} value={f.serialText} onChange={(e) => setF({ ...f, serialText: e.target.value })} dir="ltr" /></Field>}
       <label className="check mt"><input type="checkbox" checked={f.backflush} onChange={(e) => setF({ ...f, backflush: e.target.checked })} /> صرف تلقائي لما يحتاجه هذا الإنتاج من مواد لم تُصرف{willFinish ? "، وتسجيل المراحل غير المنتهية بزمنها المعياري" : ""}</label>
       {!willFinish && <label className="check"><input type="checkbox" checked={f.final} onChange={(e) => setF({ ...f, final: e.target.checked })} /> هذا آخر استلام (إنهاء الأمر بكمية أقل)</label>}
       <div className={"alert small mt " + (willFinish ? "info" : "")}>{willFinish ? "الاستلام الأخير: يدخل المنتج المخزن بكل ما بقي من تكلفة في الأمر (التكلفة الفعلية)، وتُستلم المنتجات الثانوية بأنصبتها، ويُغلق الأمر." : `استلام جزئي بالتكلفة المعيارية ${money(o.stdUnitCost)} للوحدة؛ الفرق يُسوّى في الاستلام الأخير.`}</div>
@@ -298,17 +302,39 @@ function OpModal({ o, op, onClose, onDone }: { o: any; op: any; onClose: () => v
   const running = op.status === "RUNNING" && op.startedAt;
   const elapsed = running ? Math.round(((Date.now() - Date.parse(op.startedAt)) / 60000) * 10) / 10 : null;
   const [f, setF] = useState<any>({ minutes: elapsed ?? Math.max(0, Math.round((op.plannedMin - op.actualMin) * 100) / 100), qcResult: "", qcNote: "", operator: op.operator || "" });
+  const [vals, setVals] = useState<Record<string, any>>({});
+  const checks: any[] = op.checks || [];
+  const inRange = (c: any, v: any) => (v === "" || v === undefined ? null : c.min === null && c.max === null ? !/^(لا|no)$/i.test(String(v).trim()) : (c.min === null || Number(v) >= c.min) && (c.max === null || Number(v) <= c.max));
+  const allMeasured = checks.every((c) => vals[c.name] !== undefined && vals[c.name] !== "");
   const { run, busy } = useAction();
   const cost = (Number(f.minutes) / 60) * (op.rateHour + op.overheadHour);
   return (
     <Modal title={`إنهاء مرحلة «${op.name}» — ${o.number}`} onClose={onClose} narrow footer={<><button className="btn" onClick={onClose}>إلغاء</button>
       <button className="btn" disabled={busy} data-op-time onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/ops/${op.seq}`, { body: { action: "time", minutes: Number(f.minutes), operator: f.operator } }); onDone(); }, "سُجّل الوقت")}>تسجيل وقت فقط</button>
-      <button className="btn primary" data-op-save disabled={busy || (op.qc && !f.qcResult)} onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/ops/${op.seq}`, { body: { action: "finish", ...f, minutes: Number(f.minutes) } }); onDone(); }, "انتهت المرحلة")}>إنهاء المرحلة</button></>}>
+      <button className="btn primary" data-op-save disabled={busy || (op.qc && (checks.length ? !allMeasured : !f.qcResult))} onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/ops/${op.seq}`, { body: { action: "finish", ...f, minutes: Number(f.minutes), qcResults: checks.length ? checks.map((c) => ({ name: c.name, value: vals[c.name] })) : undefined } }); onDone(); }, "انتهت المرحلة")}>إنهاء المرحلة</button></>}>
       <Field label="الدقائق الفعلية" hint={`المخطط ${mins(op.plannedMin)}، المسجّل سابقاً ${mins(op.actualMin)}${elapsed !== null ? ` · منذ البدء ${mins(elapsed)}` : ""}`}><NumInput value={f.minutes} onChange={(e: any) => setF({ ...f, minutes: e.target.value })} data-op-minutes /></Field>
       <Field label="المشغّل"><Input value={f.operator} onChange={(e) => setF({ ...f, operator: e.target.value })} /></Field>
-      {op.qc && <><Field label="نتيجة فحص الجودة"><div className="seg" data-op-qc><button className={f.qcResult === "PASS" ? "on" : ""} onClick={() => setF({ ...f, qcResult: "PASS" })}>✓ ناجح</button><button className={f.qcResult === "FAIL" ? "on" : ""} onClick={() => setF({ ...f, qcResult: "FAIL" })}>✗ غير مطابق</button></div></Field>
-        <Field label="ملاحظة الفحص"><Input value={f.qcNote} onChange={(e) => setF({ ...f, qcNote: e.target.value })} /></Field></>}
+      {op.qc && checks.length > 0 && <div data-op-criteria><div className="small mt"><b>معايير الفحص</b></div><table className="tbl compact"><tbody>{checks.map((c) => { const r = inRange(c, vals[c.name]); return <tr key={c.name}><td>{c.name}{c.min !== null || c.max !== null ? <div className="small muted">{c.min ?? "—"} إلى {c.max ?? "—"} {c.unit || ""}</div> : <div className="small muted">نعم / لا</div>}</td><td style={{ width: 120 }}>{c.min !== null || c.max !== null ? <NumInput value={vals[c.name] ?? ""} onChange={(e: any) => setVals({ ...vals, [c.name]: e.target.value })} data-crit={c.name} /> : <Select value={vals[c.name] ?? ""} onChange={(e) => setVals({ ...vals, [c.name]: e.target.value })} data-crit={c.name}><option value="">—</option><option value="نعم">نعم</option><option value="لا">لا</option></Select>}</td><td style={{ width: 40 }}>{r === null ? "" : r ? <span className="pos-val">✓</span> : <span className="neg-val">✗</span>}</td></tr>; })}</tbody></table>
+        {allMeasured && <div className={"alert small mt " + (checks.every((c) => inRange(c, vals[c.name])) ? "info" : "warn")}>{checks.every((c) => inRange(c, vals[c.name])) ? "كل المعايير ضمن الحدود — الفحص ناجح" : "معيار خارج حدوده — الفحص «غير مطابق» وتُعاد المرحلة"}</div>}</div>}
+      {op.qc && !checks.length && <><Field label="نتيجة فحص الجودة"><div className="seg" data-op-qc><button className={f.qcResult === "PASS" ? "on" : ""} onClick={() => setF({ ...f, qcResult: "PASS" })}>✓ ناجح</button><button className={f.qcResult === "FAIL" ? "on" : ""} onClick={() => setF({ ...f, qcResult: "FAIL" })}>✗ غير مطابق</button></div></Field>
+        </>}
+      {op.qc && <Field label="ملاحظة الفحص"><Input value={f.qcNote} onChange={(e) => setF({ ...f, qcNote: e.target.value })} /></Field>}
       <div className="small muted">التكلفة: {mins(f.minutes)} × {money(op.rateHour + op.overheadHour)} للساعة = <b>{money(cost)}</b>{op.rateUnit > 0 ? ` + ${money(op.rateUnit)} لكل وحدة` : ""}</div>
+    </Modal>
+  );
+}
+
+function SubcontractModal({ o, op, onClose, onDone }: { o: any; op: any; onClose: () => void; onDone: () => void }) {
+  const [sup, setSup] = useState<any>(null);
+  const [f, setF] = useState<any>({ amount: "", ref: "", qty: o.qty, taxCode: "S", finish: true, date: today() });
+  const { run, busy } = useAction();
+  return (
+    <Modal title={`فاتورة الورشة الخارجية — ${op.name} (${o.number})`} onClose={onClose} narrow footer={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn primary" data-sub-save disabled={busy || !sup || !(Number(f.amount) > 0)} onClick={() => run(async () => { await api(`/mfg/orders/${o.id}/ops/${op.seq}`, { body: { action: "subcontract", supplierId: sup.id, ...f, amount: Number(f.amount), qty: Number(f.qty) } }); onDone(); }, "رُحّلت فاتورة الورشة وأضيفت تكلفتها للأمر")}>ترحيل الفاتورة</button></>}>
+      <Field label="الورشة (المورد)"><Picker value={sup} onChange={setSup} fetcher={partnerFetcher("SUPPLIER")} label={(p: any) => p.name} placeholder="ابحث عن المورد" /></Field>
+      <div className="grid c2"><Field label="المبلغ قبل الضريبة"><NumInput value={f.amount} onChange={(e: any) => setF({ ...f, amount: e.target.value })} data-sub-amount /></Field><Field label="الكمية المنفذة"><NumInput value={f.qty} onChange={(e: any) => setF({ ...f, qty: e.target.value })} /></Field>
+        <Field label="رقم فاتورة المورد"><Input value={f.ref} onChange={(e) => setF({ ...f, ref: e.target.value })} /></Field><Field label="الضريبة"><Select value={f.taxCode} onChange={(e) => setF({ ...f, taxCode: e.target.value })}><option value="S">خاضعة</option><option value="Z">صفرية</option><option value="E">معفاة</option><option value="O">خارج النطاق</option></Select></Field></div>
+      <label className="check"><input type="checkbox" checked={f.finish} onChange={(e) => setF({ ...f, finish: e.target.checked })} /> إنهاء المرحلة بعد الفاتورة{op.qc ? " (المرحلة فيها فحص جودة: أنهِها بنتيجته)" : ""}</label>
+      <div className="small muted mt">تُرحَّل فاتورة مشتريات للمورد: من ح/ إنتاج تحت التشغيل (+ ضريبة المدخلات) إلى ح/ المورد، فتدخل تكلفة الورشة في تكلفة المنتج بالمبلغ المفوتر.</div>
     </Modal>
   );
 }
@@ -341,11 +367,11 @@ export function MfgBomsPage() {
         {can("mfg.write") && <button className="btn primary" data-bom-new onClick={() => setEdit({})}>＋ قائمة مواد</button>}
       </div><div className="small muted mt">قائمة المواد تبيّن من أي شيء يُصنع المنتج وكيف: المكونات أو الخلطة بكمياتها ونسبة الهالك، والمراحل على مراكز العمل، والمنتجات الثانوية. المكوّن الذي له قائمة مواد يُصنَّع بدوره (مستويات متعددة)، و«الطقم» يُفكّ إلى مكوناته داخل المنتج.</div></div>
       <div className="card">{!data ? <Loading /> : !rows.length ? <Empty text="لا قوائم مواد بعد" /> : <div className="table-wrap"><table className="tbl" data-bom-table>
-        <thead><tr><th>الرمز</th><th>المنتج</th><th>النوع</th><th className="n">حجم الدفعة</th><th className="n">المكونات</th><th className="n">المراحل</th><th className="n">المستويات</th><th className="n">مواد / وحدة</th><th className="n">مراحل / وحدة</th><th className="n">تكلفة الوحدة</th><th className="n">أوامر</th></tr></thead>
+        <thead><tr><th>الرمز</th><th>المنتج</th><th>النوع</th><th className="n">حجم الدفعة</th><th className="n">المكونات</th><th className="n">المراحل</th><th className="n">المستويات</th><th className="n">مواد / وحدة</th><th className="n">مراحل / وحدة</th><th className="n">تكلفة الوحدة</th><th className="n">المعيار المجمّد</th><th className="n">أوامر</th></tr></thead>
         <tbody>{rows.map((b) => <tr key={b.id} className={"clickable" + (b.isActive ? "" : " muted")} data-bom-row={b.sku} onClick={() => setEdit(b)}>
           <td className="num">{b.code}{b.isDefault && <span className="badge teal" style={{ marginInlineStart: 4 }}>افتراضية</span>}{!b.isActive && <span className="badge gray" style={{ marginInlineStart: 4 }}>موقوفة</span>}</td>
           <td><b>{b.productName}</b> <span className="small muted">{b.sku}</span></td><td>{b.kind === "KIT" ? "طقم" : "تصنيع"}</td><td className="n">{q3(b.outputQty)} {b.unit}</td><td className="n">{b.components}</td><td className="n">{b.stages}</td><td className="n">{b.levels}</td>
-          <td className="n"><Money v={b.material} /></td><td className="n"><Money v={b.conversion} /></td><td className="n"><b><Money v={b.unitCost} /></b></td><td className="n">{b.orders || "—"}</td></tr>)}</tbody></table></div>}</div>
+          <td className="n"><Money v={b.material} /></td><td className="n"><Money v={b.conversion} /></td><td className="n"><b><Money v={b.unitCost} /></b></td><td className="n">{b.frozenCost !== null ? <>{money(b.frozenCost)}{b.drift ? <div className={"small " + (b.drift > 0 ? "neg-val" : "pos-val")}>{b.drift > 0 ? "+" : ""}{b.drift}%</div> : null}</> : "—"}</td><td className="n">{b.orders || "—"}</td></tr>)}</tbody></table></div>}</div>
       {edit && <BomEditor init={edit} onClose={() => setEdit(null)} onSaved={() => { reload(); }} />}
     </div>
   );
@@ -363,6 +389,7 @@ function BomEditor({ init, onClose, onSaved }: { init: any; onClose: () => void;
   const [ops, setOps] = useState<any[]>([]);
   const [bys, setBys] = useState<any[]>([]);
   const [tab, setTab] = useState("lines");
+  const [chk, setChk] = useState<number | null>(null);
   const { run, busy } = useAction();
   useEffect(() => {
     const b = full.data; if (!b) return;
@@ -374,7 +401,7 @@ function BomEditor({ init, onClose, onSaved }: { init: any; onClose: () => void;
     const bl = new Map(b.cost.byproducts.map((x: any) => [x.productId, x]));
     setBys(b.byproducts.map((x: any) => { const c: any = bl.get(x.productId) || {}; return { prod: { id: x.productId, name: c.name, sku: c.sku }, qty: x.qty, sharePct: x.sharePct }; }));
   }, [full.data]);
-  const body = () => ({ productId: prod?.id, ...f, outputQty: Number(f.outputQty), lotQty: Number(f.lotQty) > 0 ? Number(f.lotQty) : null, lines: lines.filter((l) => l.comp).map((l) => ({ componentId: l.comp.id, qty: Number(l.qty), wastePct: Number(l.wastePct) || 0, opSeq: l.opSeq === "" ? null : Number(l.opSeq), note: l.note || undefined })), ops: ops.map((o, i) => ({ seq: Number(o.seq) || (i + 1) * 10, name: o.name, workCenterId: o.workCenterId, setupMin: Number(o.setupMin) || 0, runMin: Number(o.runMin) || 0, qc: !!o.qc, instructions: o.instructions || undefined })), byproducts: bys.filter((x) => x.prod).map((x) => ({ productId: x.prod.id, qty: Number(x.qty), sharePct: Number(x.sharePct) || 0 })) });
+  const body = () => ({ productId: prod?.id, ...f, outputQty: Number(f.outputQty), lotQty: Number(f.lotQty) > 0 ? Number(f.lotQty) : null, lines: lines.filter((l) => l.comp).map((l) => ({ componentId: l.comp.id, qty: Number(l.qty), wastePct: Number(l.wastePct) || 0, opSeq: l.opSeq === "" ? null : Number(l.opSeq), note: l.note || undefined })), ops: ops.map((o, i) => ({ seq: Number(o.seq) || (i + 1) * 10, name: o.name, workCenterId: o.workCenterId, setupMin: Number(o.setupMin) || 0, runMin: Number(o.runMin) || 0, qc: !!o.qc, checks: o.qc ? (o.checks || []).filter((c: any) => String(c.name || "").trim()) : [], instructions: o.instructions || undefined })), byproducts: bys.filter((x) => x.prod).map((x) => ({ productId: x.prod.id, qty: Number(x.qty), sharePct: Number(x.sharePct) || 0 })) });
   const save = (asNew: boolean) => run(async () => { const r = await api(asNew || !id ? "/mfg/boms" : `/mfg/boms/${id}`, { method: asNew || !id ? "POST" : "PUT", body: { ...body(), ...(asNew ? { isDefault: true } : {}) } }); setId(r.id); full.reload(); onSaved(); }, asNew ? "حُفظ إصدار جديد" : "حُفظت قائمة المواد");
   const cost = full.data?.cost;
   const cl = new Map((cost?.lines || []).map((l: any) => [l.componentId, l]));
@@ -413,10 +440,16 @@ function BomEditor({ init, onClose, onSaved }: { init: any; onClose: () => void;
           <td><Select value={o.workCenterId || ""} onChange={(e) => upd(setOps, ops, i, { workCenterId: e.target.value })} data-op-wc><option value="">اختر</option>{wcList.map((w: any) => <option key={w.id} value={w.id}>{w.name} — {money(w.costHour)}/س</option>)}</Select></td>
           <td><NumInput value={o.setupMin || 0} onChange={(e: any) => upd(setOps, ops, i, { setupMin: e.target.value })} /></td>
           <td><NumInput value={o.runMin || 0} onChange={(e: any) => upd(setOps, ops, i, { runMin: e.target.value })} data-op-run /></td>
-          <td><input type="checkbox" checked={!!o.qc} onChange={(e) => upd(setOps, ops, i, { qc: e.target.checked })} aria-label="فحص جودة" /></td>
+          <td><input type="checkbox" checked={!!o.qc} onChange={(e) => upd(setOps, ops, i, { qc: e.target.checked })} aria-label="فحص جودة" />{o.qc && <button className="btn sm ghost" data-op-checks onClick={() => setChk(i)}>معايير ({(o.checks || []).length})</button>}</td>
           <td><Input value={o.instructions || ""} onChange={(e) => upd(setOps, ops, i, { instructions: e.target.value })} /></td>
           <td><button className="btn sm ghost danger" onClick={() => setOps(ops.filter((_, j) => j !== i))} aria-label="حذف المرحلة">✕</button></td></tr>)}</tbody></table></div>
         <div className="row mt" style={{ gap: 8 }}><button className="btn sm" data-bom-add-op onClick={() => setOps([...ops, { seq: (ops.length + 1) * 10, name: "", workCenterId: wcList[0]?.id || "", setupMin: 0, runMin: 0, qc: false }])}>＋ مرحلة</button>{!wcList.length && <span className="small">لا مراكز عمل — <Link to="/mfg/work-centers">أضفها أولاً</Link></span>}</div>
+        {chk !== null && ops[chk] && <div className="card mt" data-checks-editor><div className="card-h"><h3>معايير فحص «{ops[chk].name || "المرحلة"}»</h3><button className="btn sm" onClick={() => setChk(null)}>تم</button></div>
+          <table className="tbl compact"><thead><tr><th>المعيار</th><th className="n">الحد الأدنى</th><th className="n">الحد الأعلى</th><th>الوحدة</th><th /></tr></thead><tbody>{(ops[chk].checks || []).map((c: any, j: number) => { const setC = (patch: any) => upd(setOps, ops, chk, { checks: ops[chk].checks.map((x: any, k: number) => (k === j ? { ...x, ...patch } : x)) }); return <tr key={j} data-check-row={j}>
+            <td><Input value={c.name || ""} onChange={(e) => setC({ name: e.target.value })} placeholder="القياس، اللون، الحموضة…" data-check-name /></td><td><NumInput value={c.min ?? ""} onChange={(e: any) => setC({ min: e.target.value })} data-check-min /></td><td><NumInput value={c.max ?? ""} onChange={(e: any) => setC({ max: e.target.value })} data-check-max /></td><td><Input value={c.unit || ""} onChange={(e) => setC({ unit: e.target.value })} style={{ width: 80 }} /></td>
+            <td><button className="btn sm ghost danger" onClick={() => upd(setOps, ops, chk, { checks: ops[chk].checks.filter((_: any, k: number) => k !== j) })} aria-label="حذف">✕</button></td></tr>; })}</tbody></table>
+          <button className="btn sm mt" data-check-add onClick={() => upd(setOps, ops, chk, { checks: [...(ops[chk].checks || []), { name: "", min: "", max: "", unit: "" }] })}>＋ معيار</button>
+          <div className="small muted mt">معيار بحدين رقميين يُقاس عند إنهاء المرحلة، وخروج أي قيمة عن حدودها يجعل الفحص «غير مطابق» تلقائياً. معيار بلا حدود يُجاب بنعم/لا.</div></div>}
         <div className="small muted mt">زمن التجهيز مرة لكل أمر، وزمن الوحدة يُضرب في الكمية. تكلفة المرحلة = الزمن × تكلفة ساعة مركز العمل (+ تكلفة الوحدة للورش الخارجية).</div></>}
       {tab === "by" && <><div className="table-wrap"><table className="tbl compact"><thead><tr><th>المنتج الثانوي</th><th className="n" style={{ width: 110 }}>الكمية للدفعة</th><th className="n" style={{ width: 120 }}>نصيبه من التكلفة %</th><th /></tr></thead>
         <tbody>{bys.map((x, i) => <tr key={i}><td><Picker value={x.prod} onChange={(p) => upd(setBys, bys, i, { prod: p })} fetcher={stockFetcher} label={(p: any) => p.name} placeholder="نشارة، قصاصات، منتج مرافق…" /></td><td><NumInput value={x.qty} onChange={(e: any) => upd(setBys, bys, i, { qty: e.target.value })} /></td><td><NumInput value={x.sharePct} onChange={(e: any) => upd(setBys, bys, i, { sharePct: e.target.value })} /></td><td><button className="btn sm ghost danger" onClick={() => setBys(bys.filter((_, j) => j !== i))} aria-label="حذف">✕</button></td></tr>)}</tbody></table></div>
@@ -426,8 +459,11 @@ function BomEditor({ init, onClose, onSaved }: { init: any; onClose: () => void;
         <div><table className="tbl compact"><tbody>
           <tr><td>المواد للوحدة</td><td className="n">{money(cost.material)}</td></tr><tr><td>المراحل للوحدة</td><td className="n">{money(cost.conversion)}</td></tr>
           {cost.byproductShare > 0 && <tr><td>نصيب المنتجات الثانوية</td><td className="n">{cost.byproductShare}%</td></tr>}
-          <tr className="total"><td>التكلفة المعيارية للوحدة</td><td className="n" data-bom-unit>{money(cost.unitCost)}</td></tr><tr><td>تكلفة الدفعة ({q3(cost.outputQty)})</td><td className="n">{money(cost.batchCost)}</td></tr></tbody></table>
+          <tr className="total"><td>التكلفة الحالية للوحدة</td><td className="n" data-bom-unit>{money(cost.unitCost)}</td></tr>
+          <tr><td>التكلفة المعيارية المجمّدة</td><td className="n" data-bom-frozen>{full.data.frozenCost !== null ? <>{money(full.data.frozenCost)} <span className="small muted">({String(full.data.frozenAt).slice(0, 10)})</span></> : "—"}</td></tr><tr><td>تكلفة الدفعة ({q3(cost.outputQty)})</td><td className="n">{money(cost.batchCost)}</td></tr></tbody></table>
           {cost.ops.length > 0 && <table className="tbl compact mt"><thead><tr><th>المرحلة</th><th className="n">دقيقة/وحدة</th><th className="n">تكلفة/وحدة</th></tr></thead><tbody>{cost.ops.map((o: any) => <tr key={o.seq}><td>{o.name} <span className="small muted">{o.workCenter}</span></td><td className="n">{o.minPerUnit}</td><td className="n">{money(o.perUnit)}</td></tr>)}</tbody></table>}
+          {W && <div className="row mt" style={{ gap: 6 }}><button className="btn sm" disabled={busy} data-bom-freeze onClick={() => run(async () => { await api(`/mfg/boms/${id}/freeze`, { body: {} }); full.reload(); onSaved(); }, "جُمّدت التكلفة المعيارية")}>{full.data.frozenCost !== null ? "تحديث التجميد بالتكلفة الحالية" : "تجميد التكلفة المعيارية"}</button>{full.data.frozenCost !== null && <button className="btn sm ghost" disabled={busy} onClick={() => run(async () => { await api(`/mfg/boms/${id}/freeze`, { body: { release: true } }); full.reload(); onSaved(); }, "أُلغي التجميد")}>إلغاء التجميد</button>}</div>}
+          <div className="small muted mt">التجميد يثبّت المعيار (كما يفعل SAP وDynamics): الأوامر والاستلام الجزئي تُقاس عليه، والانحراف يُظهر أثر تغيّر الأسعار والكفاءة.</div>
           {full.data.usedIn.length > 0 && <div className="small mt">يدخل في: {full.data.usedIn.map((u: any) => u.name).join("، ")}</div>}
           {full.data.versions.length > 1 && <div className="small mt">الإصدارات: {full.data.versions.map((v: any) => <button key={v.id} className={"chip" + (v.id === id ? " on" : "")} onClick={() => setId(v.id)}>V{v.version}{v.isDefault ? " ✓" : ""}</button>)}</div>}</div>
         <div><h4 style={{ marginTop: 0 }}>الهيكل لدفعة واحدة</h4><table className="tbl compact"><tbody>{flat(full.data.tree).map((r: any, i: number) => <tr key={i}><td style={{ paddingInlineStart: 8 + r.d * 18 }}>{r.d ? "↳ " : ""}{r.name}{r.kind && <span className="badge teal" style={{ marginInlineStart: 4 }}>{r.kind === "KIT" ? "طقم" : "يُصنَّع"}</span>}</td><td className="n">{q3(r.qty)} <span className="small muted">{r.unit}</span></td><td className="n">{money(r.unitCost)}</td></tr>)}</tbody></table></div>
@@ -620,7 +656,7 @@ export function MfgReportsPage() {
           <div className="fc-kpi"><span>انحرافات الإقفال</span><b className="num">{money(data.totals.closeVariance)}</b></div>
           <div className={"fc-kpi" + (data.wip.match ? " good" : " high")}><span>تحت التشغيل الآن</span><b className="num">{money(data.wip.total)}</b><small>{data.wip.match ? "مطابق للأستاذ" : `الأستاذ ${money(data.wip.ledger)}`}</small></div>
         </div>
-        <Tabs tabs={[{ key: "orders", label: "الأوامر المنتهية" }, { key: "production", label: "الإنتاج حسب المنتج" }, { key: "materials", label: "المواد المستهلكة" }, { key: "centers", label: "مراكز العمل" }, { key: "scrap", label: "التالف" }, { key: "wip", label: "تحت التشغيل" }]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ key: "orders", label: "الأوامر المنتهية" }, { key: "production", label: "الإنتاج حسب المنتج" }, { key: "materials", label: "المواد المستهلكة" }, { key: "centers", label: "مراكز العمل" }, { key: "scrap", label: "التالف" }, { key: "operators", label: "ساعات العمال" }, { key: "outside", label: "الورش الخارجية" }, { key: "wip", label: "تحت التشغيل" }]} value={tab} onChange={setTab} />
         {tab === "orders" && <div className="card"><div className="card-h"><h3>الأوامر المنتهية والانحرافات</h3><ExportBtn rows={() => data.orders.map((o: any) => ({ "الأمر": o.number, "المنتج": o.productName, "المطلوب": o.qty, "الكمية المنتجة": o.producedQty, "التالف": o.scrapQty, "المواد": o.material, "المراحل": o.conversion, "المستلم": o.received, "المعيار": o.std, "الانحراف": o.costVariance, "تكلفة الوحدة": o.unitCost, "المعيارية": o.stdUnitCost, "نسبة السليم %": o.yieldPct }))} name="أوامر التصنيع المنتهية" /></div>
           {!data.orders.length ? <Empty text="لا أوامر انتهت في الفترة" /> : <div className="table-wrap"><table className="tbl compact" data-rep-orders><thead><tr><th>الأمر</th><th>المنتج</th><th className="n">المنتج / المطلوب</th><th className="n">التالف</th><th className="n">المواد</th><th className="n">المراحل</th><th className="n">قيمة المنتج</th><th className="n">الوحدة</th><th className="n">المعيارية</th><th className="n">الانحراف</th><th className="n">السليم %</th></tr></thead>
             <tbody>{data.orders.map((o: any) => <tr key={o.id} className="clickable" onClick={() => nav(`/mfg/orders/${o.id}`)}><td className="num">{o.number}</td><td>{o.productName}</td><td className="n">{q3(o.producedQty)} / {q3(o.qty)}</td><td className="n">{o.scrapQty ? q3(o.scrapQty) : "—"}</td><td className="n"><Money v={o.material} /></td><td className="n"><Money v={o.conversion} /></td><td className="n"><Money v={o.received} /></td><td className="n">{o.unitCost !== null ? money(o.unitCost) : "—"}</td><td className="n">{money(o.stdUnitCost)}</td><td className={"n" + (o.costVariance > 0 ? " neg-val" : "")}>{o.costVariance !== null ? money(o.costVariance) : "—"}</td><td className="n">{o.yieldPct ?? "—"}</td></tr>)}</tbody></table></div>}</div>}
@@ -628,6 +664,8 @@ export function MfgReportsPage() {
         {tab === "materials" && <div className="card"><div className="table-wrap"><table className="tbl compact"><thead><tr><th>المادة</th><th className="n">الصافي المصروف</th><th className="n">القيمة</th></tr></thead><tbody>{data.materials.map((p: any) => <tr key={p.productId}><td>{p.name} <span className="small muted">{p.sku}</span></td><td className="n">{q3(p.qty)} {p.unit}</td><td className="n"><Money v={p.value} /></td></tr>)}</tbody></table>{!data.materials.length && <Empty text="لا مواد صُرفت في الفترة" />}</div></div>}
         {tab === "centers" && <div className="card"><div className="table-wrap"><table className="tbl compact" data-rep-centers><thead><tr><th>مركز العمل</th><th className="n">الساعات</th><th className="n">الطاقة في الفترة</th><th style={{ width: "28%" }}>الاستغلال</th><th className="n">التكلفة المحمّلة</th></tr></thead><tbody>{data.centers.map((w: any) => <tr key={w.id}><td><b>{w.name}</b></td><td className="n">{q3(w.hours)}</td><td className="n">{q3(w.capacityHours)}</td><td><div className="row" style={{ gap: 6 }}><Bar pct={w.utilizationPct} /><span className="small num">{w.utilizationPct}%</span></div></td><td className="n"><Money v={w.value} /></td></tr>)}</tbody></table></div></div>}
         {tab === "scrap" && <div className="card"><div className="table-wrap"><table className="tbl compact"><thead><tr><th>التاريخ</th><th>الأمر</th><th>المنتج</th><th className="n">الكمية</th><th className="n">القيمة المحمّلة</th><th>النوع</th></tr></thead><tbody>{data.scrap.map((s: any, i: number) => <tr key={i}><td className="small">{s.date}</td><td className="num">{s.number}</td><td>{s.name}</td><td className="n">{q3(s.qty)}</td><td className="n"><Money v={s.value} /></td><td className="small">{s.notes}</td></tr>)}</tbody></table>{!data.scrap.length && <Empty text="لا تالف في الفترة" />}</div></div>}
+        {tab === "operators" && <div className="card"><div className="table-wrap"><table className="tbl compact" data-rep-operators><thead><tr><th>المشغّل</th><th className="n">الساعات</th><th className="n">أوامر</th><th className="n">التكلفة المحمّلة</th></tr></thead><tbody>{data.operators.map((x: any) => <tr key={x.operator}><td><b>{x.operator}</b></td><td className="n">{q3(x.hours)}</td><td className="n">{x.orders}</td><td className="n"><Money v={x.value} /></td></tr>)}</tbody></table>{!data.operators.length && <Empty text="لا وقت مسجّل في الفترة" />}</div><div className="small muted mt">من وقت المراحل المسجّل باسم المشغّل في الأمر أو شاشة الورشة.</div></div>}
+        {tab === "outside" && <div className="card"><div className="table-wrap"><table className="tbl compact"><thead><tr><th>التاريخ</th><th>الأمر</th><th>الورشة والفاتورة</th><th className="n">المبلغ</th></tr></thead><tbody>{data.outside.map((x: any, i: number) => <tr key={i}><td className="small">{x.date}</td><td className="num">{x.number}</td><td>{x.invoiceId ? <Link to={`/doc/${x.invoiceId}`}>{x.notes}</Link> : x.notes}</td><td className="n"><Money v={x.value} /></td></tr>)}</tbody></table>{!data.outside.length && <Empty text="لا فواتير ورش خارجية في الفترة" />}</div></div>}
         {tab === "wip" && <div className="card"><div className={"alert small " + (data.wip.match ? "info" : "warn")}>مجموع أوامر التشغيل المفتوحة {money(data.wip.total)} — رصيد حساب «إنتاج تحت التشغيل» {money(data.wip.ledger)}{data.wip.match ? " ✓ مطابق" : " — غير مطابق"}</div>
           <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الأمر</th><th>المنتج</th><th>الحالة</th><th className="n">المواد</th><th className="n">المراحل</th><th className="n">المستلم</th><th className="n">تحت التشغيل</th></tr></thead><tbody>{data.wip.orders.map((o: any) => <tr key={o.id} className="clickable" onClick={() => nav(`/mfg/orders/${o.id}`)}><td className="num">{o.number}</td><td>{o.name}</td><td><MoBadge s={o.status} /></td><td className="n"><Money v={o.material} /></td><td className="n"><Money v={o.conversion} /></td><td className="n"><Money v={o.received} /></td><td className="n"><b><Money v={o.wip} /></b></td></tr>)}</tbody></table></div></div>}
       </>}
@@ -635,3 +673,30 @@ export function MfgReportsPage() {
   );
 }
 void useMemo;
+
+// ───────────────────────── lot / serial traceability ─────────────────────────
+export function MfgTracePage() {
+  const [q, setQ] = useState(() => new URLSearchParams(location.search).get("lot") || "");
+  const [lot, setLot] = useState(q);
+  const { data, error } = useFetch<any>(lot ? `/mfg/trace?lot=${encodeURIComponent(lot)}` : null, [lot]);
+  return (
+    <div className="grid" data-trace>
+      <div className="card"><div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <Field label="رقم الدفعة أو الرقم التسلسلي أو رقم أمر التصنيع"><Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") setLot(q.trim()); }} dir="ltr" style={{ minWidth: 260 }} data-trace-q /></Field>
+        <button className="btn primary" data-trace-go onClick={() => setLot(q.trim())}>تتبّع</button>
+      </div><div className="small muted mt">للخلف: من أي أمر تصنيع خرجت الدفعة، ومن شغّله، ونتائج فحص الجودة، ودفعات المكونات ومورديها. للأمام: أوامر التصنيع التي استهلكتها، والعملاء الذين اشتروها، وما بقي منها في المخزون. يفيد عند سحب منتج من السوق أو شكوى جودة.</div></div>
+      {error && <div className="card"><Empty text={error} /></div>}
+      {data && !data.found && <div className="card"><Empty text={`لا أثر للدفعة ${data.lot}`} /></div>}
+      {data?.found && <>
+        {data.origins.map((og: any) => <div className="card" key={og.order.id} data-trace-origin><div className="card-h"><h3>صُنعت في <Link to={`/mfg/orders/${og.order.id}`} className="num">{og.order.number}</Link> — {og.order.productName}</h3><MoBadge s={og.order.status} /></div>
+          <div className="small">التاريخ {og.order.date} · أُنتج {q3(og.order.producedQty)} من {q3(og.order.qty)}{og.operators.length ? ` · المشغّلون: ${og.operators.join("، ")}` : ""}</div>
+          {og.qc.length > 0 && <div className="small mt">فحص الجودة: {og.qc.map((x: any) => `${x.stage}: ${x.result === "PASS" ? "ناجح" : x.result === "FAIL" ? "غير مطابق" : "—"}${x.results ? ` (${x.results.map((r: any) => `${r.name} ${r.value}`).join("، ")})` : ""}`).join(" · ")}</div>}
+          <div className="table-wrap mt"><table className="tbl compact" data-trace-components><thead><tr><th>المكوّن</th><th className="n">الكمية</th><th>دفعاته</th><th>المورد (فاتورة الشراء)</th></tr></thead>
+            <tbody>{og.components.map((c: any, i: number) => <tr key={i}><td>{c.name}</td><td className="n">{q3(c.qty)} {c.unit}</td><td className="small num">{c.lots.map((l: any) => <Link key={l.lotNo} to={`/mfg/trace?lot=${encodeURIComponent(l.lotNo)}`} onClick={() => { setQ(l.lotNo); setLot(l.lotNo); }}>{l.lotNo} </Link>)}{!c.lots.length && "—"}</td><td className="small">{c.suppliers.map((x: any) => `${x.supplier} (${x.invoice})`).join("، ") || "—"}</td></tr>)}</tbody></table></div></div>)}
+        {data.consumedBy.length > 0 && <div className="card"><div className="card-h"><h3>استُهلكت في أوامر التصنيع</h3></div><table className="tbl compact"><tbody>{data.consumedBy.map((x: any) => <tr key={x.id}><td><Link to={`/mfg/orders/${x.id}`} className="num">{x.number}</Link></td><td>{x.product}</td><td className="small">{x.date}</td><td className="n">{q3(x.qty)}</td><td><MoBadge s={x.status} /></td></tr>)}</tbody></table></div>}
+        <div className="card" data-trace-sold><div className="card-h"><h3>بيعت إلى</h3></div>{!data.soldTo.length ? <Empty text="لم يُبع منها شيء" /> : <table className="tbl compact"><tbody>{data.soldTo.map((x: any, i: number) => <tr key={i}><td><Link to={`/doc/${x.id}`} className="num">{x.number}</Link></td><td>{x.customer || "عميل نقدي"}</td><td>{x.product}</td><td className="small">{x.date}</td><td className="n">{q3(x.qty)}</td></tr>)}</tbody></table>}</div>
+        {data.stock.length > 0 && <div className="card"><div className="card-h"><h3>الباقي في المخزون</h3></div><table className="tbl compact"><tbody>{data.stock.map((x: any, i: number) => <tr key={i}><td>{x.product}</td><td>{x.warehouse}</td><td className="n">{q3(x.qty)}</td><td className="small">{x.expiry || ""}</td></tr>)}</tbody></table></div>}
+      </>}
+    </div>
+  );
+}

@@ -22,6 +22,7 @@ import { Db } from "../db/pool";
 import { AppError, bad, conflict, num, r2, r3, isDate, today, addDays } from "../lib/core";
 import { nextNumber, post, assertOpenDate, warehouseBranch } from "../accounting/engine";
 import { stockIn, stockOut } from "../accounting/stock";
+import { saveDraft, postInvoice } from "./invoices";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uid = (x: any) => (UUID.test(String(x || "")) ? String(x) : null);
@@ -32,7 +33,7 @@ export const WC_KINDS = ["MACHINE", "LABOR", "LINE", "ASSEMBLY", "OUTSOURCE"];
 export const MO_OPEN = ["DRAFT", "CONFIRMED", "IN_PROGRESS"];
 
 // ───────────────────────── accounts ─────────────────────────
-async function ensureNear(t: Db, C: string, key: string, near: string, nameAr: string, nameEn: string, from: number) {
+export async function ensureNear(t: Db, C: string, key: string, near: string, nameAr: string, nameEn: string, from: number) {
   const a = await t.maybe(`SELECT id FROM accounts WHERE company_id=$1 AND system_key=$2`, [C, key]);
   if (a) return a.id as string;
   const base = await t.one(`SELECT * FROM accounts WHERE company_id=$1 AND system_key=$2`, [C, near], `الحساب الافتراضي (${near}) غير موجود في دليل الحسابات`);
@@ -136,14 +137,14 @@ function rollup(cx: Cx, bom: any, seen = new Set<string>([bom.productId]), forQt
 // ───────────────────────── bills of materials ─────────────────────────
 const shapeBom = (b: any, cx: Cx) => {
   const p = cx.prods.get(b.productId) || {};
-  return { id: b.id, code: b.code, version: b.version, name: b.name, kind: b.kind, productId: b.productId, sku: p.sku, productName: p.name, unit: p.unit, outputQty: n(b.outputQty), lotQty: b.lotQty === null || b.lotQty === undefined ? null : n(b.lotQty), isDefault: b.isDefault, isActive: b.isActive, notes: b.notes, lines: b.lines || [], ops: b.ops || [], byproducts: b.byproducts || [], isDemo: b.isDemo, updatedAt: b.updatedAt };
+  return { id: b.id, code: b.code, version: b.version, name: b.name, kind: b.kind, productId: b.productId, sku: p.sku, productName: p.name, unit: p.unit, outputQty: n(b.outputQty), lotQty: b.lotQty === null || b.lotQty === undefined ? null : n(b.lotQty), frozenCost: b.frozenCost === null || b.frozenCost === undefined ? null : n(b.frozenCost), frozenAt: b.frozenAt || null, frozenDetail: b.frozenDetail || null, isDefault: b.isDefault, isActive: b.isActive, notes: b.notes, lines: b.lines || [], ops: b.ops || [], byproducts: b.byproducts || [], isDemo: b.isDemo, updatedAt: b.updatedAt };
 };
 export async function listBoms(t: Db, C: string, q: any = {}) {
   const cx = await loadCx(t, C);
   const all = await t.rows(`SELECT * FROM mfg_boms WHERE company_id=$1 ${uid(q.productId) ? "AND product_id=$2" : ""} ORDER BY is_active DESC, code`, uid(q.productId) ? [C, q.productId] : [C]);
   const orders = await t.rows(`SELECT bom_id, COUNT(*)::int c FROM mfg_orders WHERE company_id=$1 GROUP BY bom_id`, [C]);
   const oc = new Map(orders.map((o: any) => [o.bomId, o.c]));
-  return all.map((b: any) => { const r = rollup(cx, b); return { ...shapeBom(b, cx), components: (b.lines || []).length, stages: (b.ops || []).length, unitCost: r.unitCost, material: r.material, conversion: r.conversion, levels: depthOf(cx, b.productId), orders: oc.get(b.id) || 0 }; });
+  return all.map((b: any) => { const r = rollup(cx, b); return { ...shapeBom(b, cx), drift: b.frozenCost !== null && b.frozenCost !== undefined && n(b.frozenCost) > 0 ? r2(((r.unitCost - n(b.frozenCost)) / n(b.frozenCost)) * 100) : null, components: (b.lines || []).length, stages: (b.ops || []).length, unitCost: r.unitCost, material: r.material, conversion: r.conversion, levels: depthOf(cx, b.productId), orders: oc.get(b.id) || 0 }; });
 }
 function depthOf(cx: Cx, pid: string, seen = new Set<string>()): number {
   const b = cx.def.get(pid); if (!b || seen.has(pid)) return 0;
@@ -188,7 +189,12 @@ export async function saveBom(t: Db, C: string, b: any, id?: string, opts: { isD
     if (!wcIds.has(String(o.workCenterId))) throw bad(`اختر مركز عمل نشطاً للمرحلة «${name}»`);
     const setupMin = num(o.setupMin), runMin = num(o.runMin);
     if (setupMin < 0 || runMin < 0) throw bad(`زمن المرحلة «${name}» لا يكون سالباً`);
-    return { seq, name, workCenterId: String(o.workCenterId), setupMin, runMin, qc: !!o.qc, instructions: txt(o.instructions, 1000) };
+    const checks = (Array.isArray(o.checks) ? o.checks : []).filter((c: any) => txt(c?.name, 80)).slice(0, 20).map((c: any) => {
+      const min = c.min === "" || c.min === null || c.min === undefined ? null : num(c.min), max = c.max === "" || c.max === null || c.max === undefined ? null : num(c.max);
+      if (min !== null && max !== null && min > max) throw bad(`حدّا المعيار «${c.name}» في المرحلة «${name}» معكوسان`);
+      return { name: txt(c.name, 80), min, max, unit: txt(c.unit, 20) };
+    });
+    return { seq, name, workCenterId: String(o.workCenterId), setupMin, runMin, qc: !!o.qc || checks.length > 0, checks, instructions: txt(o.instructions, 1000) };
   }).sort((a: any, z: any) => a.seq - z.seq);
   // components
   const rawLines: any[] = Array.isArray(b.lines) ? b.lines : [];
@@ -301,12 +307,12 @@ export async function createOrder(t: Db, company: any, user: string, b: any, opt
   const partnerId = uid(b.partnerId) ? (await t.one(`SELECT id FROM partners WHERE id=$1 AND company_id=$2`, [b.partnerId, C], "العميل غير موجود")).id : null;
   const costCenterId = uid(b.costCenterId) ? (await t.one(`SELECT id FROM cost_centers WHERE id=$1 AND company_id=$2`, [b.costCenterId, C], "مركز التكلفة غير موجود")).id : null;
   const priority = [1, 2, 3].includes(Number(b.priority)) ? Number(b.priority) : 2;
-  const roll = rollup(cx, bom, undefined, qty);
+  const roll = bom.frozenCost !== null && bom.frozenCost !== undefined ? { unitCost: n(bom.frozenCost) } : rollup(cx, bom, undefined, qty); // a frozen standard wins
   const out = n(bom.outputQty) || 1;
   const materials = explode(cx, bom, qty);
   const ops = (bom.ops || []).map((o: any) => {
     const w = cx.wcs.get(o.workCenterId) || {};
-    return { seq: n(o.seq), name: o.name, workCenterId: o.workCenterId, workCenter: w.name || "؟", costCenterId: w.costCenterId || null, rateHour: n(w.rateHour), overheadHour: n(w.overheadHour), rateUnit: n(w.rateUnit), plannedMin: r2(n(o.setupMin) + n(o.runMin) * qty), actualMin: 0, cost: 0, unitsCharged: 0, status: "PENDING", qc: !!o.qc, qcResult: null, startedAt: null, doneAt: null, operator: null, instructions: o.instructions || null };
+    return { seq: n(o.seq), name: o.name, workCenterId: o.workCenterId, workCenter: w.name || "؟", costCenterId: w.costCenterId || null, rateHour: n(w.rateHour), overheadHour: n(w.overheadHour), rateUnit: n(w.rateUnit), plannedMin: r2(n(o.setupMin) + n(o.runMin) * qty), actualMin: 0, cost: 0, unitsCharged: 0, status: "PENDING", qc: !!o.qc, checks: o.checks || [], qcResult: null, startedAt: null, doneAt: null, operator: null, instructions: o.instructions || null, outsourced: w.kind === "OUTSOURCE" };
   });
   const byproducts = (bom.byproducts || []).map((x: any) => { const p = cx.prods.get(x.productId) || {}; return { productId: x.productId, sku: p.sku, name: p.name, unit: p.unit, planned: r3((n(x.qty) * qty) / out), sharePct: n(x.sharePct), received: 0, value: 0 }; });
   const number = await nextNumber(t, C, "MO", date);
@@ -440,11 +446,11 @@ async function bookTime(t: Db, C: string, user: string, o: any, op: any, minutes
     const A = await mfgAccounts(t, C);
     e = await jv(t, C, o, date, `تكلفة مرحلة «${op.name}» — أمر التصنيع ${o.number} (${r2(minutes)} دقيقة)`, [{ account: A.wip, debit: cost, costCenterId: o.costCenterId }, { account: A.applied, credit: cost, costCenterId: op.costCenterId || null }], user);
   }
-  await t.insert("mfg_moves", { companyId: C, orderId: o.id, kind: "LABOR", date, qty: units, value: cost, opSeq: op.seq, minutes, workCenterId: op.workCenterId, entryId: e?.id || null, notes: note || null, createdBy: user, isDemo: !!o.isDemo });
+  await t.insert("mfg_moves", { companyId: C, orderId: o.id, kind: "LABOR", date, qty: units, value: cost, opSeq: op.seq, minutes, workCenterId: op.workCenterId, operator: op.operator || null, entryId: e?.id || null, notes: note || null, createdBy: user, isDemo: !!o.isDemo });
   o.wip = r2(n(o.wip) + cost); o.conversionCost = r2(n(o.conversionCost) + cost);
   return cost;
 }
-export async function opAction(t: Db, C: string, user: string, id: string, seq: number, b: any) {
+export async function opAction(t: Db, C: string, user: string, id: string, seq: number, b: any, company?: any) {
   const o = num0(await lockOrder(t, C, id)); mustOpen(o);
   const op = (o.ops as any[]).find((x) => n(x.seq) === Number(seq)); if (!op) throw new AppError(404, "المرحلة غير موجودة");
   const action = String(b.action || "");
@@ -459,14 +465,45 @@ export async function opAction(t: Db, C: string, user: string, id: string, seq: 
     else if (op.status === "RUNNING" && op.startedAt) minutes = Math.round(((Date.now() - Date.parse(op.startedAt)) / 60000) * 10) / 10;
     else minutes = Math.max(0, r2(n(op.plannedMin) - n(op.actualMin)));
     if (minutes < 0 || minutes > 60 * 24 * 31) throw bad("الدقائق غير صحيحة");
-    let qc: string | null = null;
-    if (action === "finish" && op.qc) { qc = ["PASS", "FAIL"].includes(b.qcResult) ? b.qcResult : null; if (!qc) throw bad(`المرحلة «${op.name}» فيها فحص جودة: اختر «ناجح» أو «غير مطابق»`); }
+    let qc: string | null = null; let qcResults: any[] | null = null;
+    if (action === "finish" && op.qc) {
+      if (op.checks?.length) {
+        // each criterion measured: outside its limits fails the stage, whatever was chosen
+        const given = Array.isArray(b.qcResults) ? b.qcResults : [];
+        qcResults = op.checks.map((c: any) => {
+          const g = given.find((x: any) => x.name === c.name); const raw = g?.value;
+          if (raw === undefined || raw === null || raw === "") throw bad(`سجّل قيمة «${c.name}» لفحص مرحلة «${op.name}»`);
+          const numeric = c.min !== null || c.max !== null;
+          const v = numeric ? num(raw) : String(raw).slice(0, 60);
+          const okv = numeric ? (c.min === null || (v as number) >= c.min) && (c.max === null || (v as number) <= c.max) : !/^(لا|no|fail|false|0)$/i.test(String(v).trim());
+          return { name: c.name, value: v, min: c.min, max: c.max, unit: c.unit, ok: okv };
+        });
+        qc = qcResults!.every((x: any) => x.ok) && b.qcResult !== "FAIL" ? "PASS" : "FAIL";
+      } else { qc = ["PASS", "FAIL"].includes(b.qcResult) ? b.qcResult : null; if (!qc) throw bad(`المرحلة «${op.name}» فيها فحص جودة: اختر «ناجح» أو «غير مطابق»`); }
+    }
+    if (b.operator) op.operator = txt(b.operator, 60);
     const units = action === "finish" && n(op.rateUnit) > 0 ? Math.max(0, r3((b.units !== undefined ? num(b.units) : n(o.qty)) - n(op.unitsCharged))) : 0;
     await bookTime(t, C, user, o, op, minutes, units, date, txt(b.notes, 200) || undefined);
     if (b.operator) op.operator = txt(b.operator, 60);
-    if (action === "finish") { op.status = qc === "FAIL" ? "FAILED" : "DONE"; op.qcResult = qc; op.doneAt = new Date().toISOString(); op.qcNote = txt(b.qcNote, 300); }
+    if (action === "finish") { op.status = qc === "FAIL" ? "FAILED" : "DONE"; op.qcResult = qc; op.qcResults = qcResults; op.doneAt = new Date().toISOString(); op.qcNote = txt(b.qcNote, 300); }
     else op.status = "PAUSED";
     op.startedAt = null;
+  } else if (action === "subcontract") {
+    // an outside workshop's invoice for this stage: Dr WIP (+ input VAT) / Cr the supplier — the cost joins the order at what was billed
+    await assertOpenDate(t, C, date);
+    const sup = await t.one(`SELECT id, name FROM partners WHERE id=$1 AND company_id=$2 AND is_supplier`, [uid(b.supplierId), C], "اختر مورد الورشة الخارجية");
+    const amount = r2(num(b.amount)); if (!(amount > 0)) throw bad("اكتب مبلغ فاتورة الورشة الخارجية قبل الضريبة");
+    const A = await mfgAccounts(t, C);
+    const co = company || await t.one(`SELECT * FROM companies WHERE id=$1`, [C]);
+    const d = await saveDraft(t, co, user, { direction: "PURCHASE", kind: "INVOICE", date, partnerId: sup.id, supplierRef: txt(b.ref, 40) || undefined, costCenterId: o.costCenterId || null, notes: `تصنيع خارجي لأمر التصنيع ${o.number}`, isDemo: !!o.isDemo,
+      lines: [{ accountId: A.wip, description: `تصنيع خارجي: ${op.name} — ${o.number}${b.qty ? ` (${num(b.qty)})` : ""}`, qty: 1, unitPrice: amount, taxCode: ["S", "Z", "E", "O"].includes(b.taxCode) ? b.taxCode : "S" }] } as any);
+    await postInvoice(t, co, d.id, user);
+    const inv = await t.one(`SELECT number FROM invoices WHERE id=$1`, [d.id]);
+    const je = await t.maybe(`SELECT id FROM journal_entries WHERE company_id=$1 AND source_type='INVOICE' AND source_id=$2 ORDER BY created_at LIMIT 1`, [C, d.id]);
+    op.cost = r2(n(op.cost) + amount); op.subcontracted = r2(n(op.subcontracted) + amount); op.supplier = sup.name;
+    await t.insert("mfg_moves", { companyId: C, orderId: o.id, kind: "SUBCONTRACT", date, qty: b.qty ? num(b.qty) : 0, value: amount, opSeq: op.seq, workCenterId: op.workCenterId, entryId: je?.id || null, invoiceId: d.id, notes: `${sup.name} — فاتورة ${inv.number}`, createdBy: user, isDemo: !!o.isDemo });
+    o.wip = r2(n(o.wip) + amount); o.conversionCost = r2(n(o.conversionCost) + amount);
+    if (b.finish && !op.qc) { op.status = "DONE"; op.doneAt = new Date().toISOString(); op.startedAt = null; }
   } else if (action === "reopen") {
     if (o.status === "DONE") throw conflict("الأمر منتهٍ"); op.status = "PENDING"; op.doneAt = null; op.qcResult = null;
   } else throw bad("إجراء غير معروف");
@@ -519,9 +556,20 @@ export async function produce(t: Db, C: string, user: string, id: string, b: any
   const lot = txt(b.lotNo, 40) || o.lotNo || o.number;
   const expiry = isDate(b.expiryDate) ? b.expiryDate : o.expiryDate ? iso(o.expiryDate) : null;
   const moves: any[] = [];
+  let serials: string[] | null = null;
+  if (qty > 0 && (b.serialize || (Array.isArray(b.serials) && b.serials.length))) {
+    // one serial number per piece: each becomes its own lot (traceable to this order and its materials)
+    if (!Number.isInteger(qty)) throw bad("الأرقام التسلسلية تكون لكمية صحيحة من القطع");
+    if (Array.isArray(b.serials) && b.serials.length) serials = b.serials.map((x: any) => txt(x, 60)).filter(Boolean) as string[];
+    else { const had = await t.one(`SELECT COALESCE(SUM(jsonb_array_length(serials)),0)::int c FROM mfg_moves WHERE order_id=$1 AND serials IS NOT NULL`, [o.id]); serials = Array.from({ length: qty }, (_, i) => `${lot}-${String(had.c + i + 1).padStart(3, "0")}`); }
+    if (serials.length !== qty) throw bad(`عدد الأرقام التسلسلية (${serials.length}) لا يساوي الكمية (${qty})`);
+    if (new Set(serials).size !== serials.length) throw bad("رقم تسلسلي مكرر في القائمة");
+    const dup = await t.maybe(`SELECT lot_no FROM stock_lots WHERE company_id=$1 AND product_id=$2 AND lot_no = ANY($3) LIMIT 1`, [C, o.productId, serials]);
+    if (dup) throw conflict(`الرقم التسلسلي ${dup.lotNo} مستخدم لهذا الصنف من قبل`);
+  }
   if (qty > 0) {
-    await stockIn(t, C, { productId: o.productId, warehouseId: o.outputWarehouseId, qty, date, sourceType: "MFG_RECEIPT", sourceId: o.id, reference: o.number, isDemo: !!o.isDemo, value: mainValue, lotNo: lot, expiryDate: expiry });
-    moves.push({ companyId: C, orderId: o.id, kind: "RECEIPT", date, productId: o.productId, qty, value: mainValue, notes: final ? "استلام نهائي" : "استلام جزئي بالتكلفة المعيارية", createdBy: user, isDemo: !!o.isDemo });
+    await stockIn(t, C, { productId: o.productId, warehouseId: o.outputWarehouseId, qty, date, sourceType: "MFG_RECEIPT", sourceId: o.id, reference: o.number, isDemo: !!o.isDemo, value: mainValue, lotNo: lot, expiryDate: expiry, ...(serials ? { lots: serials.map((x) => ({ lotNo: x, expiry, qty: 1 })) } : {}) });
+    moves.push({ companyId: C, orderId: o.id, kind: "RECEIPT", date, productId: o.productId, qty, value: mainValue, serials, notes: (final ? "استلام نهائي" : "استلام جزئي بالتكلفة المعيارية") + (serials ? ` · ${serials.length} رقم تسلسلي` : ` · دفعة ${lot}`), createdBy: user, isDemo: !!o.isDemo });
   }
   for (const y of bys) {
     await stockIn(t, C, { productId: y.x.productId, warehouseId: o.outputWarehouseId, qty: y.qty, date, sourceType: "MFG_BYPRODUCT", sourceId: o.id, reference: o.number, isDemo: !!o.isDemo, value: y.value, lotNo: lot });
@@ -573,8 +621,9 @@ export async function closeOrder(t: Db, C: string, user: string, id: string, b: 
 /** Cancels an order with no output: issued materials go back at their value and booked time is reversed. */
 export async function cancelOrder(t: Db, C: string, user: string, id: string, b: any = {}) {
   const o = num0(await lockOrder(t, C, id)); mustOpen(o);
-  const out = await t.one(`SELECT COUNT(*)::int c FROM mfg_moves WHERE order_id=$1 AND kind IN ('RECEIPT','BYPRODUCT','SCRAP')`, [o.id]);
+  const out = await t.one(`SELECT COUNT(*) FILTER (WHERE kind IN ('RECEIPT','BYPRODUCT','SCRAP'))::int c, COUNT(*) FILTER (WHERE kind='SUBCONTRACT')::int s FROM mfg_moves WHERE order_id=$1`, [o.id]);
   if (out.c) throw conflict("للأمر إنتاج أو تالف مسجّل: أقفله بدل إلغائه");
+  if (out.s) throw conflict("على الأمر فاتورة ورشة خارجية: أقفله (يذهب الباقي للانحرافات) أو أصدر إشعاراً للمورد أولاً");
   const date = isDate(b.date) ? String(b.date) : today();
   const hasMoves = (await t.one(`SELECT COUNT(*)::int c FROM mfg_moves WHERE order_id=$1`, [o.id])).c > 0;
   if (hasMoves) {
@@ -680,7 +729,7 @@ export async function getOrder(t: Db, C: string, id: string) {
   };
   return { ...base, warehouseId: o.warehouseId, outputWarehouseId: o.outputWarehouseId, outputWarehouseName: o.outputWarehouseName, costCenterId: o.costCenterId, costCenterName: o.costCenterName, bomCode: o.bomCode, bomVersion: o.bomVersion, parentNumber: o.parentNumber,
     lotNo: o.lotNo, expiryDate: iso(o.expiryDate), notes: o.notes, createdBy: o.createdBy, closedAt: o.closedAt, materials, ops, byproducts: o.byproducts || [], sheet,
-    moves: moves.map((m: any) => ({ id: m.id, kind: m.kind, date: iso(m.date), productId: m.productId, productName: m.productName, unit: m.unit, qty: n(m.qty), value: n(m.value), opSeq: m.opSeq, minutes: m.minutes === null ? null : n(m.minutes), entryId: m.entryId, entryNumber: m.entryNumber, notes: m.notes, createdBy: m.createdBy })),
+    moves: moves.map((m: any) => ({ id: m.id, kind: m.kind, date: iso(m.date), productId: m.productId, productName: m.productName, unit: m.unit, qty: n(m.qty), value: n(m.value), opSeq: m.opSeq, minutes: m.minutes === null ? null : n(m.minutes), entryId: m.entryId, entryNumber: m.entryNumber, notes: m.notes, createdBy: m.createdBy, operator: m.operator, serials: m.serials, invoiceId: m.invoiceId })),
     children: children.map((c: any) => ({ id: c.id, number: c.number, status: c.status, qty: n(c.qty), producedQty: n(c.producedQty), name: c.name })) };
 }
 
@@ -848,7 +897,7 @@ export async function dashboard(t: Db, C: string) {
   const [st, wipGl, month, late, running] = await Promise.all([
     t.rows(`SELECT status, COUNT(*)::int c, COALESCE(SUM(wip),0) wip FROM mfg_orders WHERE company_id=$1 GROUP BY status`, [C]),
     t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='WIP' AND e.status='POSTED'`, [C]),
-    t.one(`SELECT COALESCE(SUM(qty) FILTER (WHERE kind='RECEIPT'),0) produced, COALESCE(SUM(value) FILTER (WHERE kind IN ('RECEIPT','BYPRODUCT')),0) received, COALESCE(SUM(value) FILTER (WHERE kind='LABOR'),0) conversion,
+    t.one(`SELECT COALESCE(SUM(qty) FILTER (WHERE kind='RECEIPT'),0) produced, COALESCE(SUM(value) FILTER (WHERE kind IN ('RECEIPT','BYPRODUCT')),0) received, COALESCE(SUM(value) FILTER (WHERE kind IN ('LABOR','SUBCONTRACT')),0) conversion,
              COALESCE(SUM(value) FILTER (WHERE kind='ISSUE'),0) - COALESCE(SUM(value) FILTER (WHERE kind='RETURN'),0) material, COALESCE(SUM(minutes) FILTER (WHERE kind='LABOR'),0) minutes, COALESCE(SUM(qty) FILTER (WHERE kind='SCRAP'),0) scrap,
              COALESCE(SUM(value) FILTER (WHERE kind='CLOSE'),0) variance FROM mfg_moves WHERE company_id=$1 AND date >= $2`, [C, m0]),
     t.rows(`SELECT o.id, o.number, o.due_date, o.qty, o.produced_qty, o.status, p.name FROM mfg_orders o JOIN products p ON p.id=o.product_id WHERE o.company_id=$1 AND o.status IN ('DRAFT','CONFIRMED','IN_PROGRESS') AND o.due_date < $2 ORDER BY o.due_date LIMIT 10`, [C, td]),
@@ -882,6 +931,10 @@ export async function reports(t: Db, C: string, q: any = {}) {
     t.one(`SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id WHERE a.company_id=$1 AND a.system_key='WIP' AND e.status='POSTED'`, [C]),
   ]);
   const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1);
+  const [operators, outside] = await Promise.all([
+    t.rows(`SELECT COALESCE(m.operator,'—') operator, COALESCE(SUM(m.minutes),0) minutes, COALESCE(SUM(m.value),0) value, COUNT(DISTINCT m.order_id)::int orders FROM mfg_moves m WHERE m.company_id=$1 AND m.kind='LABOR' AND m.date BETWEEN $2 AND $3 GROUP BY 1 ORDER BY 2 DESC`, [C, from, to]),
+    t.rows(`SELECT m.date, o.number, m.notes, m.value, m.invoice_id FROM mfg_moves m JOIN mfg_orders o ON o.id=m.order_id WHERE m.company_id=$1 AND m.kind='SUBCONTRACT' AND m.date BETWEEN $2 AND $3 ORDER BY m.date DESC`, [C, from, to]),
+  ]);
   const ord = orders.map((o: any) => {
     const produced = n(o.producedQty), main = mainValue(o), std = r2(n(o.stdUnitCost) * produced);
     return { id: o.id, number: o.number, productName: o.productName, unit: o.unit, qty: n(o.qty), producedQty: produced, scrapQty: n(o.scrapQty), material: n(o.materialCost), conversion: n(o.conversionCost), received: main, std, costVariance: produced > 0 ? r2(main - std) : null, closeVariance: n(o.variance), scrapValue: n(o.scrapValue),
@@ -896,6 +949,8 @@ export async function reports(t: Db, C: string, q: any = {}) {
     materials: materials.map((r: any) => ({ productId: r.productId, sku: r.sku, name: r.name, unit: r.unit, qty: r3(r.qty), value: r2(r.value) })),
     centers: centers.map((w: any) => { const capH = n(w.capacityHours) * n(w.units) * (n(w.efficiencyPct) / 100) * days; const h = n(w.minutes) / 60; return { id: w.id, code: w.code, name: w.name, hours: r2(h), value: r2(w.value), entries: w.entries, capacityHours: r2(capH), utilizationPct: capH ? r2((h / capH) * 100) : 0 }; }),
     scrap: scrap.map((s: any) => ({ date: iso(s.date), number: s.number, name: s.name, qty: r3(s.qty), value: r2(s.value), notes: s.notes })),
+    operators: operators.map((o: any) => ({ operator: o.operator, hours: r2(n(o.minutes) / 60), value: r2(o.value), orders: o.orders })),
+    outside: outside.map((o: any) => ({ date: iso(o.date), number: o.number, notes: o.notes, value: r2(o.value), invoiceId: o.invoiceId })),
     wip: { orders: wipOrders.map((o: any) => ({ id: o.id, number: o.number, name: o.name, status: o.status, wip: n(o.wip), material: n(o.materialCost), conversion: n(o.conversionCost), received: n(o.receivedValue) })), total: wipSum, ledger: r2(wipGl.b), match: Math.abs(wipSum - n(wipGl.b)) < 0.01 },
   };
 }
@@ -928,4 +983,42 @@ export async function costByName(t: Db, C: string, q: any) {
   if (rows.length > 1 && norm(p.name) !== nq && rows.length > 3) return { found: rows.length, candidates: rows.map((r: any) => r.name) };
   const r = await costFor(t, C, { productId: p.id, qty: q.qty });
   return { found: 1, name: p.name, qty: r.qty, unitCost: r.unitCost, material: r.material, conversion: r.conversion, byproductShare: r.byproductShare, total: r.totalForQty, lines: r.lines.slice(0, 12).map((l: any) => ({ name: l.name, qty: l.effQty, unit: l.unit, cost: l.cost })), ops: r.ops.map((o: any) => ({ name: o.name, workCenter: o.workCenter, minPerUnit: o.minPerUnit, perUnit: o.perUnit })), outputQty: r.outputQty };
+}
+
+/** Freezes today's rolled-up cost as the product's standard (orders and part receipts use it), or releases it. */
+export async function freezeBom(t: Db, C: string, id: string, release = false) {
+  const b = await t.one(`SELECT * FROM mfg_boms WHERE id=$1 AND company_id=$2 FOR UPDATE`, [uid(id), C], "قائمة المواد غير موجودة");
+  if (release) { await t.exec(`UPDATE mfg_boms SET frozen_cost=NULL, frozen_at=NULL, frozen_detail=NULL WHERE id=$1`, [b.id]); return getBom(t, C, b.id); }
+  const cx = await loadCx(t, C);
+  const r = rollup(cx, b);
+  await t.update("mfg_boms", { id: b.id }, { frozenCost: r.unitCost, frozenAt: new Date(), frozenDetail: { material: r.material, conversion: r.conversion, byproductShare: r.byproductShare, lines: r.lines.map((l: any) => ({ componentId: l.componentId, name: l.name, unitCost: l.unitCost, effQty: l.effQty })), ops: r.ops.map((o: any) => ({ seq: o.seq, name: o.name, perUnit: o.perUnit })) } });
+  return getBom(t, C, b.id);
+}
+
+/**
+ * Lot / serial traceability, both ways: where a finished lot came from (its order, operators, quality results and
+ * the component lots with their suppliers) and where a lot went (orders that consumed it, customers who bought it).
+ */
+export async function trace(t: Db, C: string, q: any) {
+  const lot = txt(q.lot, 60); if (!lot) throw bad("اكتب رقم الدفعة أو الرقم التسلسلي");
+  const hasLot = `(m.reference=$2 OR m.lots @> jsonb_build_array(jsonb_build_object('lotNo', $2::text)))`;
+  const made = await t.rows(`SELECT DISTINCT o.id FROM mfg_orders o WHERE o.company_id=$1 AND (o.lot_no=$2 OR o.number=$2 OR EXISTS (SELECT 1 FROM mfg_moves mv WHERE mv.order_id=o.id AND mv.serials @> jsonb_build_array($2::text))
+      OR EXISTS (SELECT 1 FROM stock_moves m WHERE m.company_id=$1 AND m.source_type IN ('MFG_RECEIPT','MFG_BYPRODUCT') AND m.source_id=o.id AND m.lots @> jsonb_build_array(jsonb_build_object('lotNo', $2::text)))) LIMIT 20`, [C, lot]);
+  const origins: any[] = [];
+  for (const r of made) {
+    const o = await getOrder(t, C, r.id);
+    const comps = await t.rows(`SELECT m.product_id, p.name, p.unit, -m.qty qty, m.lots, m.date FROM stock_moves m JOIN products p ON p.id=m.product_id WHERE m.company_id=$1 AND m.source_type='MFG_ISSUE' AND m.source_id=$2 ORDER BY m.date, m.created_at`, [C, r.id]);
+    const supplierOf = async (pid: string, lots: any[]) => {
+      const nos = (lots || []).map((x: any) => x.lotNo).filter((x: string) => x && x !== "NEG");
+      if (!nos.length) return [];
+      return t.rows(`SELECT DISTINCT i.number, i.partner_name, i.date, x.lot FROM stock_moves m JOIN invoices i ON i.id=m.source_id, jsonb_array_elements(m.lots) l, LATERAL (SELECT l->>'lotNo' lot) x WHERE m.company_id=$1 AND m.product_id=$2 AND m.source_type='PURCHASE' AND x.lot = ANY($3)`, [C, pid, nos]);
+    };
+    const components: any[] = [];
+    for (const c of comps) components.push({ productId: c.productId, name: c.name, unit: c.unit, qty: n(c.qty), date: iso(c.date), lots: c.lots || [], suppliers: (await supplierOf(c.productId, c.lots)).map((s: any) => ({ invoice: s.number, supplier: s.partnerName, date: iso(s.date), lot: s.lot })) });
+    origins.push({ order: { id: o.id, number: o.number, productName: o.productName, date: o.date, closedAt: o.closedAt, qty: o.qty, producedQty: o.producedQty, status: o.status }, operators: [...new Set(o.moves.filter((m: any) => m.operator).map((m: any) => m.operator))], qc: o.ops.filter((x: any) => x.qc).map((x: any) => ({ stage: x.name, result: x.qcResult, results: x.qcResults || null, note: x.qcNote || null })), components });
+  }
+  const consumedBy = await t.rows(`SELECT DISTINCT o.id, o.number, o.status, p.name, m.date, -m.qty qty FROM stock_moves m JOIN mfg_orders o ON o.id=m.source_id JOIN products p ON p.id=o.product_id WHERE m.company_id=$1 AND m.source_type='MFG_ISSUE' AND m.lots @> jsonb_build_array(jsonb_build_object('lotNo', $2::text))`, [C, lot]);
+  const soldTo = await t.rows(`SELECT i.id, i.number, i.partner_name, i.date, p.name product, -m.qty qty FROM stock_moves m JOIN invoices i ON i.id=m.source_id JOIN products p ON p.id=m.product_id WHERE m.company_id=$1 AND m.source_type IN ('SALE','POS') AND ${hasLot.replace("m.reference=$2 OR ", "")} ORDER BY i.date`, [C, lot]);
+  const stock = await t.rows(`SELECT l.qty, l.expiry_date, w.name warehouse, p.name product FROM stock_lots l JOIN warehouses w ON w.id=l.warehouse_id JOIN products p ON p.id=l.product_id WHERE l.company_id=$1 AND l.lot_no=$2 AND l.qty <> 0`, [C, lot]);
+  return { lot, origins, consumedBy: consumedBy.map((r: any) => ({ id: r.id, number: r.number, status: r.status, product: r.name, date: iso(r.date), qty: n(r.qty) })), soldTo: soldTo.map((r: any) => ({ id: r.id, number: r.number, customer: r.partnerName, date: iso(r.date), product: r.product, qty: n(r.qty) })), stock: stock.map((r: any) => ({ product: r.product, warehouse: r.warehouse, qty: n(r.qty), expiry: iso(r.expiryDate) })), found: !!(made.length || consumedBy.length || soldTo.length || stock.length) };
 }
