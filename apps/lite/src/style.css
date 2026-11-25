@@ -226,3 +226,27 @@ html.m-phone .dlg,html.m-handheld .dlg{border-radius:16px 16px 0 0;max-height:96
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* 1.1: القفل، الورديات، الكاميرا */
+.lock{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px 16px;background:linear-gradient(160deg,var(--navy),var(--navy2));color:#fff}
+.lock .mut{color:#cfd8ee}.lock .sm.mut{max-width:320px}
+.lk-brand{display:flex;align-items:center;gap:10px;font-size:1.25rem;font-weight:800}
+.lk-brand i{width:42px;height:42px;border-radius:11px;background:var(--gold);color:var(--navy);display:flex;align-items:center;justify-content:center;font-style:normal}
+.pin-dots{display:flex;gap:12px;direction:ltr;margin:6px 0}
+.pin-dots i{width:16px;height:16px;border-radius:50%;border:2px solid #cfd8ee}
+.pin-dots i.opt{opacity:.45}.pin-dots i.on{background:var(--gold);border-color:var(--gold);opacity:1}
+.pin-dots.shake{animation:shk .35s}
+@keyframes shk{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+.pad{display:grid;grid-template-columns:repeat(3,76px);gap:12px;direction:ltr}
+.pad button{height:64px;border-radius:16px;background:rgba(255,255,255,.12);color:#fff;font-size:1.5rem;font-weight:700}
+.pad button:active{background:rgba(255,255,255,.25)}
+.pad button.ok{background:var(--gold);color:var(--navy);font-size:1rem}.pad button.clr{font-size:1rem}
+#top .who{margin-inline-start:4px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#scanner{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:rgba(5,10,22,.86);display:flex;align-items:center;justify-content:center;padding:12px}
+.scan-box{background:var(--card);border-radius:14px;width:100%;max-width:520px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.scan-h{display:flex;justify-content:space-between;align-items:center}
+.scan-v{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3}
+.scan-v video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-line{position:absolute;left:8%;right:8%;top:50%;height:2px;background:#ff3b30;box-shadow:0 0 8px #ff3b30}
+.scan-msg{font-size:.9rem;color:var(--mut);text-align:center}
+.scan-got{min-height:1.5em;text-align:center}

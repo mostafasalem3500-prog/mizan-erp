@@ -1,14 +1,18 @@
 package sa.mizanerp.lite;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.print.PrintAttributes;
 import android.print.PrintManager;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -37,10 +41,12 @@ public class MainActivity extends Activity {
     private static final String START = "https://" + HOST + "/index.html";
     private static final int REQ_FILE = 11;
     private static final int REQ_SAVE = 12;
+    private static final int REQ_CAM = 13;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private byte[] pendingSave;
+    private PermissionRequest pendingCam;
     private long lastBack;
 
     @Override
@@ -57,6 +63,7 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(false);
         s.setTextZoom(100);
         s.setSupportZoom(false);
+        s.setMediaPlaybackRequiresUserGesture(false); // معاينة الكاميرا لقارئ الباركود
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
         web.addJavascriptInterface(new Bridge(), "MizanNative");
 
@@ -85,6 +92,39 @@ public class MainActivity extends Activity {
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            /** الكاميرا لقارئ الباركود فقط، ولصفحة التطبيق نفسها فقط */
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        boolean cam = false;
+                        for (String r : request.getResources()) if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) cam = true;
+                        Uri o = request.getOrigin();
+                        if (!cam || o == null || !HOST.equals(o.getHost())) {
+                            request.deny();
+                            return;
+                        }
+                        if (Build.VERSION.SDK_INT < 23) {
+                            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                            return;
+                        }
+                        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                            return;
+                        }
+                        if (pendingCam != null) pendingCam.deny();
+                        pendingCam = request;
+                        requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_CAM);
+                    }
+                });
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingCam == request) pendingCam = null;
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -271,6 +311,15 @@ public class MainActivity extends Activity {
                 toast("تعذر حفظ الملف");
             }
         }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_CAM || pendingCam == null) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) pendingCam.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+        else pendingCam.deny();
+        pendingCam = null;
     }
 
     @Override

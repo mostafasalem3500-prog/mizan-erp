@@ -15,3 +15,5 @@ apps/lite/android/build/
 apps/lite/preview/
 apps/lite/shots/
 apps/lite/*.apk
+apps/lite/test/shots/
+apps/lite/package-lock.json

@@ -1,6 +1,7 @@
 import sys,json
 from playwright.sync_api import sync_playwright
-URL='file:///home/claude/mizan-lite/dist/index.html'
+import os
+URL='file://'+os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','dist','index.html')
 errs=[];n=0
 def ok(c,m):
     global n;n+=1

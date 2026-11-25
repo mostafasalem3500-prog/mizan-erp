@@ -1,7 +1,7 @@
 /* ميزان لايت — المحرك المحاسبي (قيد مزدوج، المبالغ بالهللة كأعداد صحيحة) */
 var Mizan = (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var DB_NAME = 'mizan-lite', KEY = 'state.v1';
   var DEFAULT_UPDATE = 'https://raw.githubusercontent.com/mostafasalem3500-prog/mizan-erp/main/apps/lite/version.json';
 
@@ -14,13 +14,13 @@ var Mizan = (function () {
     ['4101', 'المبيعات', 'R'], ['4102', 'مردودات المبيعات', 'R'], ['4201', 'إيرادات أخرى', 'R'],
     ['5101', 'تكلفة المبيعات', 'X'], ['5201', 'الرواتب والأجور', 'X'], ['5202', 'الإيجار', 'X'], ['5203', 'كهرباء وماء واتصالات', 'X'],
     ['5204', 'مصروفات عمومية وإدارية', 'X'], ['5205', 'صيانة', 'X'], ['5206', 'دعاية وتسويق', 'X'], ['5207', 'رسوم بنكية وعمولات شبكة', 'X'],
-    ['5208', 'تسويات وفروقات المخزون', 'X'], ['5209', 'رسوم حكومية وتراخيص', 'X']
+    ['5208', 'تسويات وفروقات المخزون', 'X'], ['5209', 'رسوم حكومية وتراخيص', 'X'], ['5210', 'عجز وزيادة الصندوق', 'X']
   ];
   var TYPE_NAMES = { A: 'الأصول', L: 'الخصوم', E: 'حقوق الملكية', R: 'الإيرادات', X: 'المصروفات' };
   var METHOD_ACC = { cash: '1101', card: '1102', bank: '1102' };
   var METHOD_NAMES = { cash: 'نقدي', card: 'شبكة', bank: 'تحويل بنكي', credit: 'آجل' };
 
-  var S = null, saveTimer = null, idb = null, storageKind = 'memory', listeners = [];
+  var S = null, saveTimer = null, idb = null, storageKind = 'memory', listeners = [], CU = null;
 
   function defaults() {
     return {
@@ -29,10 +29,10 @@ var Mizan = (function () {
         name: '', nameEn: '', vat: '', cr: '', address: '', city: '', phone: '', logo: '',
         vatRate: 15, pricesIncl: true, oversell: 'ask', mode: 'auto', scale: 100, theme: 'light',
         tplReceipt: 't80', tplInvoice: 'a4classic', footer: 'شكراً لتعاملكم معنا', showHijri: true,
-        bilingual: true, showLogo: true, autoPrint: false, updateUrl: DEFAULT_UPDATE
+        bilingual: true, showLogo: true, autoPrint: false, updateUrl: DEFAULT_UPDATE, requireShift: false, scanBeep: true
       },
       accounts: COA.map(function (a) { return { code: a[0], name: a[1], type: a[2], sys: true }; }),
-      cats: [], products: [], parties: [], docs: [], vouchers: [], journals: [], held: [], seq: {}, audit: []
+      cats: [], products: [], parties: [], docs: [], vouchers: [], journals: [], held: [], seq: {}, audit: [], users: [], shifts: []
     };
   }
 
@@ -60,8 +60,12 @@ var Mizan = (function () {
   function seqNext(key, prefix) { S.seq[key] = (S.seq[key] || 0) + 1; return prefix + '-' + pad(S.seq[key], 6); }
   function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
   function account(code) { for (var i = 0; i < S.accounts.length; i++) if (S.accounts[i].code === code) return S.accounts[i]; return null; }
-  function audit(act, ref) { S.audit.push({ ts: nowIso(), act: act, ref: ref || '' }); if (S.audit.length > 500) S.audit.splice(0, S.audit.length - 500); }
+  function audit(act, ref) { S.audit.push({ ts: nowIso(), act: act, ref: ref || '', by: CU ? CU.name : '' }); if (S.audit.length > 500) S.audit.splice(0, S.audit.length - 500); }
   function validVat(v) { return /^3\d{13}3$/.test(String(v || '')); }
+  function openShift() { for (var i = S.shifts.length - 1; i >= 0; i--) if (S.shifts[i].status === 'open') return S.shifts[i]; return null; }
+  // من سجّل المستند وفي أي وردية
+  function stamp(o) { if (CU) o.by = CU.name; var sh = openShift(); if (sh) o.shift = sh.id; return o; }
+  function needShift() { need(!S.settings.requireShift || openShift(), 'افتح وردية أولاً (الورديات ← فتح وردية)'); }
 
   /* ---------- التخزين ---------- */
   function openIdb(cb) {
@@ -78,6 +82,7 @@ var Mizan = (function () {
     var d = defaults(), k;
     for (k in d) if (!(k in st)) st[k] = d[k];
     for (k in d.settings) if (!(k in st.settings)) st.settings[k] = d.settings[k];
+    COA.forEach(function (a) { if (!st.accounts.some(function (x) { return x.code === a[0]; })) st.accounts.push({ code: a[0], name: a[1], type: a[2], sys: true }); });
     return st;
   }
   function load(cb) {
@@ -118,11 +123,11 @@ var Mizan = (function () {
       var d = 0, c = 0; st.journals[i].lines.forEach(function (l) { d += l.dr; c += l.cr; });
       need(d === c, 'النسخة الاحتياطية تحتوي قيداً غير متوازن — رُفض الاستيراد');
     }
-    S = migrate(st); save(); return S;
+    S = migrate(st); CU = null; save(); return S;
   }
   function reset(keepSettings) {
     var old = S; S = defaults();
-    if (keepSettings && old) { S.settings = old.settings; S.setup = old.setup; }
+    if (keepSettings && old) { S.settings = old.settings; S.setup = old.setup; S.users = old.users || []; }
     save(); return S;
   }
 
@@ -140,6 +145,7 @@ var Mizan = (function () {
     need(out.length >= 2, 'القيد يحتاج سطرين على الأقل');
     if (d !== c) throw err('UNBALANCED', 'القيد غير متوازن: مدين ' + fmt(d) + ' ≠ دائن ' + fmt(c));
     var j = { id: uid(), no: seqNext('JV', 'JV'), date: date, ts: nowIso(), ref: ref || '', desc: desc || '', src: src || null, lines: out };
+    if (CU) j.by = CU.name;
     S.journals.push(j); return j;
   }
   function reverseJournal(jid, desc, date) {
@@ -232,6 +238,7 @@ var Mizan = (function () {
   function sale(inp, opts) {
     opts = opts || {};
     need(inp.lines && inp.lines.length, 'أضف صنفاً واحداً على الأقل');
+    needShift();
     var party = inp.partyId ? byId(S.parties, inp.partyId) : null;
     inp.lines.forEach(function (l) { need(l.qty > 0, 'الكمية يجب أن تكون أكبر من صفر'); need(l.price >= 0, 'السعر غير صحيح'); });
     var c = computeLines(inp.lines, inp.discount, S.settings.pricesIncl);
@@ -254,11 +261,11 @@ var Mizan = (function () {
     var j = postJournal(date, no, 'فاتورة مبيعات ' + no + (party ? ' — ' + party.name : ''), lines, { t: 'sale', id: doc.id });
     doc.jid = j.id;
     c.lines.forEach(function (l) { var p = l.pid ? byId(S.products, l.pid) : null; if (p && !p.service) p.stock = Math.round((p.stock - l.qty) * 1000) / 1000; });
-    S.docs.push(doc); if (short.length) audit('بيع بتخطي الرصيد', no); save(); return doc;
+    stamp(doc); S.docs.push(doc); if (short.length) audit('بيع بتخطي الرصيد', no); save(); return doc;
   }
   // items: [{i: رقم السطر, qty}]
   function saleReturn(docId, items, method) {
-    var d = byId(S.docs, docId); need(d && d.t === 'sale', 'الفاتورة غير موجودة');
+    var d = byId(S.docs, docId); need(d && d.t === 'sale', 'الفاتورة غير موجودة'); needShift();
     var party = d.partyId ? byId(S.parties, d.partyId) : null;
     if (method === 'credit') need(party, 'الإرجاع على الحساب يحتاج عميلاً');
     var rl = [], net = 0, vat = 0, cost = 0;
@@ -286,7 +293,7 @@ var Mizan = (function () {
         p.cost = q > 0 ? Math.round(val / q) : p.cost; p.stock = Math.round((p.stock + r.qty) * 1000) / 1000;
       }
     });
-    S.docs.push(doc); audit('مرتجع مبيعات', no); save(); return doc;
+    stamp(doc); S.docs.push(doc); audit('مرتجع مبيعات', no); save(); return doc;
   }
 
   /* ---------- المشتريات ---------- */
@@ -307,7 +314,7 @@ var Mizan = (function () {
       var p = byId(S.products, l.pid), old = Math.max(p.stock, 0), q = old + l.qty;
       p.cost = Math.round((old * p.cost + l.net) / q); p.stock = Math.round((p.stock + l.qty) * 1000) / 1000;
     });
-    S.docs.push(doc); save(); return doc;
+    stamp(doc); S.docs.push(doc); save(); return doc;
   }
 
   /* ---------- المصروفات والسندات ---------- */
@@ -318,7 +325,7 @@ var Mizan = (function () {
     var no = seqNext('EXP', 'EXP'), date = inp.date || today();
     var v = { id: uid(), t: 'exp', no: no, date: date, ts: nowIso(), acc: inp.acc, amount: g, net: net, vat: vat, method: inp.method, desc: inp.desc || a.name, payee: inp.payee || '', status: 'posted' };
     v.jid = postJournal(date, no, 'مصروف: ' + v.desc, [{ a: inp.acc, dr: net }, { a: '1105', dr: vat }, { a: METHOD_ACC[inp.method], cr: g }], { t: 'exp', id: v.id }).id;
-    S.vouchers.push(v); save(); return v;
+    stamp(v); S.vouchers.push(v); save(); return v;
   }
   // kind: in قبض | out صرف
   function voucher(inp) {
@@ -330,20 +337,21 @@ var Mizan = (function () {
     var cashLine = { a: METHOD_ACC[inp.method] }; cashLine[isIn ? 'dr' : 'cr'] = amt; other[isIn ? 'cr' : 'dr'] = amt;
     var v = { id: uid(), t: isIn ? 'rcv' : 'pay', no: no, date: date, ts: nowIso(), partyId: party ? party.id : '', partyName: party ? party.name : '', acc: other.a, amount: amt, method: inp.method, desc: inp.desc || '', status: 'posted' };
     v.jid = postJournal(date, no, (isIn ? 'سند قبض ' : 'سند صرف ') + no + (party ? ' — ' + party.name : '') + (v.desc ? ' — ' + v.desc : ''), [cashLine, other], { t: v.t, id: v.id }).id;
-    S.vouchers.push(v); save(); return v;
+    stamp(v); S.vouchers.push(v); save(); return v;
   }
   function transfer(inp) {
     var amt = Math.round(inp.amount); need(amt > 0, 'اكتب المبلغ'); need(inp.from !== inp.to && METHOD_ACC[inp.from] && METHOD_ACC[inp.to], 'اختر حسابين مختلفين');
     var no = seqNext('TRF', 'TRF'), date = inp.date || today();
     var v = { id: uid(), t: 'trf', no: no, date: date, ts: nowIso(), amount: amt, method: inp.from, to: inp.to, desc: inp.desc || 'تحويل بين الصندوق والبنك', status: 'posted' };
     v.jid = postJournal(date, no, v.desc, [{ a: METHOD_ACC[inp.to], dr: amt }, { a: METHOD_ACC[inp.from], cr: amt }], { t: 'trf', id: v.id }).id;
-    S.vouchers.push(v); save(); return v;
+    stamp(v); S.vouchers.push(v); save(); return v;
   }
   function cancel(kind, id, reason) {
     need(reason && reason.trim(), 'اكتب سبب الإلغاء');
     var list = kind === 'pur' ? S.docs : S.vouchers, d = byId(list, id);
     need(d && d.status === 'posted', 'المستند غير موجود أو ملغى');
     if (kind === 'pur') {
+      need(!d.lines.some(function (l) { return l.rq > 0; }), 'على الفاتورة مرتجع مشتريات — لا تُلغى، سجّل مرتجعاً لما بقي');
       d.lines.forEach(function (l) { var p = byId(S.products, l.pid); need(p && p.stock >= l.qty, 'لا يمكن الإلغاء: بيع جزء من كمية الصنف ' + l.name); });
       d.lines.forEach(function (l) {
         var p = byId(S.products, l.pid), q = Math.round((p.stock - l.qty) * 1000) / 1000, val = p.stock * p.cost - l.net;
@@ -352,6 +360,207 @@ var Mizan = (function () {
     }
     reverseJournal(d.jid, 'إلغاء ' + d.no + ' — ' + reason.trim());
     d.status = 'cancelled'; d.cancelReason = reason.trim(); audit('إلغاء مستند', d.no); save(); return d;
+  }
+
+
+  /* ---------- مرتجع المشتريات ---------- */
+  // items: [{i: رقم السطر, qty}] ؛ method: cash | bank | credit (يُخصم من حساب المورد)
+  function purchaseReturn(docId, items, method) {
+    var d = byId(S.docs, docId); need(d && d.t === 'pur' && d.status === 'posted', 'فاتورة المشتريات غير موجودة أو ملغاة');
+    var party = d.partyId ? byId(S.parties, d.partyId) : null;
+    if (method === 'credit') need(party, 'الخصم من الحساب يحتاج مورداً');
+    else need(METHOD_ACC[method], 'اختر طريقة استرداد المبلغ');
+    var rl = [], net = 0, vat = 0;
+    items.forEach(function (it) {
+      var l = d.lines[it.i]; need(l, 'سطر غير موجود'); if (!(it.qty > 0)) return;
+      var rem = Math.round((l.qty - (l.rq || 0)) * 1000) / 1000; need(it.qty <= rem, 'كمية المرتجع أكبر من المتاح للصنف: ' + l.name);
+      var p = byId(S.products, l.pid); need(p && p.stock >= it.qty, 'الرصيد لا يكفي لإرجاع ' + l.name + ' (المتاح ' + (p ? p.stock : 0) + ')');
+      var last = it.qty === rem, n = last ? l.net - (l.rnet || 0) : Math.round(l.net * it.qty / l.qty), v = last ? l.vat - (l.rvat || 0) : Math.round(l.vat * it.qty / l.qty);
+      rl.push({ i: it.i, pid: l.pid, name: l.name, qty: it.qty, price: l.price, disc: 0, rate: l.rate, net: n, vat: v, total: n + v });
+      net += n; vat += v;
+    });
+    need(rl.length, 'حدد كمية للإرجاع');
+    var total = net + vat, no = seqNext('PRN', 'PRN'), date = today();
+    var dr = method === 'credit' ? { a: '2101', dr: total, p: party.id } : { a: METHOD_ACC[method], dr: total };
+    var doc = { id: uid(), t: 'pret', no: no, date: date, ts: nowIso(), ref: d.no, refId: d.id, partyId: d.partyId, partyName: d.partyName, partyVat: d.partyVat, supplierRef: d.supplierRef, lines: rl, discount: 0, net: net, vat: vat, total: total, pays: [{ m: method, amt: total }], status: 'posted' };
+    var j = postJournal(date, no, 'مرتجع مشتريات ' + no + ' للفاتورة ' + d.no + (d.partyName ? ' — ' + d.partyName : ''), [dr, { a: '1104', cr: net }, { a: '1105', cr: vat }], { t: 'pret', id: doc.id });
+    doc.jid = j.id;
+    rl.forEach(function (r) {
+      var l = d.lines[r.i]; l.rq = Math.round(((l.rq || 0) + r.qty) * 1000) / 1000; l.rnet = (l.rnet || 0) + r.net; l.rvat = (l.rvat || 0) + r.vat;
+      var p = byId(S.products, r.pid), q = Math.round((p.stock - r.qty) * 1000) / 1000, val = Math.max(p.stock, 0) * p.cost - r.net;
+      if (q > 0) p.cost = Math.max(0, Math.round(val / q)); p.stock = q;
+    });
+    stamp(doc); S.docs.push(doc); audit('مرتجع مشتريات', no); save(); return doc;
+  }
+
+  /* ---------- المستخدمون والرمز السري ---------- */
+  // SHA-256 (للرمز السري فقط — قفل للجهاز وليس تشفيراً للبيانات)
+  function sha256(str) {
+    var K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19], b = utf8(str), l = b.length * 8, i, j, w = [];
+    b.push(0x80); while (b.length % 64 !== 56) b.push(0);
+    for (i = 7; i >= 0; i--) b.push(i > 3 ? 0 : (l >>> (i * 8)) & 255);
+    function r(x, n) { return (x >>> n) | (x << (32 - n)); }
+    for (i = 0; i < b.length; i += 64) {
+      for (j = 0; j < 16; j++) w[j] = (b[i + j * 4] << 24) | (b[i + j * 4 + 1] << 16) | (b[i + j * 4 + 2] << 8) | b[i + j * 4 + 3];
+      for (j = 16; j < 64; j++) { var s0 = r(w[j - 15], 7) ^ r(w[j - 15], 18) ^ (w[j - 15] >>> 3), s1 = r(w[j - 2], 17) ^ r(w[j - 2], 19) ^ (w[j - 2] >>> 10); w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0; }
+      var a = H[0], c = H[1], d = H[2], e = H[3], f = H[4], g = H[5], h = H[6], k = H[7];
+      for (j = 0; j < 64; j++) {
+        var t1 = (k + (r(f, 6) ^ r(f, 11) ^ r(f, 25)) + ((f & g) ^ (~f & h)) + K[j] + w[j]) | 0, t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & c) ^ (a & d) ^ (c & d))) | 0;
+        k = h; h = g; g = f; f = (e + t1) | 0; e = d; d = c; c = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + c) | 0; H[2] = (H[2] + d) | 0; H[3] = (H[3] + e) | 0; H[4] = (H[4] + f) | 0; H[5] = (H[5] + g) | 0; H[6] = (H[6] + h) | 0; H[7] = (H[7] + k) | 0;
+    }
+    return H.map(function (x) { return ('0000000' + (x >>> 0).toString(16)).slice(-8); }).join('');
+  }
+  var ROLES = { owner: 'المالك / المدير', cashier: 'كاشير' };
+  // صلاحيات الكاشير: البيع والمرتجع والورديات وإضافة عميل؛ المالك كل شيء. بلا مستخدمين = جهاز بمستخدم واحد بلا قفل.
+  var CASHIER = { pos: 1, docs: 1, 'sale.return': 1, shifts: 1, 'party.add': 1, home: 1, guide: 1, more: 1, parties: 1 };
+  function can(what) { if (!S.users.length) return true; if (!CU) return false; return CU.role === 'owner' || !!CASHIER[what]; }
+  function pinHash(u, pin) { return sha256(u.salt + ':' + pin); }
+  function findByPin(pin, except) { for (var i = 0; i < S.users.length; i++) { var u = S.users[i]; if (u.id !== except && u.active !== false && u.hash === pinHash(u, pin)) return u; } return null; }
+  function saveUser(inp) {
+    need(!S.users.length || can('users'), 'إدارة المستخدمين للمالك فقط');
+    need(inp.name && String(inp.name).trim(), 'اكتب اسم المستخدم');
+    var role = ROLES[inp.role] ? inp.role : 'cashier', o = inp.id ? byId(S.users, inp.id) : null;
+    if (!S.users.length) role = 'owner';
+    if (inp.pin || !o) {
+      need(/^\d{4,6}$/.test(String(inp.pin || '')), 'الرمز السري 4 إلى 6 أرقام');
+      need(!findByPin(String(inp.pin), o && o.id), 'هذا الرمز مستخدم لمستخدم آخر — اختر رمزاً مختلفاً');
+    }
+    if (o) {
+      if (o.role === 'owner' && role !== 'owner') need(S.users.some(function (u) { return u.id !== o.id && u.role === 'owner' && u.active !== false; }), 'يجب أن يبقى مالك واحد على الأقل');
+      o.name = String(inp.name).trim(); o.role = role; if (inp.pin) { o.salt = uid(); o.hash = pinHash(o, String(inp.pin)); }
+    } else {
+      o = { id: uid(), name: String(inp.name).trim(), role: role, salt: uid(), active: true, created: nowIso() }; o.hash = pinHash(o, String(inp.pin));
+      S.users.push(o); if (!CU) CU = o;
+    }
+    audit('مستخدم: ' + o.name, ROLES[o.role]); save(); return o;
+  }
+  function removeUser(id) {
+    need(can('users'), 'إدارة المستخدمين للمالك فقط');
+    var u = byId(S.users, id); need(u, 'المستخدم غير موجود');
+    if (u.role === 'owner') need(S.users.some(function (x) { return x.id !== id && x.role === 'owner'; }), 'لا يُحذف المالك الوحيد — أضف مالكاً آخر أولاً أو احذف كل المستخدمين لإلغاء القفل');
+    S.users.splice(S.users.indexOf(u), 1); if (CU && CU.id === id) CU = null; audit('حذف مستخدم', u.name); save();
+  }
+  function clearUsers() { need(can('users'), 'إدارة المستخدمين للمالك فقط'); S.users = []; CU = null; audit('إلغاء القفل والمستخدمين'); save(); }
+  function login(pin) { var u = findByPin(String(pin || '')); need(u, 'الرمز السري غير صحيح'); CU = u; audit('دخول', u.name); return u; }
+  function logout() { CU = null; }
+
+  /* ---------- الورديات ---------- */
+  function shiftOpen(inp) {
+    inp = inp || {};
+    need(!openShift(), 'توجد وردية مفتوحة — أغلقها أولاً');
+    var fl = Math.round(inp.float || 0); need(fl >= 0, 'مبلغ الافتتاح غير صحيح');
+    var sh = { id: uid(), no: seqNext('SH', 'SH'), status: 'open', openedAt: nowIso(), date: today(), by: CU ? CU.name : '', float: fl, note: inp.note || '' };
+    S.shifts.push(sh); audit('فتح وردية', sh.no); save(); return sh;
+  }
+  // ملخص الوردية: كل ما سُجّل فيها، والنقدية المتوقعة في الدرج
+  function shiftSummary(id) {
+    var sh = id ? byId(S.shifts, id) : openShift(); need(sh, 'لا توجد وردية');
+    var r = { shift: sh, sales: 0, count: 0, returns: 0, retCount: 0, cashSales: 0, cardSales: 0, creditSales: 0, cashReturns: 0, cardReturns: 0, cashIn: 0, cashOut: 0, expenses: 0, receipts: 0, payments: 0, purchasesCash: 0, transfersIn: 0, transfersOut: 0, discount: 0, vat: 0, byUser: {} };
+    S.docs.forEach(function (d) {
+      if (d.shift !== sh.id || d.status !== 'posted') return;
+      if (d.t === 'sale') {
+        r.sales += d.total; r.count++; r.discount += d.discount || 0; r.vat += d.vat;
+        d.pays.forEach(function (p) { if (p.m === 'cash') r.cashSales += p.amt; else if (p.m === 'credit') r.creditSales += p.amt; else r.cardSales += p.amt; });
+        var u = d.by || '—'; r.byUser[u] = (r.byUser[u] || 0) + d.total;
+      } else if (d.t === 'sret') { r.returns += d.total; r.retCount++; r.vat -= d.vat; d.pays.forEach(function (p) { if (p.m === 'cash') r.cashReturns += p.amt; else if (p.m !== 'credit') r.cardReturns += p.amt; }); }
+      else if (d.t === 'pur') d.pays.forEach(function (p) { if (p.m === 'cash') r.purchasesCash += p.amt; });
+      else if (d.t === 'pret') d.pays.forEach(function (p) { if (p.m === 'cash') r.purchasesCash -= p.amt; });
+    });
+    S.vouchers.forEach(function (v) {
+      if (v.shift !== sh.id || v.status !== 'posted') return;
+      if (v.t === 'exp' && v.method === 'cash') r.expenses += v.amount;
+      else if (v.t === 'rcv' && v.method === 'cash') r.receipts += v.amount;
+      else if (v.t === 'pay' && v.method === 'cash') r.payments += v.amount;
+      else if (v.t === 'trf') { if (v.to === 'cash') r.transfersIn += v.amount; if (v.method === 'cash') r.transfersOut += v.amount; }
+    });
+    r.cashIn = r.cashSales + r.receipts + r.transfersIn;
+    r.cashOut = r.cashReturns + r.expenses + r.payments + r.purchasesCash + r.transfersOut;
+    r.expected = sh.float + r.cashIn - r.cashOut;
+    return r;
+  }
+  // إغلاق الوردية بعدّ النقدية: العجز أو الزيادة بقيد على «عجز وزيادة الصندوق»
+  function shiftClose(inp) {
+    var sh = openShift(); need(sh, 'لا توجد وردية مفتوحة');
+    need(inp && inp.counted !== '' && inp.counted != null && isFinite(inp.counted), 'اكتب النقدية المعدودة في الدرج');
+    var counted = Math.round(inp.counted); need(counted >= 0, 'المبلغ غير صحيح');
+    var r = shiftSummary(sh.id), diff = counted - r.expected, j = null;
+    if (diff) j = postJournal(today(), sh.no, (diff < 0 ? 'عجز الصندوق' : 'زيادة الصندوق') + ' — إغلاق الوردية ' + sh.no + (sh.by ? ' (' + sh.by + ')' : ''), diff < 0 ? [{ a: '5210', dr: -diff }, { a: '1101', cr: -diff }] : [{ a: '1101', dr: diff }, { a: '5210', cr: diff }], { t: 'shift', id: sh.id });
+    sh.status = 'closed'; sh.closedAt = nowIso(); sh.closedBy = CU ? CU.name : ''; sh.counted = counted; sh.expected = r.expected; sh.diff = diff; sh.jid = j ? j.id : null; sh.note = inp.note || sh.note;
+    sh.totals = { sales: r.sales, count: r.count, returns: r.returns, cashSales: r.cashSales, cardSales: r.cardSales, creditSales: r.creditSales, expenses: r.expenses, receipts: r.receipts, payments: r.payments };
+    audit('إغلاق وردية', sh.no); save(); return sh;
+  }
+
+  /* ---------- قارئ الباركود بالكاميرا (EAN-13 / EAN-8 / UPC-A) ---------- */
+  var EAN_L = ['3211', '2221', '2122', '1411', '1132', '1231', '1114', '1312', '1213', '3112'];
+  var EAN_PAR = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+  function eanCheck(code) { var s = 0, n = code.length; for (var i = 0; i < n - 1; i++) s += (+code[n - 2 - i]) * (i % 2 === 0 ? 3 : 1); return (10 - s % 10) % 10 === +code[n - 1]; }
+  // أربعة أشرطة لرقم واحد ← نمط 7 وحدات
+  function digitOf(runs) {
+    var t = runs[0] + runs[1] + runs[2] + runs[3], m = t / 7, w = runs.map(function (x) { return Math.max(1, Math.min(4, Math.round(x / m))); }), sum = w[0] + w[1] + w[2] + w[3];
+    while (sum !== 7) { var bi = 0, be = -1e9; for (var i = 0; i < 4; i++) { var e = sum > 7 ? w[i] - runs[i] / m : runs[i] / m - w[i]; if ((sum > 7 ? w[i] > 1 : w[i] < 4) && e > be) { be = e; bi = i; } } w[bi] += sum > 7 ? -1 : 1; sum += sum > 7 ? -1 : 1; }
+    var k = w.join(''), d = EAN_L.indexOf(k); if (d >= 0) return { d: d, p: 'L' };
+    d = EAN_L.indexOf(k.split('').reverse().join('')); if (d >= 0) return { d: d, p: 'G' };
+    return null;
+  }
+  function guardOk(runs, m) { for (var i = 0; i < runs.length; i++) if (runs[i] < m * 0.45 || runs[i] > m * 1.8) return false; return true; }
+  // runs: أطوال متتالية تبدأ بشريط داكن
+  function decodeRuns(runs) {
+    var i, k, out;
+    for (i = 0; i + 43 <= runs.length; i += 2) {
+      // EAN-13: 59 شريطاً، 95 وحدة
+      if (i + 59 <= runs.length) {
+        var seg = runs.slice(i, i + 59), tot = 0; for (k = 0; k < 59; k++) tot += seg[k];
+        var m = tot / 95;
+        if (guardOk(seg.slice(0, 3), m) && guardOk(seg.slice(27, 32), m) && guardOk(seg.slice(56, 59), m) && (i === 0 || runs[i - 1] > m * 4)) {
+          out = ''; var par = '';
+          for (k = 0; k < 6 && out !== null; k++) { var r = digitOf(seg.slice(3 + k * 4, 7 + k * 4)); if (!r) out = null; else { out += r.d; par += r.p; } }
+          for (k = 0; k < 6 && out !== null; k++) { var q = digitOf(seg.slice(32 + k * 4, 36 + k * 4)); if (!q || q.p !== 'L') out = null; else out += q.d; }
+          if (out !== null) { var f = EAN_PAR.indexOf(par); if (f >= 0 && eanCheck(f + out)) return f + out; }
+        }
+      }
+      // EAN-8: 43 شريطاً، 67 وحدة
+      var s8 = runs.slice(i, i + 43), t8 = 0; for (k = 0; k < 43; k++) t8 += s8[k];
+      var m8 = t8 / 67;
+      if (guardOk(s8.slice(0, 3), m8) && guardOk(s8.slice(19, 24), m8) && guardOk(s8.slice(40, 43), m8) && (i === 0 || runs[i - 1] > m8 * 4)) {
+        out = '';
+        for (k = 0; k < 4 && out !== null; k++) { var a = digitOf(s8.slice(3 + k * 4, 7 + k * 4)); if (!a || a.p !== 'L') out = null; else out += a.d; }
+        for (k = 0; k < 4 && out !== null; k++) { var b = digitOf(s8.slice(24 + k * 4, 28 + k * 4)); if (!b || b.p !== 'L') out = null; else out += b.d; }
+        if (out !== null && eanCheck(out)) return out;
+      }
+    }
+    return null;
+  }
+  function runsOf(row) {
+    var mn = 255, mx = 0, i; for (i = 0; i < row.length; i++) { if (row[i] < mn) mn = row[i]; if (row[i] > mx) mx = row[i]; }
+    if (mx - mn < 40) return null;
+    var th = (mn + mx) / 2, runs = [], cur = row[0] < th, len = 0, started = false;
+    for (i = 0; i < row.length; i++) {
+      var dark = row[i] < th;
+      if (dark === cur) len++; else { if (started || cur) { runs.push(len); started = true; } cur = dark; len = 1; }
+    }
+    if (started) runs.push(len);
+    return runs;
+  }
+  // gray: صورة رمادية (Uint8Array عرض × ارتفاع). يجرّب عدة أسطر أفقية من المنتصف وفي الاتجاهين.
+  function scanBarcode(gray, w, h) {
+    var rows = [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65, 0.3, 0.7, 0.25, 0.75];
+    for (var k = 0; k < rows.length; k++) {
+      var y = Math.floor(h * rows[k]), row = Array.prototype.slice.call(gray, y * w, y * w + w);
+      for (var dir = 0; dir < 2; dir++) {
+        var runs = runsOf(dir ? row.slice().reverse() : row); if (!runs) break;
+        var c = decodeRuns(runs); if (c) return c;
+      }
+    }
+    return null;
+  }
+  // البحث عن صنف بالباركود: يقبل UPC-A المقروء كـ EAN-13 بصفر في أوله
+  function productByBarcode(code) {
+    code = String(code || '').trim(); if (!code) return null;
+    for (var i = 0; i < S.products.length; i++) { var p = S.products[i]; if (p.active !== false && p.barcode && (p.barcode === code || (code.length === 13 && code[0] === '0' && p.barcode === code.slice(1)) || (p.barcode.length === 13 && p.barcode[0] === '0' && p.barcode.slice(1) === code))) return p; }
+    return null;
   }
 
   /* ---------- التقارير ---------- */
@@ -391,17 +600,18 @@ var Mizan = (function () {
     return { assets: A, liabilities: L, equity: E, totalAssets: ta, totalLiabilities: tl, totalEquity: te, balanced: ta === tl + te };
   }
   function vatReport(from, to) {
-    var r = { salesStd: 0, salesStdVat: 0, salesZero: 0, returns: 0, returnsVat: 0, purchases: 0, purchasesVat: 0, expenses: 0, expensesVat: 0 };
+    var r = { salesStd: 0, salesStdVat: 0, salesZero: 0, returns: 0, returnsVat: 0, purchases: 0, purchasesVat: 0, purchaseReturns: 0, purchaseReturnsVat: 0, expenses: 0, expensesVat: 0 };
     S.docs.forEach(function (d) {
       if (d.status !== 'posted' || !inRange(d.date, from, to)) return;
       d.lines.forEach(function (l) {
         if (d.t === 'sale') { if (l.rate > 0) { r.salesStd += l.net; r.salesStdVat += l.vat; } else r.salesZero += l.net; }
         else if (d.t === 'sret') { r.returns += l.net; r.returnsVat += l.vat; }
         else if (d.t === 'pur') { r.purchases += l.net; r.purchasesVat += l.vat; }
+        else if (d.t === 'pret') { r.purchaseReturns += l.net; r.purchaseReturnsVat += l.vat; }
       });
     });
     S.vouchers.forEach(function (v) { if (v.t === 'exp' && v.status === 'posted' && v.vat > 0 && inRange(v.date, from, to)) { r.expenses += v.net; r.expensesVat += v.vat; } });
-    r.outputVat = r.salesStdVat - r.returnsVat; r.inputVat = r.purchasesVat + r.expensesVat; r.netVat = r.outputVat - r.inputVat;
+    r.outputVat = r.salesStdVat - r.returnsVat; r.inputVat = r.purchasesVat - r.purchaseReturnsVat + r.expensesVat; r.netVat = r.outputVat - r.inputVat;
     var m = balances(from, to), o = m['2102'] || { dr: 0, cr: 0 }, i = m['1105'] || { dr: 0, cr: 0 };
     r.ledgerOutput = o.cr - o.dr; r.ledgerInput = i.dr - i.cr;
     return r;
@@ -428,6 +638,7 @@ var Mizan = (function () {
         d.lines.forEach(function (l) { r.cogs += l.cost || 0; var k = l.name; tp[k] = tp[k] || { name: k, qty: 0, total: 0 }; tp[k].qty += l.qty; tp[k].total += l.total; });
       } else if (d.t === 'sret') { r.returns += d.total; r.cogs -= d.lines.reduce(function (a, l) { return a + (l.cost || 0); }, 0); }
       else if (d.t === 'pur') r.purchases += d.total;
+      else if (d.t === 'pret') r.purchases -= d.total;
     });
     S.vouchers.forEach(function (v) { if (v.date === date && v.status === 'posted' && v.t === 'exp') r.expenses += v.amount; });
     for (var k in tp) r.top.push(tp[k]); r.top.sort(function (a, b) { return b.total - a.total; }); r.top = r.top.slice(0, 8);
@@ -462,7 +673,8 @@ var Mizan = (function () {
       { name: 'ضريبة المخرجات في المستندات = الأستاذ', ok: vr.outputVat === vr.ledgerOutput },
       { name: 'ضريبة المدخلات في المستندات = الأستاذ', ok: vr.inputVat === vr.ledgerInput },
       { name: 'أرصدة العملاء = حساب العملاء', ok: ar === gl('1103', 1) },
-      { name: 'أرصدة الموردين = حساب الموردين', ok: ap === gl('2101', -1) }
+      { name: 'أرصدة الموردين = حساب الموردين', ok: ap === gl('2101', -1) },
+      { name: 'فروقات الورديات المغلقة مقيدة على «عجز وزيادة الصندوق»', ok: S.shifts.reduce(function (a, sh) { return a + (sh.status === 'closed' ? -(sh.diff || 0) : 0); }, 0) === S.journals.reduce(function (a, j) { return a + (j.src && j.src.t === 'shift' ? j.lines.reduce(function (b, l) { return b + (l.a === '5210' ? l.dr - l.cr : 0); }, 0) : 0); }, 0) }
     ];
   }
 
@@ -509,8 +721,9 @@ var Mizan = (function () {
   }
 
   /* ---------- بيانات تجريبية ---------- */
+  function withCheck(c12) { for (var d = 0; d < 10; d++) if (eanCheck(c12 + d)) return c12 + d; return c12; }
   function loadDemo() {
-    var keep = S.settings, wasSetup = S.setup; S = defaults(); S.settings = keep; S.setup = wasSetup; S.demo = true;
+    var keep = S.settings, wasSetup = S.setup, users = S.users || [], rs = keep.requireShift; S = defaults(); S.settings = keep; S.setup = wasSetup; S.users = users; S.demo = true; keep.requireShift = false;
     if (!S.settings.name) { S.settings.name = 'مؤسسة الواحة التجارية'; S.settings.vat = '310123456700003'; S.settings.cr = '4030123456'; S.settings.address = 'شارع إبراهيم الخليل'; S.settings.city = 'مكة المكرمة'; S.settings.phone = '0500000000'; }
     var t = today(), cats = {}, P = {};
     ['مشروبات', 'مخبوزات', 'بقالة', 'منظفات', 'خدمات'].forEach(function (n) { cats[n] = saveCat({ name: n }).id; });
@@ -518,7 +731,7 @@ var Mizan = (function () {
     ['خبز تميس', 200, 'مخبوزات', 90, 0], ['كرواسون', 600, 'مخبوزات', 250, 0], ['كيك شوكولاتة', 1500, 'مخبوزات', 700, 0],
     ['أرز بسمتي 5 كجم', 4500, 'بقالة', 3300, 0], ['زيت طبخ 1.5 لتر', 2300, 'بقالة', 1700, 0], ['سكر 2 كجم', 1100, 'بقالة', 800, 0], ['تمر سكري 1 كجم', 3500, 'بقالة', 2200, 0], ['حليب طويل الأجل', 650, 'بقالة', 450, 0],
     ['صابون سائل', 1400, 'منظفات', 900, 0], ['مناديل 10 علب', 2000, 'منظفات', 1350, 0], ['توصيل طلب', 1000, 'خدمات', 0, 0, 1]].forEach(function (r, i) {
-      P[r[0]] = saveProduct({ name: r[0], price: r[1], cat: cats[r[2]], cost: r[3], service: !!r[5], barcode: r[5] ? '' : String(6281000000001 + i), min: r[5] ? 0 : 5 });
+      P[r[0]] = saveProduct({ name: r[0], price: r[1], cat: cats[r[2]], cost: r[3], service: !!r[5], barcode: r[5] ? '' : withCheck(String(628100000000 + i)), min: r[5] ? 0 : 5 });
     });
     var cu1 = saveParty({ role: 'c', name: 'مطعم البيت السعيد', phone: '0551112233', vat: '300987654300003', address: 'حي العزيزية، مكة المكرمة' });
     var cu2 = saveParty({ role: 'c', name: 'أحمد عبدالله', phone: '0567778899' });
@@ -551,7 +764,7 @@ var Mizan = (function () {
     expense({ date: addDays(t, -1), acc: '5201', amount: 15000, method: 'bank', desc: 'رواتب العاملين' });
     var bal = partyBalance(cu1.id); if (bal > 20000) voucher({ kind: 'in', partyId: cu1.id, amount: Math.round(bal / 2 / 100) * 100, method: 'cash', desc: 'دفعة من الحساب', date: addDays(t, -2) });
     voucher({ kind: 'out', partyId: su2.id, amount: 60000, method: 'bank', desc: 'دفعة للمورد', date: addDays(t, -4) });
-    S.demo = true; audit('تحميل بيانات تجريبية'); save(); return S;
+    keep.requireShift = rs; S.demo = true; audit('تحميل بيانات تجريبية'); save(); return S;
   }
 
   return {
@@ -561,7 +774,10 @@ var Mizan = (function () {
     uid: uid, today: today, addDays: addDays, toH: toH, num: num, fmt: fmt, byId: byId, account: account, validVat: validVat,
     postJournal: postJournal, manualJournal: manualJournal, reverseJournal: reverseJournal,
     saveCat: saveCat, saveProduct: saveProduct, adjustStock: adjustStock, saveParty: saveParty, partyBalance: partyBalance,
-    computeLines: computeLines, sale: sale, saleReturn: saleReturn, purchase: purchase, expense: expense,
+    computeLines: computeLines, sale: sale, saleReturn: saleReturn, purchase: purchase, purchaseReturn: purchaseReturn, expense: expense,
+    ROLES: ROLES, can: can, saveUser: saveUser, removeUser: removeUser, clearUsers: clearUsers, login: login, logout: logout, get user() { return CU; }, sha256: sha256,
+    openShift: openShift, shiftOpen: shiftOpen, shiftClose: shiftClose, shiftSummary: shiftSummary,
+    scanBarcode: scanBarcode, decodeRuns: decodeRuns, eanCheck: eanCheck, productByBarcode: productByBarcode,
     voucher: voucher, transfer: transfer, cancel: cancel,
     addAccount: function (a) { need(/^\d{4,6}$/.test(a.code), 'رمز الحساب 4–6 أرقام'); need(!account(a.code), 'الرمز مستخدم'); need(a.name, 'اكتب اسم الحساب'); need({ 1: 'A', 2: 'L', 3: 'E', 4: 'R', 5: 'X' }[a.code[0]] === a.type, 'الرمز يجب أن يبدأ برقم نوع الحساب (1 أصول، 2 خصوم، 3 ملكية، 4 إيرادات، 5 مصروفات)'); S.accounts.push({ code: a.code, name: a.name, type: a.type }); save(); },
     balances: balances, trialBalance: trialBalance, incomeStatement: incomeStatement, balanceSheet: balanceSheet, vatReport: vatReport, ledger: ledger, daily: daily, salesByProduct: salesByProduct, stockValue: stockValue, lowStock: lowStock, integrity: integrity,

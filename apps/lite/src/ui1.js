@@ -42,11 +42,14 @@ function go(name, arg) { route = { name: name, arg: arg == null ? null : arg }; 
 function render() {
   S = M.state; applyDisplay();
   var app = $('#app');
-  if (!S.setup) { app.classList.add('nosh'); $('#nav').style.display = 'none'; $('#tabbar').style.display = 'none'; $('#top').style.display = 'none'; $('#view').className = ''; $('#view').innerHTML = pages.setup.render(); return; }
-  $('#nav').style.display = ''; $('#tabbar').style.display = ''; $('#top').style.display = '';
+  var locked = S.setup && S.users.length && !M.user;
+  if (!S.setup || locked) { app.classList.add('nosh'); $('#nav').style.display = 'none'; $('#tabbar').style.display = 'none'; $('#top').style.display = 'none'; $('#view').className = ''; $('#view').innerHTML = (locked ? pages.lock : pages.setup).render(); return; }
+  app.classList.remove('nosh'); $('#nav').style.display = '';
+  if (!M.can(route.name)) route = { name: M.can('home') ? 'home' : 'pos', arg: null };
+  $$('[data-nav]').forEach(function (a) { a.style.display = M.can(a.getAttribute('data-nav')) || a.getAttribute('data-nav') === 'more' ? '' : 'none'; }); $('#tabbar').style.display = ''; $('#top').style.display = '';
   var p = pages[route.name] || pages.home, phoneTab = TABS.some(function (t) { return t[0] === route.name; }) ? route.name : 'more';
   $$('[data-nav]').forEach(function (a) { var k = a.getAttribute('data-nav'); a.classList.toggle('on', a.parentNode.id === 'tabbar' ? k === phoneTab : k === route.name); });
-  $('#top').innerHTML = '<h1>' + esc(typeof p.title === 'function' ? p.title() : p.title) + '</h1><div class="acts row">' + (p.acts ? p.acts() : '') + '</div>';
+  $('#top').innerHTML = '<h1>' + esc(typeof p.title === 'function' ? p.title() : p.title) + '</h1><div class="acts row">' + (p.acts ? p.acts() : '') + (S.users.length && M.user ? '<button class="btn ghost sm" data-act="lock" title="قفل الجهاز" data-lock>' + ic('lock') + '<span class="who">' + esc(M.user.name) + '</span></button>' : '') + '</div>';
   $('#view').className = p.flush ? 'flush' : '';
   $('#view').innerHTML = p.render(route.arg);
   if (p.after) p.after();
@@ -153,6 +156,7 @@ function cartHtml() {
       return '<div class="cl"><div class="grow" data-act="pos-line" data-i="' + i + '"><div class="t">' + esc(l.name) + '</div><div class="sm mut"><span class="num">' + M.fmt(l.price) + '</span>' + (l.disc ? ' · خصم <span class="num">' + M.fmt(l.disc) + '</span>' : '') + ' · <b class="num">' + M.fmt(Math.round(l.qty * l.price) - l.disc) + '</b></div></div><div class="qty"><button data-act="pos-qty" data-i="' + i + '" data-d="-1" aria-label="إنقاص">−</button><span class="num">' + qtyf(l.qty) + '</span><button data-act="pos-qty" data-i="' + i + '" data-d="1" aria-label="زيادة">＋</button></div></div>';
     }).join('') : '<div class="empty">السلة فارغة<br><span class="sm">اضغط على الصنف لإضافته</span></div>') + '</div>' +
     '<div class="cart-f"><div class="ln"><span>قبل الضريبة</span>' + money(c.net) + '</div>' + (c.discount ? '<div class="ln"><span>خصم الفاتورة</span>' + money(c.discount) + '</div>' : '') + '<div class="ln"><span>ضريبة القيمة المضافة ' + S.settings.vatRate + '%</span>' + money(c.vat) + '</div><div class="ln tt"><span>الإجمالي</span>' + money(c.total) + '</div>' +
+    (S.settings.requireShift && !M.openShift() ? '<div class="note sm" style="margin:6px 0">لا توجد وردية مفتوحة. <a class="b" data-act="shift-open" style="text-decoration:underline;cursor:pointer">فتح وردية</a></div>' : '') +
     '<div class="row"><button class="btn green big grow" data-act="pos-pay"' + (cart.lines.length ? '' : ' disabled') + '>دفع</button></div><div class="cbtns"><button class="btn ghost sm grow" data-act="pos-disc">خصم</button><button class="btn ghost sm grow" data-act="pos-hold">تعليق</button><button class="btn ghost sm grow" data-act="pos-held">المعلّقة (' + S.held.length + ')</button><button class="btn ghost sm" data-act="pos-clear">مسح</button></div></div>';
 }
 function drawCart() {
@@ -164,7 +168,7 @@ pages.pos = {
   title: 'نقطة البيع', flush: true,
   acts: function () { return '<button class="btn ghost sm" data-act="go" data-to="docs">آخر الفواتير</button>'; },
   render: function () {
-    return '<div class="pos" id="pos"><div class="pos-cat"><div class="row" style="margin-bottom:8px"><input class="grow" id="pos-q" data-in="pos-q" placeholder="ابحث بالاسم أو امسح الباركود" value="' + esc(posQ) + '" autocomplete="off" enterkeyhint="search"></div>' +
+    return '<div class="pos" id="pos"><div class="pos-cat"><div class="row" style="margin-bottom:8px"><input class="grow" id="pos-q" data-in="pos-q" placeholder="ابحث بالاسم أو امسح الباركود" value="' + esc(posQ) + '" autocomplete="off" enterkeyhint="search"><button class="btn ghost" data-act="scan" data-for="pos" aria-label="قراءة الباركود بالكاميرا" title="قراءة الباركود بالكاميرا" data-scan-pos>' + ic('cam') + '</button></div>' +
       '<div class="chips"><button class="chip' + (posCat ? '' : ' on') + '" data-act="pos-cat" data-id="">الكل</button>' + S.cats.map(function (c) { return '<button class="chip' + (posCat === c.id ? ' on' : '') + '" data-act="pos-cat" data-id="' + c.id + '">' + esc(c.name) + '</button>'; }).join('') + '</div>' +
       '<div class="pos-grid" id="pos-grid">' + posTiles() + '</div><button class="cartbar" id="cartbar" data-act="pos-showcart"></button></div><div class="pos-cart" id="pos-cart"></div></div>';
   },

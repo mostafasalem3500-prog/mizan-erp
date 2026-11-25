@@ -8,7 +8,7 @@ pages.docs = {
   acts: function () { return '<button class="btn ghost sm" data-act="new-purchase">' + ic('plus') + 'فاتورة مشتريات</button>'; },
   render: function () {
     var f = flt.docs, q = norm(f.q), list = S.docs.filter(function (d) { return d.t === f.t && (!q || norm(d.no + ' ' + d.partyName).indexOf(q) >= 0); }).slice().reverse();
-    return tabs('docs-t', [['sale', 'المبيعات'], ['sret', 'المرتجعات'], ['pur', 'المشتريات']], f.t) + '<div class="tools"><input data-in="docs-q" placeholder="بحث بالرقم أو الاسم" value="' + esc(f.q) + '"></div><div class="card" id="docs-list">' + docsList(list) + '</div>';
+    return tabs('docs-t', [['sale', 'المبيعات'], ['sret', 'المرتجعات'], ['pur', 'المشتريات'], ['pret', 'مرتجعات المشتريات']], f.t) + '<div class="tools"><input data-in="docs-q" placeholder="بحث بالرقم أو الاسم" value="' + esc(f.q) + '"></div><div class="card" id="docs-list">' + docsList(list) + '</div>';
   }
 };
 function docsList(list) {
@@ -41,7 +41,7 @@ actions['edit-product'] = function (el) {
   var p = M.byId(S.products, el.getAttribute('data-id')) || {}, isNew = !p.id; imgTmp = p.img || '';
   modal(isNew ? 'صنف جديد' : 'تعديل: ' + p.name, fld('اسم الصنف *', 'name', p.name, 'autofocus') + '<div class="grid g2">' + nfld('سعر البيع ' + (S.settings.pricesIncl ? '(شامل الضريبة)' : '(قبل الضريبة)') + ' *', 'price', p.price != null ? (p.price / 100).toFixed(2) : '') + sel('الضريبة', 'rate', [[S.settings.vatRate, S.settings.vatRate + '% خاضع'], [0, '0% صفري / معفى']], p.rate == null ? S.settings.vatRate : p.rate) + '</div>' +
     (isNew ? '<div class="grid g2">' + nfld('تكلفة الشراء للوحدة (قبل الضريبة)', 'cost', '') + nfld('الكمية الحالية (رصيد افتتاحي)', 'stock', '') + '</div>' : '') +
-    '<div class="grid g2">' + fld('الباركود', 'barcode', p.barcode, 'class="n" inputmode="numeric"') + sel('التصنيف', 'cat', [['', 'بدون']].concat(S.cats.map(function (c) { return [c.id, c.name]; })), p.cat) + '</div><div class="grid g2">' + fld('الوحدة', 'unit', p.unit || 'حبة') + nfld('حد إعادة الطلب', 'min', p.min || '') + '</div>' +
+    '<div class="grid g2"><div class="row" style="align-items:flex-end;gap:6px"><div class="grow">' + fld('الباركود', 'barcode', p.barcode, 'class="n" inputmode="numeric"') + '</div><button class="btn ghost" data-act="scan" data-for="prod" aria-label="قراءة الباركود بالكاميرا" style="margin-bottom:12px" data-scan-prod>' + ic('cam') + '</button></div>' + sel('التصنيف', 'cat', [['', 'بدون']].concat(S.cats.map(function (c) { return [c.id, c.name]; })), p.cat) + '</div><div class="grid g2">' + fld('الوحدة', 'unit', p.unit || 'حبة') + nfld('حد إعادة الطلب', 'min', p.min || '') + '</div>' +
     (isNew ? chk('خدمة (بلا مخزون)', 'service', false) : chk('الصنف فعّال ويظهر في نقطة البيع', 'active', p.active !== false)) +
     '<div class="row"><div class="tile" style="width:64px;min-height:64px;padding:0;border:0"><div class="im" id="img-pv" style="height:64px;margin:0' + (imgTmp ? ';background-image:url(' + imgTmp + ')' : '') + '"></div></div><label class="btn ghost sm">صورة الصنف<input type="file" accept="image/*" data-in="prod-img" style="display:none"></label>' + (imgTmp ? '<button class="btn ghost sm" data-act="prod-img-del">حذف الصورة</button>' : '') + '</div>',
     (isNew || p.service ? '' : '<button class="btn ghost" data-act="adj-stock" data-id="' + p.id + '">جرد / تسوية الكمية</button>') + '<button class="btn" data-act="save-product" data-id="' + (p.id || '') + '">حفظ</button>');

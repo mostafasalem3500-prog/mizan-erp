@@ -101,7 +101,8 @@ function sampleDoc() { var c = M.computeLines([{ name: 'صنف تجريبي أو
 pages.settings = {
   title: 'الإعدادات',
   render: function () {
-    var s = S.settings, h = tabs('set-t', [['co', 'المنشأة'], ['dev', 'الجهاز والعرض'], ['tpl', 'قوالب الطباعة'], ['data', 'البيانات والنسخ'], ['upd', 'التحديث وعن النسخة']], setTab);
+    var s = S.settings, h = tabs('set-t', [['co', 'المنشأة'], ['users', 'المستخدمون والورديات'], ['dev', 'الجهاز والعرض'], ['tpl', 'قوالب الطباعة'], ['data', 'البيانات والنسخ'], ['upd', 'التحديث وعن النسخة']], setTab);
+    if (setTab === 'users') h += usersTab();
     if (setTab === 'co') h += '<div class="card" id="set-f">' + fld('اسم المنشأة *', 'name', s.name) + fld('الاسم بالإنجليزية (اختياري)', 'nameEn', s.nameEn, 'dir="ltr"') + '<div class="grid g2">' + fld('الرقم الضريبي', 'vat', s.vat, 'class="n" inputmode="numeric" maxlength="15"') + fld('السجل التجاري', 'cr', s.cr, 'class="n" inputmode="numeric"') + '</div><div class="grid g2">' + fld('المدينة', 'city', s.city) + fld('العنوان', 'address', s.address) + '</div>' + fld('الجوال', 'phone', s.phone, 'class="n" inputmode="tel"') + '<div class="row" style="margin-bottom:12px">' + (s.logo ? '<img src="' + s.logo + '" alt="الشعار" style="height:54px;border-radius:8px;border:1px solid var(--line)">' : '') + '<label class="btn ghost sm">' + (s.logo ? 'تغيير الشعار' : 'رفع الشعار') + '<input type="file" accept="image/*" data-in="logo" style="display:none"></label>' + (s.logo ? '<button class="btn ghost sm" data-act="logo-del">حذف</button>' : '') + '</div>' +
       chk('أسعار البيع شاملة ضريبة القيمة المضافة', 'pricesIncl', s.pricesIncl) + sel('عند بيع صنف رصيده لا يكفي', 'oversell', [['ask', 'اسأل الكاشير ثم اسمح'], ['allow', 'اسمح دائماً'], ['block', 'امنع البيع']], s.oversell) + '<button class="btn" data-act="set-save">حفظ</button></div>';
     if (setTab === 'dev') h += '<div class="card"><h3>نوع الجهاز ومقاس الشاشة</h3>' + deviceGrid(s.mode) + '<div class="sm mut">المقاس الحالي للشاشة: <span class="num">' + window.innerWidth + '×' + window.innerHeight + '</span> — الوضع المطبَّق: ' + { phone: 'جوال', handheld: 'جهاز دفع محمول', tablet: 'كاشير صغير / تابلت', desktop: 'كاشير كبير / لابتوب' }[resolveMode()] + '</div></div>' +
@@ -157,7 +158,7 @@ actions['upd-check'] = function () {
 actions['open-url'] = function (el) { var u = el.getAttribute('data-url'); if (NATIVE && NATIVE.openUrl) NATIVE.openUrl(u); else window.open(u, '_blank'); };
 
 /* ---------- المزيد (الجوال) ---------- */
-pages.more = { title: 'المزيد', render: function () { return '<div class="card"><div class="list">' + NAV.filter(function (n) { return !TABS.some(function (t) { return t[0] === n[0]; }); }).map(function (n) { return '<div data-act="go" data-to="' + n[0] + '"><span style="width:26px;height:26px;margin-inline-end:12px;color:var(--navy2)">' + ic(n[2]) + '</span><div class="grow t">' + n[1] + '</div><span class="mut">‹</span></div>'; }).join('') + '</div></div><div class="c sm mut">ميزان لايت — الإصدار ' + M.VERSION + '</div>'; } };
+pages.more = { title: 'المزيد', render: function () { return '<div class="card"><div class="list">' + NAV.filter(function (n) { return M.can(n[0]) && !TABS.some(function (t) { return t[0] === n[0]; }); }).map(function (n) { return '<div data-act="go" data-to="' + n[0] + '"><span style="width:26px;height:26px;margin-inline-end:12px;color:var(--navy2)">' + ic(n[2]) + '</span><div class="grow t">' + n[1] + '</div><span class="mut">‹</span></div>'; }).join('') + '</div></div><div class="c sm mut">ميزان لايت — الإصدار ' + M.VERSION + '</div>'; } };
 
 /* ---------- دليل الاستخدام المصوّر ---------- */
 function shot(inner) { return '<div class="shot"><svg viewBox="0 0 320 150" font-family="Tajawal,Tahoma" direction="rtl">' + inner + '</svg></div>'; }
@@ -175,7 +176,8 @@ pages.guide = {
       '<div class="card"><h3>٤ — الطباعة والقوالب</h3>' + shot(G.bx(0, 0, 320, 150, '#f3f5f9', 10) + G.bx(238, 12, 66, 126, '#fff', 3) + G.tx(271, 28, 'إيصال 80مم', 8) + G.bx(250, 96, 42, 34, '#17202e', 2) + G.bx(170, 22, 52, 116, '#fff', 3) + G.tx(196, 38, '58مم', 8) + G.bx(182, 104, 28, 26, '#17202e', 2) + G.bx(16, 12, 138, 126, '#fff', 3) + G.bx(16, 12, 138, 20, '#14274e', 3) + G.tx(85, 26, 'فاتورة ضريبية A4', 9, '#fff') + G.bx(26, 96, 30, 30, '#17202e', 2) + G.bx(70, 104, 74, 12, '#c9a227', 2)) +
       step(1, 'من <b>الإعدادات ← قوالب الطباعة</b> اختر قالب الإيصال (58 أو 80 مم) وقالب فاتورة A4/A5.') + step(2, 'في نافذة أي فاتورة يمكنك التبديل بين القوالب قبل الطباعة.') + step(3, 'الطابعات الحرارية على أندرويد تعمل عبر «خدمة طباعة» مثبّتة على الجهاز (تطبيق الشركة المصنّعة أو تطبيق وسيط مثل RawBT للبلوتوث و USB).') + '</div>' +
       '<div class="card"><h3>٥ — مقاس الجهاز</h3>' + step(1, 'من <b>الإعدادات ← الجهاز والعرض</b> اختر: جوال، جهاز دفع محمول، كاشير صغير، أو كاشير كبير / لابتوب.') + step(2, 'تتغير القوائم وشبكة الأصناف والسلة لتناسب الشاشة، ويمكن تكبير الخط والأزرار.') + '</div>' +
-      '<div class="card"><h3>٦ — التقارير والنسخ الاحتياطي</h3>' + step(1, '<b>التقارير</b>: اليومي، المبيعات بالصنف، قائمة الدخل، الميزانية، ميزان المراجعة، ملخص الضريبة، المخزون.') + step(2, '<b>فحص الدفاتر</b> يؤكد أن كل الحركات مربوطة بقيودها ومتوازنة.') + step(3, 'البيانات على الجهاز فقط: خذ <b>نسخة احتياطية</b> بانتظام من الإعدادات ← البيانات والنسخ.') + '</div></div>';
+      '<div class="card"><h3>٦ — الورديات والمستخدمون والكاميرا</h3>' + step(1, '<b>الورديات</b>: افتح وردية بعدّ النقدية في الدرج، وعند الإغلاق اكتب المعدود: يحسب البرنامج المتوقع (الافتتاح + النقدي الداخل − الخارج) ويقيّد العجز أو الزيادة، ويطبع تقرير الإغلاق (Z).') + step(2, 'من <b>الإعدادات ← المستخدمون والورديات</b> أضف المالك ثم الكاشيرية برمز سري: يُطلب الرمز عند الفتح، وتُسجّل كل فاتورة باسم من أصدرها، والكاشير لا يرى إلا البيع والمرتجع والوردية.') + step(3, 'زر الكاميرا بجوار البحث في نقطة البيع يقرأ باركود الأصناف (EAN-13 و EAN-8 و UPC-A) ويضيفها للسلة واحداً بعد الآخر. وفي نموذج الصنف يملأ خانة الباركود.') + step(4, '<b>مرتجع المشتريات</b>: افتح فاتورة المشتريات ← «مرتجع مشتريات»، فتخرج الكميات وتُعكس ضريبة المدخلات ويُخصم من حساب المورد أو يُسترد نقداً.') + '</div>' +
+      '<div class="card"><h3>٧ — التقارير والنسخ الاحتياطي</h3>' + step(1, '<b>التقارير</b>: اليومي، المبيعات بالصنف، قائمة الدخل، الميزانية، ميزان المراجعة، ملخص الضريبة، المخزون.') + step(2, '<b>فحص الدفاتر</b> يؤكد أن كل الحركات مربوطة بقيودها ومتوازنة.') + step(3, 'البيانات على الجهاز فقط: خذ <b>نسخة احتياطية</b> بانتظام من الإعدادات ← البيانات والنسخ.') + '</div></div>';
   }
 };
 
@@ -191,7 +193,7 @@ document.addEventListener('change', function (ev) { var t = ev.target; if (t.tag
 document.addEventListener('keydown', function (ev) {
   if (ev.key === 'Escape' && $('#modal').classList.contains('open')) return closeModal();
   if (ev.key === 'Enter' && ev.target.id === 'pos-q') {
-    var q = ev.target.value.trim(); if (!q) return; var hit = null; S.products.forEach(function (p) { if (p.barcode && p.barcode === q && p.active !== false) hit = p; });
+    var q = ev.target.value.trim(); if (!q) return; var hit = M.productByBarcode(q);
     if (!hit) { var l = S.products.filter(function (p) { return p.active !== false && norm(p.name).indexOf(norm(q)) >= 0; }); if (l.length === 1) hit = l[0]; }
     if (hit) { addToCart(hit); posQ = ''; ev.target.value = ''; $('#pos-grid').innerHTML = posTiles(); } else toast('لا يوجد صنف بهذا الباركود', true);
   }
@@ -207,4 +209,3 @@ window.mizanBack = function () {
   if (S && S.setup && route.name !== 'home') { go('home'); return true; }
   return false;
 };
-M.load(function (st) { S = st; shell(); render(); });
