@@ -40,11 +40,12 @@ export const ROLES: Record<string, { ar: string; perms: string[] }> = {
   ADMIN: { ar: "مدير النظام", perms: ["*"] },
   ACCOUNTANT: {
     ar: "محاسب",
-    perms: ["*.read", "sales.write", "purchases.write", "payments.write", "expenses.write", "accounting.write", "inventory.write", "assets.write", "vat.write", "pos.use", "partners.write", "products.write"],
+    perms: ["*.read", "sales.write", "purchases.write", "payments.write", "expenses.write", "accounting.write", "inventory.write", "assets.write", "vat.write", "pos.use", "partners.write", "products.write", "mfg.write"],
   },
   SALES: { ar: "مندوب مبيعات", perms: ["sales.read", "sales.write", "partners.read", "partners.write", "products.read", "inventory.read", "payments.read", "payments.write", "dashboard.read", "reports.sales"] },
   CASHIER: { ar: "كاشير", perms: ["pos.use", "products.read", "partners.read", "partners.write", "sales.read", "dashboard.read"] },
-  STOREKEEPER: { ar: "أمين مستودع", perms: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"] },
+  STOREKEEPER: { ar: "أمين مستودع", perms: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read", "mfg.read", "mfg.write"] },
+  PRODUCTION: { ar: "مشرف إنتاج", perms: ["mfg.read", "mfg.write", "products.read", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"] },
   VIEWER: { ar: "مشاهد / مدقق", perms: ["*.read"] },
 };
 

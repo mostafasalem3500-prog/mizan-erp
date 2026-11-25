@@ -104,6 +104,9 @@ export const ABOUT = "أنا المساعد المحاسبي المدمج في �
 
 /** Phrases → the lesson (shared/lessons.ts) that shows how to do it in the program. First match wins: specific before general. */
 export const LESSON_KEYS: { keys: RegExp; id: string }[] = [
+  { keys: /قائمه (ال)?مواد|خلطه|خلطات|مراكز (ال)?عمل|مركز عمل|bom/, id: "mfg-setup" },
+  { keys: /امر (ال)?تصنيع|اوامر (ال)?تصنيع|تحت التشغيل|شاشه (ال)?ورشه|استلام (ال)?انتاج/, id: "mfg-orders" },
+  { keys: /تخطيط (ال)?احتياجات|mrp|جدوله (ال)?انتاج|احمال|فك (ال)?منتج|تفكيك/, id: "mfg-plan" },
   { keys: /رصيد افتتاح|ارصده افتتاح|أرصدة افتتاح|ابدا العمل|أبدأ العمل|بدايه العمل/, id: "opening" },
   { keys: /مرتجع (ال)?مشتريات|ارجاع (ل|الى |إلى )?(ال)?مورد|ارجع بضاعه للمورد/, id: "purchase-return" },
   { keys: /مرتجع|ارجاع|إرجاع|اشعار دائن|إشعار دائن/, id: "credit-note" },

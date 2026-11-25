@@ -403,6 +403,28 @@ function peakAnswer(r: any): string {
   if (r.untimed) out.push("", `${r.untimed} فاتورة بلا وقت مسجل لم تدخل التوزيع على الساعات.`);
   return out.join("\n");
 }
+function mfgAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  const C = r.counts;
+  if (!C.boms) return "لم تُعرَّف قوائم مواد بعد. ابدأ من [لوحة التصنيع](/mfg): مراكز العمل، ثم قائمة المواد، ثم أمر التصنيع — أو حمّل المثال الجاهز منها.";
+  const ST: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", IN_PROGRESS: "قيد التنفيذ" };
+  const AVL: Record<string, string> = { OK: "متوفرة", PARTIAL: "ناقصة جزئياً", SHORT: "ناقصة" };
+  const out = [`**التصنيع الآن:** ${C.inProgress} قيد التنفيذ، ${C.confirmed} مؤكد، ${C.draft} مسودة. إنتاج تحت التشغيل ${money(r.wip.orders)} ${cur}${r.wip.match ? " (مطابق للأستاذ)" : ` — الأستاذ ${money(r.wip.ledger)}: غير مطابق`}.`, `- إنتاج هذا الشهر ${money(r.month.received)} (${r.month.producedQty} وحدة)، مواد ${money(r.month.material)}، مراحل ${money(r.month.conversion)} في ${r.month.hours} ساعة.`];
+  if (r.open?.length) out.push("", "| الأمر | المنتج | المنجز | المرحلة | المواد | التسليم | الحالة |", "|---|---|---|---|---|---|---|", ...r.open.map((o: any) => `| ${o.number} | ${o.product} | ${o.produced}/${o.qty} | ${o.stage || "—"} | ${o.availability ? AVL[o.availability] : "—"} | ${o.dueDate || "—"}${o.late ? " ⚠" : ""} | ${ST[o.status] || o.status} |`));
+  if (r.late?.length) out.push("", `**متأخر:** ${r.late.map((o: any) => `${o.number} (${o.name}، التسليم ${o.dueDate})`).join("، ")}`);
+  if (r.shortages?.length) out.push("", "**مواد ناقصة:** " + r.shortages.map((s: any) => `${s.number}: ${s.missing.map((m: any) => m.name).join("، ")}`).join(" · "));
+  out.push("", "[لوحة التصنيع](/mfg) · [شاشة الورشة](/mfg/floor) · [تخطيط الاحتياجات](/mfg/plan)");
+  return out.join("\n");
+}
+function mfgCostAnswer(r: any, cur: string): string {
+  if (r.error) return r.error;
+  if (!r.found) return "لم أجد منتجاً له قائمة مواد بهذا الاسم. افتح [قوائم المواد](/mfg/boms) لترى المنتجات المعرّفة.";
+  if (r.candidates) return `وجدت أكثر من منتج: ${r.candidates.join("، ")} — حدّد الاسم.`;
+  const out = [`**تكلفة تصنيع ${r.qty} × ${r.name}:** ${money(r.total)} ${cur} — ${money(r.unitCost)} للوحدة (مواد ${money(r.material)} + مراحل ${money(r.conversion)}${r.byproductShare ? `، ناقص نصيب المنتجات الثانوية ${r.byproductShare}%` : ""}).`, "", "| المكوّن (لدفعة " + r.outputQty + ") | الكمية بالهالك | التكلفة |", "|---|---|---|", ...r.lines.map((l: any) => `| ${l.name} | ${l.qty} ${l.unit || ""} | ${money(l.cost)} |`)];
+  if (r.ops?.length) out.push("", "**المراحل:** " + r.ops.map((o: any) => `${o.name} (${o.workCenter}، ${o.minPerUnit} د للوحدة = ${money(o.perUnit)})`).join("، "));
+  out.push("", "التكلفة بالأسعار الحالية للمخزون. [قوائم المواد](/mfg/boms)");
+  return out.join("\n");
+}
 function planAnswer(r: any, cur: string): string {
   if (r.error) return r.error;
   if (!r.rows?.length) return `لا شيء يحتاج شراءً الآن: كل المكونات تكفي ${r.cover + r.lead} يوماً على الأقل حسب استهلاك آخر ${r.history} يوماً.\n\n[خطة شراء المكونات](/recipes?tab=buy)`;
@@ -668,6 +690,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     if (prev.name === "sales_breakdown") return say(breakdownAnswer(res, ctx.currency, prev.input.label), res.by === "category" ? ["المبيعات حسب الصنف", "المبيعات حسب الساعة", "قارن هذا الشهر بالشهر الماضي"] : ["المبيعات حسب التصنيف", "متى وقت الذروة؟", "ملاحظاتك على الوضع"]);
     if (prev.name === "smart_insights") return say(insightsAnswer(res), ["المبيعات حسب التصنيف هذا الشهر", "الأصناف الناقصة", "حلّل الوضع المالي"]);
     if (prev.name === "peak_hours") return say(peakAnswer(res), ["المبيعات حسب يوم الأسبوع", "ملخص اليوم"]);
+    if (prev.name === "manufacturing_status") return say(mfgAnswer(res, ctx.currency), ["ماذا أشتري للمطبخ؟", "تقارير التصنيع"]);
+    if (prev.name === "manufacturing_cost") return say(mfgCostAnswer(res, ctx.currency), ["حالة التصنيع", "الأصناف الناقصة"]);
     if (prev.name === "purchase_plan") return say(planAnswer(res, ctx.currency), ["تكلفة الطعام هذا الشهر", "الأصناف الناقصة"]);
     if (prev.name === "kitchen_performance") return say(kitchenAnswer(res), ["متى وقت الذروة؟", "تكلفة الطعام هذا الشهر"]);
     if (prev.name === "food_cost") return say(foodCostAnswer(res, ctx.currency), ["هندسة القائمة", "الأصناف الناقصة"]);
@@ -719,6 +743,8 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
   // «افتح … / أين شاشة …»: the screen itself, as a link
   { const nv = n.match(/^(?:افتح|افتحي|اذهب (?:الي|الى|ل)|انتقل (?:الي|الى|ل)|خذني (?:الي|الى|ل)|وديني (?:ل|علي|على)|اين (?:اجد|شاشه|صفحه)|وين (?:الاقي|شاشه|صفحه)|اريد فتح|ابغي افتح) ?(?:شاشه|صفحه|قائمه)? ?(.+?)\s*[؟?]?$/);
     if (nv && nv[1].length > 2 && !a.amount) { const hits = screensFor(nv[1], ctx.vatRate === 14); if (hits.length) return say(hits.length === 1 ? `[افتح ${hits[0].label}](${hits[0].to})` : `أقرب الشاشات لما طلبت:\n${hits.map((x) => `- [${x.label}](${x.to})`).join("\n")}`); } }
+  // the cost of making a product (its quantity is a number, not an amount of money)
+  { const mc = n.match(/(?:تكلفه|تكاليف|كلفه) (?:تصنيع|انتاج|صناعه) (?:(\d+(?:\.\d+)?) )?(.+?)(?:\s*(?:؟|\?|$))/); if (mc && mc[2].trim().length > 1) return call("manufacturing_cost", { product: mc[2].trim(), qty: mc[1] ? Number(mc[1]) : undefined }); }
   // live figures of the clearing accounts, e-store profit and stock gaps; then the direct answers
   if (!a.amount && !wantsRecord(n)) {
     if (/(كم|ايش|وش|ما|اللي|التي|لم|ما ) ?.{0,25}(ما وصل|لم يصل|لم تصل|ما نزل|ما سمع|معلق|معلقه|باقي) .{0,20}(الشبكه|شبكه|مدي|مدى|البنك|المنصه|المنصات|سله|زد)|(مبيعات|عمليات) (ال)?(شبكه|مدي|مدى) .{0,25}(ما وصل|لم تصل|معلق|البنك)|(مستحق|مستحقات|فلوس|فلوسي) .{0,12}(عند|لدي|لدى) (سله|زد|المنصه|المنصات)|كم لم يصل/.test(n))
@@ -736,6 +762,7 @@ export async function localAgent(body: { messages: any[] }, ctx: LocalCtx): Prom
     }
     if (/(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|نصايح|توصيات) (علي|على|عن|حول|ل)? ?(ال)?(وضع|الوضع|المنشاه|الشركه|المحل|المطعم|اعمالي|الشغل|اليوم|الحين)|^(وش|ايش|ما|ماذا) (الجديد|تلاحظ|لاحظت)|^(ملاحظات|ملاحظاتك|رؤي|رؤى|نصائح|توصيات)$|تنبيهات ذكيه/.test(n)) return call("smart_insights", {});
     if (/(وقت|اوقات|ساعه|ساعات|ايام|يوم) (ال)?(ذروه|زحمه|الضغط)|(متي|متى) (يكون |تكون )?(ال)?(زحمه|ذروه|الضغط)|(افضل|اكثر) (يوم|ساعه|وقت) .{0,8}(بيع|مبيعات)|(اي|ايش|وش|ما) (افضل|اكثر) (يوم|ساعه|وقت)/.test(n)) return call("peak_hours", { days: /اسبوع/.test(n) ? 7 : /3 اشهر|ثلاث(ه)? اشهر|ربع/.test(n) ? 90 : 28 });
+    if (/(اوامر|امر) (ال)?(تصنيع|انتاج)|(حاله|وضع|اخبار) (ال)?(تصنيع|انتاج|مصنع|ورشه)|(ماذا|ايش|وش|شو) (في|علي|عند) (ال)?(ورشه|مصنع)|تحت التشغيل/.test(n)) return call("manufacturing_status", {});
     if (/خطه (ال)?(شراء|مشتريات)|(ماذا|ايش|وش|شو|ما|ايه) .{0,12}(اشتري|نشتري|اطلب|نطلب)|(مشتريات|طلبيه|طلبيات) (ال)?(مطبخ|مطعم|مكونات)|(كم|متي|متى) .{0,12}(يكفي|تكفي|يخلص|تخلص) (ال)?(مخزون|مكونات|خامات|رصيد)/.test(n)) return call("purchase_plan", {});
     if (/(اداء|سرعه|بطء|وقت|اوقات|زمن) (ال)?(مطبخ|تجهيز|تحضير الطلبات)|(كم|قديش) .{0,10}(ياخذ|ياخد|تاخذ|يستغرق) (ال)?(طلب|تجهيز|اوردر)|(الطلبات|الاصناف) (ال)?متاخره/.test(n)) { const per = parsePeriod(n, ctx.today); return call("kitchen_performance", /(اليوم|امس|شهر|اسبوع)/.test(n) ? { from: per.from, to: per.to } : {}); }
     if (/تكلفه (ال)?(طعام|اكل|الاطباق|المطبخ)|نسبه (ال)?تكلفه .{0,10}(الطعام|الاطباق|المطعم|المطبخ)|food ?cost/.test(n)) { const per = parsePeriod(n, ctx.today); return call("food_cost", { from: per.from, to: per.to }); }

@@ -6,6 +6,7 @@
 import { menuEngineering, setoffCandidates, foodCost } from "./round343";
 import { salesBreakdown, insights, heatmap } from "./round347";
 import { purchasePlan, kitchenPerformance } from "./round348";
+import { dashboard as mfgDashboard, listOrders as mfgOrders, costByName } from "./manufacturing";
 import { auditScan } from "./auditor";
 import { cashForecast } from "./cashforecast";
 import { Db, db, tx } from "../db/pool";
@@ -182,6 +183,16 @@ async function runTool(t: Db, company: any, name: string, input: any, auth?: Aut
     if (!perms(auth, "reports.read")) return { error: "صلاحيتك لا تسمح بعرض التقارير" };
     const r = await heatmap(t, C, { days: num(input.days) || 28 });
     return { days: r.days, peak: r.peak, bestDay: r.bestDay, quietHour: r.quietHour, byDay: r.byDay, byHour: r.byHour.filter((h: any) => h.docs > 0), timed: r.timed, untimed: r.untimed };
+  }
+  if (name === "manufacturing_status") {
+    if (!perms(auth, "mfg.read")) return { error: "صلاحيتك لا تسمح بعرض التصنيع" };
+    const d = await mfgDashboard(t, C);
+    const open = (await mfgOrders(t, C, { status: "OPEN" })).slice(0, 12).map((o: any) => ({ number: o.number, product: o.productName, qty: o.qty, produced: o.producedQty, status: o.status, dueDate: o.dueDate, late: o.late, stage: o.currentStage, availability: o.availability, wip: o.wip }));
+    return { counts: d.counts, wip: d.wip, month: d.month, late: d.late, shortages: d.shortages, open };
+  }
+  if (name === "manufacturing_cost") {
+    if (!perms(auth, "mfg.read")) return { error: "صلاحيتك لا تسمح بعرض التصنيع" };
+    return costByName(t, C, { query: input.product, qty: num(input.qty) || undefined });
   }
   if (name === "purchase_plan") {
     if (!perms(auth, "inventory.read")) return { error: "صلاحيتك لا تسمح بعرض المخزون" };

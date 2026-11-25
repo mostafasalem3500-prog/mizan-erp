@@ -80,7 +80,7 @@ export async function purchasePlan(t: Db, C: string, q: { cover?: number; lead?:
   const history = Math.max(7, Math.min(180, Math.round(num(q.history) || 28)));
   const onlyRecipe = q.onlyRecipe === true || q.onlyRecipe === "1";
   const rows = await t.rows(
-    `WITH used AS (SELECT m.product_id, -SUM(m.qty) FILTER (WHERE m.source_type IN ('SALE','POS','SALE_RETURN') OR (m.source_type='PRODUCTION' AND m.qty < 0)) q
+    `WITH used AS (SELECT m.product_id, -SUM(m.qty) FILTER (WHERE m.source_type IN ('SALE','POS','SALE_RETURN') OR (m.source_type='PRODUCTION' AND m.qty < 0) OR m.source_type IN ('MFG_ISSUE','MFG_RETURN')) q
                      FROM stock_moves m WHERE m.company_id=$1 AND m.date > CURRENT_DATE - $2::int GROUP BY m.product_id),
           bal AS (SELECT product_id, SUM(qty) qty FROM stock_balances WHERE company_id=$1 GROUP BY product_id),
           onorder AS (SELECT l.product_id, SUM(l.qty*l.factor) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='PURCHASE' AND i.kind='ORDER' AND i.status='DRAFT' GROUP BY l.product_id),

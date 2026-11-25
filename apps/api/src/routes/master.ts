@@ -268,7 +268,8 @@ master.delete(
   "/products/:id",
   perm("products.write"),
   h(async (req) => {
-    const used = await db.maybe(`SELECT 1 FROM invoice_lines WHERE product_id=$1 UNION SELECT 1 FROM stock_moves WHERE product_id=$1 LIMIT 1`, [p(req).id]);
+    const used = await db.maybe(`SELECT 1 FROM invoice_lines WHERE product_id=$1 UNION SELECT 1 FROM stock_moves WHERE product_id=$1
+      UNION SELECT 1 FROM mfg_boms b WHERE b.product_id=$1 OR b.lines @> jsonb_build_array(jsonb_build_object('componentId', $1::text)) OR b.byproducts @> jsonb_build_array(jsonb_build_object('productId', $1::text)) LIMIT 1`, [p(req).id]); // used in a bill of materials too
     if (used) { await db.exec(`UPDATE products SET is_active=false WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]); return { ok: true, deactivated: true, message: "الصنف له حركات — تم إيقافه" }; }
     await db.exec(`DELETE FROM stock_balances WHERE product_id=$1`, [p(req).id]);
     await db.exec(`DELETE FROM products WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)]);

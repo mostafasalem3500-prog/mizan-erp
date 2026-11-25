@@ -85,6 +85,16 @@ const DailyPage = lz(() => import("./pages/Quick"), "DailyPage");
 const ProjectDetailPage = lz(() => import("./pages/Projects"), "ProjectDetailPage");
 const KitchenPage = lz(() => import("./pages/Restaurant"), "KitchenPage");
 const PosSetupPage = lz(() => import("./pages/Restaurant"), "PosSetupPage");
+const MfgDashboard = lz(() => import("./pages/Manufacturing"), "MfgDashboard");
+const MfgOrdersPage = lz(() => import("./pages/Manufacturing"), "MfgOrdersPage");
+const MfgOrderPage = lz(() => import("./pages/Manufacturing"), "MfgOrderPage");
+const MfgBomsPage = lz(() => import("./pages/Manufacturing"), "MfgBomsPage");
+const MfgWorkCentersPage = lz(() => import("./pages/Manufacturing"), "MfgWorkCentersPage");
+const MfgFloorPage = lz(() => import("./pages/Manufacturing"), "MfgFloorPage");
+const MfgPlanPage = lz(() => import("./pages/Manufacturing"), "MfgPlanPage");
+const MfgSchedulePage = lz(() => import("./pages/Manufacturing"), "MfgSchedulePage");
+const MfgUnbuildPage = lz(() => import("./pages/Manufacturing"), "MfgUnbuildPage");
+const MfgReportsPage = lz(() => import("./pages/Manufacturing"), "MfgReportsPage");
 const PrintTemplatesPage = lz(() => import("./pages/PrintTemplates"), "PrintTemplatesPage");
 const ZatcaPage = lz(() => import("./pages/Settings"), "ZatcaPage");
 const AdminPage = lz(() => import("./pages/Settings"), "AdminPage");
@@ -117,10 +127,11 @@ const LoyaltyPage = lz(() => import("./pages/Round28"), "LoyaltyPage");
 
 const ROLE_PERMS: Record<string, string[]> = {
   OWNER: ["*"], ADMIN: ["*"],
-  ACCOUNTANT: ["*.read", "sales.write", "purchases.write", "payments.write", "expenses.write", "accounting.write", "inventory.write", "assets.write", "vat.write", "pos.use", "partners.write", "products.write"],
+  ACCOUNTANT: ["*.read", "sales.write", "purchases.write", "payments.write", "expenses.write", "accounting.write", "inventory.write", "assets.write", "vat.write", "pos.use", "partners.write", "products.write", "mfg.write"],
   SALES: ["sales.read", "sales.write", "partners.read", "partners.write", "products.read", "inventory.read", "payments.read", "payments.write", "dashboard.read", "reports.sales"],
   CASHIER: ["pos.use", "products.read", "partners.read", "partners.write", "sales.read", "dashboard.read"],
-  STOREKEEPER: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"],
+  STOREKEEPER: ["products.read", "products.write", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read", "mfg.read", "mfg.write"],
+  PRODUCTION: ["mfg.read", "mfg.write", "products.read", "inventory.read", "inventory.write", "purchases.read", "partners.read", "dashboard.read"],
   VIEWER: ["*.read"],
 };
 function canRole(role: string | null, perm: string, superAdmin = false) {
@@ -301,6 +312,16 @@ export function App() {
                 <Route path="/projects/:id" element={<ProjectDetailPage />} />
                 <Route path="/pos/kitchen" element={<KitchenPage />} />
                 <Route path="/pos/setup" element={<PosSetupPage />} />
+                <Route path="/mfg" element={<MfgDashboard />} />
+                <Route path="/mfg/orders" element={<MfgOrdersPage />} />
+                <Route path="/mfg/orders/:id" element={<MfgOrderPage />} />
+                <Route path="/mfg/boms" element={<MfgBomsPage />} />
+                <Route path="/mfg/work-centers" element={<MfgWorkCentersPage />} />
+                <Route path="/mfg/floor" element={<MfgFloorPage />} />
+                <Route path="/mfg/plan" element={<MfgPlanPage />} />
+                <Route path="/mfg/schedule" element={<MfgSchedulePage />} />
+                <Route path="/mfg/unbuild" element={<MfgUnbuildPage />} />
+                <Route path="/mfg/reports" element={<MfgReportsPage />} />
                 <Route path="/settings/:tab" element={<SettingsPage />} />
                 <Route path="/admin" element={me.superAdmin ? <AdminPage /> : <Navigate to="/" />} />
                 <Route path="*" element={<Navigate to="/" />} />

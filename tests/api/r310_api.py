@@ -24,7 +24,7 @@ cust=c('/partners?role=CUSTOMER&limit=50'); top=max(cust,key=lambda x: float(x['
 a,_=ask('رصيد العميل '+top['name']); ok('{:,.2f}'.format(float(top['balance'])) in a and '/customers/'+top['id'] in a,f"partner balance matches list ({top['name']})")
 a,_=ask('رصيد العميل زززز غير موجود'); ok('لم أجد' in a,'unknown partner')
 # ── books check: clean first, then a planted problem is found and explained
-a,r=ask('افحص الدفاتر'); ok('فحص' in a and ('15 من 15' in a or 'سليمة' in a),'books check runs: '+a[:60].replace('\n',' '))
+a,r=ask('افحص الدفاتر'); ok('فحص' in a and (__import__('re').search(r'نجح (\d+) من \1 ', a) or 'سليمة' in a),'books check runs: '+a[:60].replace('\n',' '))
 acc={x.get('systemKey'):x for x in c('/accounts')['rows'] if x.get('systemKey')}
 c('/journals',{'date':time.strftime('%Y-%m-%d'),'memo':'قيد يدوي خاطئ','lines':[{'accountId':acc['AR']['id'],'debit':777,'credit':0},{'accountId':acc['CAPITAL']['id'],'debit':0,'credit':777}]})
 a,_=ask('هل دفاتري سليمة؟'); ok('العملاء' in a and '777.00' in a and 'العلاج' in a,'planted AR line without customer is detected with the difference and a fix')

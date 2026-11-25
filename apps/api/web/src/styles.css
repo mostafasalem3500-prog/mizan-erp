@@ -968,3 +968,14 @@ div.fc-col { cursor: default; }
 .station-row { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
 .plan-cover { display: flex; align-items: center; gap: 6px; min-width: 120px; } .plan-cover .mini-bar { min-width: 60px; }
 tr.plan-critical td:first-child { box-shadow: inset 4px 0 0 #ef4444; } tr.plan-low td:first-child { box-shadow: inset 4px 0 0 #f59e0b; }
+/* 3.49 manufacturing */
+.mfg-start { border: 1px dashed var(--primary); }
+.mfg-steps { margin: 8px 0 14px; padding-inline-start: 22px; display: grid; gap: 6px; line-height: 1.7; }
+.mfg-short { padding: 8px 0; border-bottom: 1px solid var(--border); } .mfg-short:last-child { border-bottom: 0; }
+.floor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.floor-card { border-inline-start: 5px solid var(--primary); display: grid; gap: 4px; align-content: start; }
+.floor-card.running { border-inline-start-color: #f59e0b; } .floor-card.waiting { opacity: .72; border-inline-start-color: var(--border); } .floor-card.late { box-shadow: 0 0 0 1px #ef4444 inset; }
+.floor-stage { font-size: 17px; font-weight: 700; }
+.floor-card .btn { flex: 1; padding: 10px; font-size: 15px; }
+.sched td { min-width: 46px; }
+@media print { .floor-card .btn { display: none; } }

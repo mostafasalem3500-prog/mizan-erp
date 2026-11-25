@@ -77,7 +77,7 @@ export const yearStart = () => today().slice(0, 4) + "-01-01";
 export const KIND_AR: Record<string, string> = { QUOTATION: "عرض سعر", ORDER: "أمر", INVOICE: "فاتورة", CREDIT_NOTE: "إشعار دائن", DEBIT_NOTE: "إشعار مدين" };
 export const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", POSTED: "مرحّل", CANCELLED: "ملغى", CONVERTED: "محوّل", UNPAID: "غير مسدد", PARTIAL: "مسدد جزئياً", PAID: "مسدد", OPEN: "مفتوح", CLOSED: "مغلق", LOCKED: "مقفل", ACTIVE: "نشط", FULLY_DEPRECIATED: "مهلك بالكامل", DISPOSED: "مستبعد", FILED: "مقدَّم", SETTLED: "مسدد" };
 export const ZATCA_AR: Record<string, string> = { NOT_REQUIRED: "مرحلة أولى (QR)", NOT_ONBOARDED: "بانتظار الربط", PENDING: "بانتظار الإرسال", REPORTED: "مُبلَّغ", CLEARED: "معتمد", WARNING: "مقبول بتحذير", REJECTED: "مرفوض", FAILED: "فشل الإرسال" };
-export const JTYPE_AR: Record<string, string> = { MANUAL: "قيد يدوي", ECL: "مخصص الديون المشكوك فيها", LEASE: "عقود الإيجار", AMORTIZATION: "إطفاء مدفوع مقدماً / إيراد مؤجل", OPENING: "افتتاحي", CLOSING: "إقفال", SALES: "مبيعات", SALES_RETURN: "مرتجع مبيعات", PURCHASE: "مشتريات", PURCHASE_RETURN: "مرتجع مشتريات", RECEIPT: "سند قبض", PAYMENT: "سند صرف", EXPENSE: "مصروف", POS: "نقاط بيع", POS_CLOSE: "إغلاق وردية", STOCK: "مخزون", DEPRECIATION: "إهلاك", ASSET: "أصول", VAT_SETTLEMENT: "تسوية ضريبة", REVERSAL: "قيد عكسي", CHEQUE: "شيكات", PAYROLL: "رواتب", DONATION: "سند قبض جمعية", CHARITY_DISB: "سند صرف جمعية", ZAKAT: "زكاة", WHT: "ضريبة استقطاع" };
+export const JTYPE_AR: Record<string, string> = { MANUAL: "قيد يدوي", ECL: "مخصص الديون المشكوك فيها", LEASE: "عقود الإيجار", AMORTIZATION: "إطفاء مدفوع مقدماً / إيراد مؤجل", OPENING: "افتتاحي", CLOSING: "إقفال", SALES: "مبيعات", SALES_RETURN: "مرتجع مبيعات", PURCHASE: "مشتريات", PURCHASE_RETURN: "مرتجع مشتريات", RECEIPT: "سند قبض", PAYMENT: "سند صرف", EXPENSE: "مصروف", POS: "نقاط بيع", POS_CLOSE: "إغلاق وردية", STOCK: "مخزون", DEPRECIATION: "إهلاك", ASSET: "أصول", VAT_SETTLEMENT: "تسوية ضريبة", REVERSAL: "قيد عكسي", CHEQUE: "شيكات", PAYROLL: "رواتب", DONATION: "سند قبض جمعية", CHARITY_DISB: "سند صرف جمعية", ZAKAT: "زكاة", WHT: "ضريبة استقطاع", MANUFACTURING: "تصنيع" };
 export const TAX_AR: Record<string, string> = { S: `خاضع ${CFG.vatRate}%`, Z: "نسبة صفر", X: "صادرات", E: "معفى", O: "خارج النطاق", IM: "استيراد (جمارك)", RC: "احتساب عكسي" };
 export const TYPE_AR: Record<string, string> = { ASSET: "أصول", LIABILITY: "خصوم", EQUITY: "حقوق ملكية", REVENUE: "إيرادات", EXPENSE: "مصروفات" };
 export const METHOD_AR: Record<string, string> = { CASH: "نقدي", CARD: "شبكة/بطاقة", BANK: "تحويل بنكي", CHEQUE: "شيك", CREDIT: "آجل" };
@@ -420,6 +420,7 @@ export function sourceLink(r: { sourceType?: string; sourceId?: string; srcNumbe
     case "INVOICE": return r.sourceId ? `/doc/${r.sourceId}` : null;
     case "PAYMENT": return r.srcNumber ? `/${r.srcDir === "OUT" ? "vouchers" : "receipts"}?q=${encodeURIComponent(r.srcNumber)}` : null;
     case "EXPENSE": return r.srcNumber ? `/expenses?q=${encodeURIComponent(r.srcNumber)}` : null;
+    case "MFG_ORDER": return r.sourceId ? `/mfg/orders/${r.sourceId}` : null;
     default: return null;
   }
 }

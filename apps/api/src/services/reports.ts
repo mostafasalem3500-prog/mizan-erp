@@ -1,5 +1,6 @@
 /** Financial reports, all computed from journal_lines (single source of truth). */
 import { remitAlerts } from "./payremit";
+import { wipCheck } from "./manufacturing";
 import { clearingAlerts } from "./clearing";
 import { Db } from "../db/pool";
 import { bad, r2, D, isDate, today, addDays, addMonths, monthEnd } from "../lib/core";
@@ -524,6 +525,8 @@ export async function integrity(t: Db, companyId: string) {
     checks.push({ name: "كل سندات البرنامج المحاسبي والجمعية مرحّلة بقيود تطابق مبالغها", ok: vr.mismatches === 0, a: vr.mismatches, b: 0, note: "a = سندات بلا قيد مرحّل أو بقيد يخالف مبلغها" });
     if (assocUse.coop) for (const c of await assocChecks(t, companyId)) checks.push({ name: c.name, ok: c.ok, a: c.actual, b: c.expected });
   }
+  const wip = await wipCheck(t, companyId);
+  if (wip) checks.push({ name: "إنتاج تحت التشغيل في أوامر التصنيع المفتوحة = حساب إنتاج تحت التشغيل", ok: Math.abs(wip.orders - wip.ledger) < 0.01, a: wip.orders, b: wip.ledger });
   return { ok: checks.every((c) => c.ok), checks };
 }
 
