@@ -13,7 +13,9 @@ export async function seedHrExample(t: Db, C: string, user: string) {
   if (emps.length < 4) return { ok: false };
   const td = today(), D = { isDemo: true };
   const [ahmed, sara, mohammed, rahul] = emps;
-  await ensureLeaveTypes(t, C);
+  const types = await ensureLeaveTypes(t, C);
+  // the Egyptian set has no marriage leave: the one off today is on exam leave there
+  const today1 = types.some((x: any) => x.code === "MARRIAGE" && x.isActive) ? { type: "MARRIAGE", reason: "زواج" } : { type: "EXAM", reason: "امتحان" };
   const doc = (e: any, kind: string, number: string, expiry: string | null, issue?: string) => saveDocument(t, C, user, { employeeId: e.id, kind, number, issueDate: issue || null, expiryDate: expiry }, undefined, D);
   await doc(ahmed, "NATIONAL_ID", ahmed.idNumber, addMonths(td, 40));
   await doc(sara, "NATIONAL_ID", sara.idNumber, addMonths(td, 28));
@@ -27,7 +29,7 @@ export async function seedHrExample(t: Db, C: string, user: string) {
   await t.exec(`UPDATE employees SET contract_type='FIXED', contract_end=$2 WHERE id=$1`, [rahul.id, addDays(td, 45)]);
   await t.exec(`UPDATE employees SET probation_end=$2 WHERE id=$1`, [mohammed.id, addDays(td, 12)]);
   // leave: someone off today, two requests to decide
-  await requestLeave(t, C, user, { employeeId: sara.id, type: "MARRIAGE", fromDate: addDays(td, -1), toDate: addDays(td, 3), approve: true, reason: "زواج" }, D);
+  await requestLeave(t, C, user, { employeeId: sara.id, type: today1.type, fromDate: addDays(td, -1), toDate: addDays(td, 3), approve: true, reason: today1.reason }, D);
   await requestLeave(t, C, user, { employeeId: rahul.id, type: "SICK", fromDate: addDays(td, 2), toDate: addDays(td, 4), reason: "تقرير طبي — التهاب" }, D);
   await requestLeave(t, C, user, { employeeId: ahmed.id, type: "ANNUAL", fromDate: addDays(td, 20), toDate: addDays(td, 29), reason: "إجازة عائلية" }, D);
   // a 10% raise for the storekeeper from the first of next month

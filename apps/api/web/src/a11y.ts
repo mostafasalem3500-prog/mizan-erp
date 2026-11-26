@@ -22,7 +22,16 @@ function nameFor(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement)
   if (el.tagName === "TEXTAREA") return "نص";
   return TYPE_AR[type] || "حقل إدخال";
 }
+/** Buttons that carry only a symbol get a spoken name and a hover hint (the symbol alone says nothing to a screen reader). */
+const ICON_AR: Record<string, string> = { "🖨": "طباعة", "✕": "إزالة", "×": "إزالة", "✎": "تعديل", "✏": "تعديل", "📎": "المرفقات", "⬇": "تنزيل", "⬆": "رفع", "↻": "تحديث", "＋": "إضافة", "+": "إضافة", "🗑": "حذف", "👁": "عرض", "⋯": "المزيد", "‹": "السابق", "›": "التالي", "☰": "القائمة", "★": "المفضلة", "☆": "إضافة إلى المفضلة", "🔗": "رابط", "⧉": "نسخ" };
 function patch(root: ParentNode) {
+  root.querySelectorAll<HTMLElement>("button, a.btn").forEach((el) => {
+    if (el.getAttribute("aria-label") || el.title) return;
+    const t = (el.textContent || "").trim();
+    if (!t || t.length > 3) return;
+    const name = ICON_AR[t] || ICON_AR[t.replace(/\uFE0F/g, "")];
+    if (name) { el.setAttribute("aria-label", tr(name)); el.title = tr(name); }
+  });
   root.querySelectorAll<HTMLInputElement>("input:not([type=hidden]), select, textarea").forEach((el) => {
     if (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || el.closest("label") || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))) return;
     el.setAttribute("aria-label", tr(nameFor(el)));

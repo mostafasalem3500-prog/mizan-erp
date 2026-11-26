@@ -120,7 +120,7 @@ export const CATALOG: Def[] = [
   { key: "estore.orders", module: "estore", title: "طلبات المتاجر الإلكترونية", desc: "طلبات سلة وزد حسب المنصة والشهر والحالة", filters: ["period", "platform", "paymentStatus", "user"], groupBy: [{ key: "platform", label: "المنصة" }, { key: "month", label: "الشهر" }, { key: "day", label: "اليوم" }, { key: "paymentStatus", label: "حالة السداد" }, { key: "none", label: "تفصيلي" }], chart: "total" },
   { key: "estore.payouts", module: "estore", title: "تحويلات المنصات", desc: "التحويلات المستلمة من سلة وزد والعمولات", filters: ["period", "platform"] },
 ];
-export const MODULES = [["financial", "المالية"], ["sales", "المبيعات"], ["purchases", "المشتريات"], ["inventory", "المخزون"], ["pos", "نقطة البيع"], ["treasury", "الخزينة"], ["expenses", "المصروفات"], ["hr", "الرواتب والموظفون"], ["assets", "الأصول الثابتة"], ["vat", "الضريبة"], ["estore", "المتاجر الإلكترونية"]].map(([key, label]) => ({ key, label }));
+export const MODULES = [["financial", "المالية"], ["sales", "المبيعات"], ["purchases", "المشتريات"], ["inventory", "المخزون"], ["pos", "نقطة البيع"], ["treasury", "الخزينة"], ["expenses", "المصروفات"], ["hr", "الموارد البشرية والرواتب"], ["assets", "الأصول الثابتة"], ["vat", "الضريبة"], ["estore", "المتاجر الإلكترونية"]].map(([key, label]) => ({ key, label }));
 
 // ───────────────────────── runner ─────────────────────────
 export async function runReport(t: Db, companyId: string, key: string, q: any, ctx: { lockedBranchId?: string | null }): Promise<Result & { def: Def }> {
@@ -812,3 +812,125 @@ export async function dimensionValues(t: Db, companyId: string, key: string) {
   if (!Q[key]) return [];
   return (await t.rows(Q[key], [companyId])).map((r) => ({ id: r.id || r.v, label: r.v }));
 }
+
+// ═════════ 3.54.0: reports for the HR file and the activity sections (manufacturing, rentals, subscriptions) ═════════
+MODULES.push({ key: "mfg", label: "التصنيع" }, { key: "rental", label: "التأجير" }, { key: "subs", label: "الاشتراكات" });
+CATALOG.push(
+  { key: "hr.leaves", module: "hr", title: "سجل الإجازات", desc: "كل إجازة بنوعها وأيامها وحالتها، مجمّعة حسب الموظف أو النوع أو القسم", filters: ["period", "employee", "department", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "employee", label: "حسب الموظف" }, { key: "type", label: "حسب النوع" }, { key: "department", label: "حسب القسم" }] },
+  { key: "hr.documents", module: "hr", title: "وثائق الموظفين وانتهاؤها", desc: "الإقامة والجواز ورخصة العمل والتأمين بتاريخ الانتهاء والأيام المتبقية", filters: ["employee", "department", "q"] },
+  { key: "hr.headcount", module: "hr", title: "سجل الموظفين", desc: "بيانات الموظف والعقد والراتب، مجمّعة حسب القسم أو الجنسية أو نوع العقد", filters: ["department", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "department", label: "حسب القسم" }, { key: "nationality", label: "حسب الجنسية" }, { key: "contract", label: "حسب نوع العقد" }] },
+  { key: "hr.salary-changes", module: "hr", title: "تعديلات الرواتب", desc: "كل تعديل راتب بتاريخ سريانه والقيمة قبله وبعده وسببه", filters: ["period", "employee", "department"] },
+  { key: "mfg.orders", module: "mfg", title: "أوامر التصنيع وتكلفتها", desc: "الكمية المخططة والمنتجة والتالف، تكلفة المواد والتشغيل، والانحراف عن المعيار", filters: ["period", "product", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "product", label: "حسب المنتج" }, { key: "status", label: "حسب الحالة" }, { key: "month", label: "حسب الشهر" }] },
+  { key: "mfg.consumption", module: "mfg", title: "استهلاك المواد في التصنيع", desc: "ما صُرف من كل مادة لأوامر التصنيع وما أُعيد، بالكمية والقيمة", filters: ["period", "product", "q"] },
+  { key: "rental.contracts", module: "rental", title: "عقود التأجير", desc: "كل عقد بمدته وحالته وما فُوتر منه والتأمين المحتجز", filters: ["period", "partner", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "partner", label: "حسب العميل" }, { key: "status", label: "حسب الحالة" }] },
+  { key: "rental.revenue", module: "rental", title: "إيراد التأجير بالشهر", desc: "ما فُوتر من عقود التأجير لكل شهر، وحركة التأمينات", filters: ["period"], chart: "invoiced" },
+  { key: "subs.subscribers", module: "subs", title: "المشتركون", desc: "كل اشتراك بخطته وحالته وقيمته وموعد فاتورته القادمة", filters: ["partner", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "plan", label: "حسب الخطة" }, { key: "status", label: "حسب الحالة" }] },
+  { key: "subs.billing", module: "subs", title: "فوترة الاشتراكات بالشهر", desc: "الفواتير والإشعارات الدائنة الصادرة من الاشتراكات لكل شهر وخطة", filters: ["period"], groupBy: [{ key: "month", label: "حسب الشهر" }, { key: "plan", label: "حسب الخطة" }], chart: "net" },
+);
+const D10 = (c: string) => `to_char(${c},'YYYY-MM-DD')`;
+const LEAVE_ST: Record<string, string> = { PENDING: "بانتظار القرار", APPROVED: "معتمدة", REJECTED: "مرفوضة", CANCELLED: "ملغاة" };
+IMPL["hr.leaves"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("l.company_id=?", C); w.add("l.to_date >= ?", from).add("l.from_date <= ?", to).uuid("l.employee_id", q.employeeId).like(["em.name", "em.code", "l.reason", "lt.name"], q.q); if (q.department) w.in("em.department", q.department);
+  const base = `FROM employee_leaves l JOIN employees em ON em.id=l.employee_id LEFT JOIN hr_leave_types lt ON lt.id=l.type_id WHERE ${w.sql}`;
+  const TN = `COALESCE(lt.name, CASE l.type WHEN 'ANNUAL' THEN 'إجازة سنوية' WHEN 'SICK' THEN 'إجازة مرضية' WHEN 'UNPAID' THEN 'إجازة بدون أجر' ELSE 'أخرى' END)`;
+  const g = q.groupBy || "none";
+  if (g === "none") {
+    const rows = await t.rows(`SELECT em.code, em.name, em.department, ${TN} type_name, ${D10("l.from_date")} from_date, ${D10("l.to_date")} to_date, l.days, l.status, l.reason, l.decided_by, CASE WHEN l.via='PORTAL' THEN 'بوابة الموظف' ELSE 'الموارد البشرية' END source ${base} ORDER BY l.from_date DESC`, w.params);
+    return { columns: [{ key: "code", label: "الكود" }, { key: "name", label: "الموظف" }, { key: "department", label: "القسم" }, { key: "typeName", label: "النوع" }, { key: "fromDate", label: "من", type: "date" }, { key: "toDate", label: "إلى", type: "date" }, { key: "days", label: "الأيام", type: "qty", sum: true }, { key: "status", label: "الحالة" }, { key: "reason", label: "السبب" }, { key: "decidedBy", label: "القرار من" }, { key: "source", label: "المصدر" }], rows: rows.map((r: any) => ({ ...r, days: Number(r.days), status: LEAVE_ST[r.status] || r.status })) };
+  }
+  const G = g === "employee" ? "em.name" : g === "department" ? "COALESCE(em.department,'—')" : TN;
+  const rows = await t.rows(`SELECT ${G} grp, COUNT(*)::int leaves, COALESCE(SUM(l.days) FILTER (WHERE l.status='APPROVED'),0) approved, COALESCE(SUM(l.days) FILTER (WHERE l.status='PENDING'),0) pending, COUNT(DISTINCT l.employee_id)::int employees ${base} GROUP BY 1 ORDER BY 3 DESC`, w.params);
+  return { columns: [{ key: "grp", label: g === "employee" ? "الموظف" : g === "department" ? "القسم" : "النوع" }, { key: "leaves", label: "عدد الإجازات", type: "int", sum: true }, { key: "approved", label: "أيام معتمدة", type: "qty", sum: true }, { key: "pending", label: "أيام بانتظار القرار", type: "qty", sum: true }, { key: "employees", label: "الموظفون", type: "int" }], rows: rows.map((r: any) => ({ ...r, approved: Number(r.approved), pending: Number(r.pending) })) };
+};
+IMPL["hr.documents"] = async (t, C, q) => {
+  const w = new W("d.company_id=?", C); w.uuid("d.employee_id", q.employeeId).like(["em.name", "em.code", "d.number", "d.issuer"], q.q); if (q.department) w.in("em.department", q.department);
+  const K: Record<string, string> = { NATIONAL_ID: "الهوية الوطنية", IQAMA: "الإقامة", PASSPORT: "جواز السفر", WORK_PERMIT: "رخصة العمل", HEALTH_INSURANCE: "التأمين الطبي", CONTRACT: "عقد العمل", DRIVING_LICENSE: "رخصة القيادة", CERTIFICATE: "شهادة / مؤهل", MEDICAL: "شهادة صحية", OTHER: "أخرى" };
+  const rows = await t.rows(`SELECT em.code, em.name, em.department, d.kind, d.number, ${D10("d.issue_date")} issue_date, ${D10("d.expiry_date")} expiry_date, (d.expiry_date - $${w.params.length + 1}::date)::int days_left, d.issuer FROM hr_documents d JOIN employees em ON em.id=d.employee_id AND em.is_active WHERE ${w.sql} ORDER BY d.expiry_date NULLS LAST, em.name`, [...w.params, today()]);
+  return { columns: [{ key: "code", label: "الكود" }, { key: "name", label: "الموظف" }, { key: "department", label: "القسم" }, { key: "kind", label: "الوثيقة" }, { key: "number", label: "الرقم" }, { key: "issueDate", label: "الإصدار", type: "date" }, { key: "expiryDate", label: "الانتهاء", type: "date" }, { key: "daysLeft", label: "الأيام المتبقية", type: "int" }, { key: "state", label: "الحالة" }, { key: "issuer", label: "جهة الإصدار" }],
+    rows: rows.map((r: any) => ({ ...r, kind: K[r.kind] || r.kind, state: r.daysLeft === null ? "بلا تاريخ" : r.daysLeft < 0 ? "منتهية" : r.daysLeft <= 30 ? "خلال 30 يوماً" : r.daysLeft <= 90 ? "خلال 90 يوماً" : "سارية" })) };
+};
+IMPL["hr.headcount"] = async (t, C, q) => {
+  const w = new W("em.company_id=?", C); w.like(["em.name", "em.code", "em.job_title", "em.id_number"], q.q); if (q.department) w.in("em.department", q.department);
+  const PAY = `(em.basic + em.housing + em.transport + em.other_allow)`;
+  const NAT = `CASE em.nationality WHEN 'SAUDI' THEN 'سعودي' WHEN 'EGYPTIAN' THEN 'مصري' ELSE 'غير ' || CASE WHEN '${BASE_CURRENCY}'='EGP' THEN 'مصري' ELSE 'سعودي' END END`;
+  const CT = `COALESCE(em.contract_type,'INDEFINITE')`;
+  const CTL: Record<string, string> = { FIXED: "محدد المدة", PART_TIME: "دوام جزئي", INDEFINITE: "غير محدد المدة" };
+  const g = q.groupBy || "none";
+  if (g === "none") {
+    const rows = await t.rows(`SELECT em.code, em.name, em.job_title, em.department, ${NAT} nationality, ${D10("em.hire_date")} hire_date, ${CT} contract, ${D10("em.contract_end")} contract_end, em.basic, em.housing, em.transport + em.other_allow allowances, ${PAY} total, CASE WHEN em.is_active THEN 'على رأس العمل' ELSE 'منتهية خدمته' END state FROM employees em WHERE ${w.sql} ORDER BY em.is_active DESC, em.code`, w.params);
+    return { columns: [{ key: "code", label: "الكود" }, { key: "name", label: "الموظف" }, { key: "jobTitle", label: "المسمى" }, { key: "department", label: "القسم" }, { key: "nationality", label: "الجنسية" }, { key: "hireDate", label: "التعيين", type: "date" }, { key: "contract", label: "العقد" }, { key: "contractEnd", label: "نهاية العقد", type: "date" }, { key: "basic", label: "الأساسي", type: "money", sum: true }, { key: "housing", label: "السكن", type: "money", sum: true }, { key: "allowances", label: "بدلات أخرى", type: "money", sum: true }, { key: "total", label: "الإجمالي", type: "money", sum: true }, { key: "state", label: "الحالة" }], rows: rows.map((r: any) => ({ ...r, contract: CTL[r.contract] || r.contract })) };
+  }
+  const G = g === "department" ? "COALESCE(em.department,'—')" : g === "nationality" ? NAT : CT;
+  const rows = await t.rows(`SELECT ${G} grp, COUNT(*) FILTER (WHERE em.is_active)::int active, COUNT(*) FILTER (WHERE NOT em.is_active)::int left_count, COALESCE(SUM(${PAY}) FILTER (WHERE em.is_active),0) total, COALESCE(AVG(${PAY}) FILTER (WHERE em.is_active),0) average FROM employees em WHERE ${w.sql} GROUP BY 1 ORDER BY 2 DESC`, w.params);
+  return { columns: [{ key: "grp", label: g === "department" ? "القسم" : g === "nationality" ? "الجنسية" : "نوع العقد" }, { key: "active", label: "على رأس العمل", type: "int", sum: true }, { key: "leftCount", label: "منتهية خدمتهم", type: "int", sum: true }, { key: "total", label: "الرواتب الشهرية", type: "money", sum: true }, { key: "average", label: "متوسط الراتب", type: "money" }], rows: rows.map((r: any) => ({ ...r, grp: g === "contract" ? CTL[r.grp] || r.grp : r.grp, total: r2(r.total), average: r2(r.average) })) };
+};
+IMPL["hr.salary-changes"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("c.company_id=?", C); w.range("c.effective_date", from === "1900-01-01" ? undefined : from, undefined).uuid("c.employee_id", q.employeeId); if (q.department) w.in("em.department", q.department);
+  void to; // changes dated after the period's end are shown too: they are the ones still waiting
+  const tot = (p: any) => r2(Number(p?.basic || 0) + Number(p?.housing || 0) + Number(p?.transport || 0) + Number(p?.otherAllow || 0));
+  const ST: Record<string, string> = { PENDING: "ينتظر تاريخه", APPLIED: "سارٍ", CANCELLED: "ملغى" };
+  const rows = await t.rows(`SELECT em.code, em.name, em.department, ${D10("c.effective_date")} effective_date, c.old_pay, c.new_pay, c.reason, c.status, c.created_by FROM hr_salary_changes c JOIN employees em ON em.id=c.employee_id WHERE ${w.sql} ORDER BY c.effective_date DESC`, w.params);
+  return { columns: [{ key: "code", label: "الكود" }, { key: "name", label: "الموظف" }, { key: "department", label: "القسم" }, { key: "effectiveDate", label: "يسري من", type: "date" }, { key: "before", label: "قبل", type: "money" }, { key: "after", label: "بعد", type: "money" }, { key: "diff", label: "الفرق", type: "money", sum: true }, { key: "pct", label: "النسبة", type: "pct" }, { key: "reason", label: "السبب" }, { key: "status", label: "الحالة" }, { key: "createdBy", label: "سجّله" }],
+    rows: rows.map((r: any) => { const a = tot(r.oldPay), b = tot(r.newPay); return { code: r.code, name: r.name, department: r.department, effectiveDate: r.effectiveDate, before: a, after: b, diff: r2(b - a), pct: a ? r2(((b - a) / a) * 100) : 0, reason: r.reason, status: ST[r.status] || r.status, createdBy: r.createdBy }; }) };
+};
+const MFG_ST: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", PLANNED: "مخطط", RELEASED: "مُصدَر", IN_PROGRESS: "قيد التنفيذ", DONE: "منتهٍ", CLOSED: "مقفل", CANCELLED: "ملغى" };
+IMPL["mfg.orders"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("o.company_id=?", C); w.range("o.date", from, to).uuid("o.product_id", q.productId).like(["o.number", "p.name", "p.sku", "o.sales_ref", "o.lot_no"], q.q);
+  const g = q.groupBy || "none";
+  if (g === "none") {
+    const rows = await t.rows(`SELECT o.number, ${D10("o.date")} date, p.sku, p.name, o.qty, o.produced_qty, o.scrap_qty, o.status, o.material_cost, o.conversion_cost, o.received_value, o.wip, o.variance, CASE WHEN o.produced_qty > 0 THEN ROUND(o.received_value / o.produced_qty, 4) END unit_cost, o.std_unit_cost, ${D10("o.due_date")} due_date FROM mfg_orders o JOIN products p ON p.id=o.product_id WHERE ${w.sql} ORDER BY o.date DESC, o.number DESC`, w.params);
+    return { columns: [{ key: "number", label: "الأمر" }, { key: "date", label: "التاريخ", type: "date" }, { key: "sku", label: "الرمز" }, { key: "name", label: "المنتج" }, { key: "qty", label: "المخطط", type: "qty", sum: true }, { key: "producedQty", label: "المنتَج", type: "qty", sum: true }, { key: "scrapQty", label: "التالف", type: "qty", sum: true }, { key: "status", label: "الحالة" }, { key: "materialCost", label: "المواد", type: "money", sum: true }, { key: "conversionCost", label: "التشغيل", type: "money", sum: true }, { key: "receivedValue", label: "قيمة المستلم", type: "money", sum: true }, { key: "wip", label: "تحت التشغيل", type: "money", sum: true }, { key: "variance", label: "الانحراف", type: "money", sum: true }, { key: "unitCost", label: "تكلفة الوحدة", type: "money" }, { key: "stdUnitCost", label: "المعيار", type: "money" }, { key: "dueDate", label: "الاستحقاق", type: "date" }], rows: rows.map((r: any) => ({ ...r, status: MFG_ST[r.status] || r.status })) };
+  }
+  const G = g === "product" ? "p.name" : g === "status" ? "o.status" : "to_char(o.date,'YYYY-MM')";
+  const rows = await t.rows(`SELECT ${G} grp, COUNT(*)::int orders, SUM(o.qty) qty, SUM(o.produced_qty) produced, SUM(o.scrap_qty) scrap, SUM(o.material_cost) material, SUM(o.conversion_cost) conversion, SUM(o.received_value) received, SUM(o.variance) variance FROM mfg_orders o JOIN products p ON p.id=o.product_id WHERE ${w.sql} GROUP BY 1 ORDER BY 1`, w.params);
+  return { columns: [{ key: "grp", label: g === "product" ? "المنتج" : g === "status" ? "الحالة" : "الشهر" }, { key: "orders", label: "الأوامر", type: "int", sum: true }, { key: "qty", label: "المخطط", type: "qty", sum: true }, { key: "produced", label: "المنتَج", type: "qty", sum: true }, { key: "scrap", label: "التالف", type: "qty", sum: true }, { key: "material", label: "المواد", type: "money", sum: true }, { key: "conversion", label: "التشغيل", type: "money", sum: true }, { key: "received", label: "قيمة المستلم", type: "money", sum: true }, { key: "variance", label: "الانحراف", type: "money", sum: true }], rows: rows.map((r: any) => ({ ...r, grp: g === "status" ? MFG_ST[r.grp] || r.grp : r.grp })) };
+};
+IMPL["mfg.consumption"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("m.company_id=?", C); w.range("m.date", from, to).uuid("m.product_id", q.productId).like(["p.name", "p.sku"], q.q).raw("m.kind IN ('ISSUE','RETURN')");
+  const rows = await t.rows(`SELECT p.sku, p.name, p.unit, COALESCE(SUM(m.qty) FILTER (WHERE m.kind='ISSUE'),0) issued, COALESCE(SUM(m.qty) FILTER (WHERE m.kind='RETURN'),0) returned, COALESCE(SUM(m.value) FILTER (WHERE m.kind='ISSUE'),0) - COALESCE(SUM(m.value) FILTER (WHERE m.kind='RETURN'),0) value, COUNT(DISTINCT m.order_id)::int orders FROM mfg_moves m JOIN products p ON p.id=m.product_id WHERE ${w.sql} GROUP BY p.id ORDER BY 6 DESC`, w.params);
+  return { columns: [{ key: "sku", label: "الرمز" }, { key: "name", label: "المادة" }, { key: "unit", label: "الوحدة" }, { key: "issued", label: "المصروف", type: "qty" }, { key: "returned", label: "المُعاد", type: "qty" }, { key: "net", label: "الصافي", type: "qty" }, { key: "value", label: "القيمة", type: "money", sum: true }, { key: "orders", label: "الأوامر", type: "int" }], rows: rows.map((r: any) => ({ ...r, issued: Math.abs(Number(r.issued)), returned: Math.abs(Number(r.returned)), net: Math.abs(Number(r.issued)) - Math.abs(Number(r.returned)), value: r2(Math.abs(Number(r.value))) })) };
+};
+const RENT_ST: Record<string, string> = { DRAFT: "مسودة", RESERVED: "محجوز", ACTIVE: "ساري", RETURNED: "أُعيد", CLOSED: "مقفل", CANCELLED: "ملغى" };
+IMPL["rental.contracts"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("c.company_id=?", C); w.add("c.end_date >= ?", from).add("c.start_date <= ?", to).uuid("c.partner_id", q.partnerId).like(["c.number", "p.name", "c.notes"], q.q);
+  const INV = `(SELECT COALESCE(SUM(m.amount),0) FROM rental_moves m WHERE m.contract_id=c.id AND m.kind='INVOICE')`;
+  const HELD = `(c.deposit_received - c.deposit_applied - c.deposit_refunded)`;
+  const g = q.groupBy || "none";
+  if (g === "none") {
+    const rows = await t.rows(`SELECT c.number, p.name partner, ${D10("c.start_date")} start_date, ${D10("c.end_date")} end_date, (c.end_date - c.start_date + 1)::int days, c.status, CASE c.billing WHEN 'MONTHLY' THEN 'شهري' ELSE 'مقدماً' END billing, jsonb_array_length(COALESCE(c.lines,'[]'::jsonb)) items, ${INV} invoiced, ${HELD} deposit_held, ${D10("c.next_bill_date")} next_bill_date FROM rental_contracts c JOIN partners p ON p.id=c.partner_id WHERE ${w.sql} ORDER BY c.start_date DESC`, w.params);
+    return { columns: [{ key: "number", label: "العقد" }, { key: "partner", label: "العميل" }, { key: "startDate", label: "من", type: "date" }, { key: "endDate", label: "إلى", type: "date" }, { key: "days", label: "الأيام", type: "int" }, { key: "status", label: "الحالة" }, { key: "billing", label: "الفوترة" }, { key: "items", label: "الأصول", type: "int" }, { key: "invoiced", label: "المفوتر", type: "money", sum: true }, { key: "depositHeld", label: "تأمين محتجز", type: "money", sum: true }, { key: "nextBillDate", label: "الفاتورة القادمة", type: "date" }], rows: rows.map((r: any) => ({ ...r, status: RENT_ST[r.status] || r.status })) };
+  }
+  const rows = await t.rows(`SELECT ${g === "partner" ? "p.name" : "c.status"} grp, COUNT(*)::int contracts, SUM(${INV}) invoiced, SUM(${HELD}) deposit_held FROM rental_contracts c JOIN partners p ON p.id=c.partner_id WHERE ${w.sql} GROUP BY 1 ORDER BY 3 DESC`, w.params);
+  return { columns: [{ key: "grp", label: g === "partner" ? "العميل" : "الحالة" }, { key: "contracts", label: "العقود", type: "int", sum: true }, { key: "invoiced", label: "المفوتر", type: "money", sum: true }, { key: "depositHeld", label: "تأمين محتجز", type: "money", sum: true }], rows: rows.map((r: any) => ({ ...r, grp: g === "status" ? RENT_ST[r.grp] || r.grp : r.grp })) };
+};
+IMPL["rental.revenue"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("m.company_id=?", C); w.range("m.date", from, to);
+  const S = (k: string) => `COALESCE(SUM(m.amount) FILTER (WHERE m.kind='${k}'),0)`;
+  const rows = await t.rows(`SELECT to_char(m.date,'YYYY-MM') mon, COUNT(*) FILTER (WHERE m.kind='INVOICE')::int invoices, ${S("INVOICE")} invoiced, ${S("DEPOSIT_IN")} deposit_in, ${S("DEPOSIT_APPLY")} deposit_applied, ${S("DEPOSIT_OUT")} deposit_out, COUNT(DISTINCT m.contract_id)::int contracts FROM rental_moves m WHERE ${w.sql} GROUP BY 1 ORDER BY 1`, w.params);
+  return { columns: [{ key: "mon", label: "الشهر" }, { key: "contracts", label: "العقود", type: "int" }, { key: "invoices", label: "الفواتير", type: "int", sum: true }, { key: "invoiced", label: "إيراد التأجير (قبل الضريبة)", type: "money", sum: true }, { key: "depositIn", label: "تأمين مستلم", type: "money", sum: true }, { key: "depositApplied", label: "تأمين خُصم من فواتير", type: "money", sum: true }, { key: "depositOut", label: "تأمين مردود", type: "money", sum: true }], rows };
+};
+const SUB_ST: Record<string, string> = { TRIAL: "تجربة", ACTIVE: "ساري", PAUSED: "موقوف مؤقتاً", CANCELLED: "ملغى", EXPIRED: "منتهٍ" };
+const SUB_PER: Record<string, [string, number]> = { WEEK: ["أسبوعي", 12 / 52], MONTH: ["شهري", 1], QUARTER: ["ربع سنوي", 3], HALF: ["نصف سنوي", 6], YEAR: ["سنوي", 12] };
+IMPL["subs.subscribers"] = async (t, C, q) => {
+  const w = new W("s.company_id=?", C); w.uuid("s.partner_id", q.partnerId).like(["s.number", "p.name", "pl.name", "p.phone"], q.q);
+  const rows = await t.rows(`SELECT s.number, p.name partner, p.phone, pl.name plan, pl.period, s.status, s.qty, s.price, s.discount_pct, ${D10("s.start_date")} start_date, ${D10("s.current_to")} current_to, ${D10("s.next_bill_date")} next_bill_date, ${D10("s.end_date")} end_date FROM subscriptions s JOIN partners p ON p.id=s.partner_id JOIN sub_plans pl ON pl.id=s.plan_id WHERE ${w.sql} ORDER BY s.status, p.name`, w.params);
+  const full = rows.map((r: any) => { const value = r2(Number(r.price) * Number(r.qty) * (1 - Number(r.discountPct) / 100)); const months = (SUB_PER[r.period] || ["", 1])[1]; return { ...r, qty: Number(r.qty), period: (SUB_PER[r.period] || [r.period])[0], value, monthly: r.status === "ACTIVE" ? r2(value / months) : 0, statusKey: r.status, status: SUB_ST[r.status] || r.status }; });
+  const g = q.groupBy || "none";
+  if (g === "none") return { columns: [{ key: "number", label: "الاشتراك" }, { key: "partner", label: "المشترك" }, { key: "phone", label: "الجوال" }, { key: "plan", label: "الخطة" }, { key: "period", label: "المدة" }, { key: "status", label: "الحالة" }, { key: "qty", label: "العدد", type: "qty" }, { key: "value", label: "قيمة الفترة", type: "money", sum: true }, { key: "monthly", label: "الإيراد الشهري المتكرر", type: "money", sum: true }, { key: "startDate", label: "البداية", type: "date" }, { key: "currentTo", label: "نهاية الفترة", type: "date" }, { key: "nextBillDate", label: "الفاتورة القادمة", type: "date" }, { key: "endDate", label: "ينتهي", type: "date" }], rows: full };
+  const m = new Map<string, any>();
+  for (const r of full) { const k = g === "plan" ? r.plan : r.status; const x = m.get(k) || { grp: k, subscribers: 0, active: 0, monthly: 0 }; x.subscribers++; if (r.statusKey === "ACTIVE") x.active++; x.monthly = r2(x.monthly + r.monthly); m.set(k, x); }
+  return { columns: [{ key: "grp", label: g === "plan" ? "الخطة" : "الحالة" }, { key: "subscribers", label: "الاشتراكات", type: "int", sum: true }, { key: "active", label: "السارية", type: "int", sum: true }, { key: "monthly", label: "الإيراد الشهري المتكرر", type: "money", sum: true }], rows: [...m.values()].sort((a, b) => b.monthly - a.monthly) };
+};
+IMPL["subs.billing"] = async (t, C, q) => {
+  const { from, to } = period(q);
+  const w = new W("m.company_id=?", C); w.range("m.date", from, to).raw("(m.kind IN ('INVOICE','CREDIT') OR (m.kind='CHANGE' AND m.amount > 0))");
+  const G = (q.groupBy || "month") === "plan" ? "pl.name" : "to_char(m.date,'YYYY-MM')";
+  const rows = await t.rows(`SELECT ${G} grp, COUNT(*) FILTER (WHERE m.kind IN ('INVOICE','CHANGE'))::int invoices, COALESCE(SUM(m.amount) FILTER (WHERE m.kind IN ('INVOICE','CHANGE')),0) invoiced, COUNT(*) FILTER (WHERE m.kind='CREDIT')::int credits, COALESCE(SUM(ABS(m.amount)) FILTER (WHERE m.kind='CREDIT'),0) credited, COUNT(DISTINCT m.subscription_id)::int subscribers FROM sub_moves m JOIN subscriptions s ON s.id=m.subscription_id JOIN sub_plans pl ON pl.id=s.plan_id WHERE ${w.sql} GROUP BY 1 ORDER BY 1`, w.params);
+  return { columns: [{ key: "grp", label: (q.groupBy || "month") === "plan" ? "الخطة" : "الشهر" }, { key: "subscribers", label: "المشتركون", type: "int" }, { key: "invoices", label: "الفواتير", type: "int", sum: true }, { key: "invoiced", label: "المفوتر (قبل الضريبة)", type: "money", sum: true }, { key: "credits", label: "الإشعارات الدائنة", type: "int", sum: true }, { key: "credited", label: "المردود", type: "money", sum: true }, { key: "net", label: "الصافي", type: "money", sum: true }], rows: rows.map((r: any) => ({ ...r, net: r2(Number(r.invoiced) - Number(r.credited)) })) };
+};

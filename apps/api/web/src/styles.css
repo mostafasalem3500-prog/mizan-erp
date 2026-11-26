@@ -990,3 +990,12 @@ tr.plan-critical td:first-child { box-shadow: inset 4px 0 0 #ef4444; } tr.plan-l
 
 /* 3.53.0: tablets — the top bar keeps its icons and drops the button words so nothing is pushed off the screen */
 @media (max-width: 1100px) { .topbar .pos-t, .topbar .quick-t { display: none; } .topbar { gap: 8px; padding-inline: 14px; } }
+
+/* 3.54.0: two tabs in the side menu — the accounting core, and the activity-specific sections */
+.sidebar .nav-tabs { display: flex; gap: 4px; background: rgba(255,255,255,.06); border-radius: 10px; padding: 3px; margin: 0 2px 8px; }
+.sidebar .nav-tabs button { flex: 1; border: 0; background: none; color: #b7d3cf; font: inherit; font-size: 12.5px; padding: 6px 4px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.sidebar .nav-tabs button.on { background: var(--primary); color: #fff; font-weight: 600; }
+.sidebar .nav-tabs button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.sidebar [hidden] { display: none !important; }
+.sidebar .nav-hint { color: #8bb0ab; font-size: 12px; padding: 10px 8px; line-height: 1.7; }
+.sector-points { margin: 0 0 12px; padding-inline-start: 18px; font-size: 13.5px; line-height: 1.9; color: var(--text); }

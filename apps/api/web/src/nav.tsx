@@ -10,6 +10,9 @@ import { useFavs } from "./pages/Learn";
 
 export type NavItem = { to: string; label: string; perm: string; sa?: boolean; eg?: boolean; company?: boolean; action?: boolean };
 export type NavGroup = { key: string; ic: string; label: string; to?: string; perm?: string; items?: NavItem[] };
+/** 3.54.0: the activity-specific sections sit in their own menu tab, so the accounting menu stays short. */
+export const SECTOR_KEYS = ["sectors", "resto", "mfg", "rent", "subs", "estore"];
+const tabOf = (key?: string) => (key && SECTOR_KEYS.includes(key) ? "sector" : "main");
 
 export const NAV_TREE: NavGroup[] = [
   { key: "home", ic: "▦", label: "لوحة المؤشرات", to: "/", perm: "dashboard.read" },
@@ -18,6 +21,7 @@ export const NAV_TREE: NavGroup[] = [
   { key: "insights", ic: "📈", label: "لوحة الإدارة والتحليل", to: "/insights", perm: "reports.read" },
   { key: "ai", ic: "✨", label: "المساعد الذكي", to: "/ai", perm: "dashboard.read" },
   { key: "pos", ic: "🛒", label: "نقطة البيع", to: "/pos", perm: "pos.use" },
+  { key: "sectors", ic: "🧭", label: "دليل الأنشطة المتخصصة", to: "/sectors", perm: "dashboard.read" },
   { key: "resto", ic: "🍽", label: "المطاعم والمقاهي", items: [
     { to: "/recipes", label: "الوصفات وتكلفة الأطباق", perm: "products.read", company: true },
     { to: "/recipes?tab=preps", label: "التحضيرات (وصفة أولية ونهائية)", perm: "products.read", company: true },
@@ -44,6 +48,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/mfg/unbuild", label: "الفك والتفكيك", perm: "mfg.read", company: true },
     { to: "/mfg/trace", label: "تتبّع الدفعات والأرقام التسلسلية", perm: "mfg.read", company: true },
     { to: "/mfg/reports", label: "تقارير التصنيع والانحرافات", perm: "mfg.read", company: true },
+    { to: "/reports-center?m=mfg", label: "تقارير التصنيع التفصيلية", perm: "reports.read", company: true },
   ] },
   { key: "rent", ic: "🔑", label: "التأجير", items: [
     { to: "/rentals/contracts?new=1", label: "عقد إيجار جديد", perm: "sales.write", action: true },
@@ -52,6 +57,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/rentals/assets", label: "أصول التأجير وأسعارها", perm: "sales.read", company: true },
     { to: "/rentals/calendar", label: "تقويم الإشغال", perm: "sales.read", company: true },
     { to: "/rentals/reports", label: "تقارير التأجير والعائد", perm: "sales.read", company: true },
+    { to: "/reports-center?m=rental", label: "تقارير التأجير التفصيلية", perm: "reports.read", company: true },
   ] },
   { key: "subs", ic: "🔁", label: "الاشتراكات", items: [
     { to: "/subs/list?new=1", label: "مشترك جديد", perm: "sales.write", action: true },
@@ -60,6 +66,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/subs/plans", label: "خطط الاشتراك", perm: "sales.read", company: true },
     { to: "/subs/checkin", label: "تسجيل الحضور", perm: "sales.read", company: true },
     { to: "/subs/usage", label: "تقرير الحضور والاستخدام", perm: "sales.read", company: true },
+    { to: "/reports-center?m=subs", label: "تقارير الاشتراكات التفصيلية", perm: "reports.read", company: true },
   ] },
   { key: "tasks", ic: "☑", label: "المهام والمتابعات", to: "/tasks", perm: "dashboard.read" },
   { key: "sales", ic: "🧾", label: "المبيعات", items: [
@@ -164,7 +171,7 @@ export const NAV_TREE: NavGroup[] = [
     { to: "/hr/gosi", label: "نسب التأمينات وسياسة المسير", perm: "hr.read", sa: true, company: true },
     { to: "/hr/gosi", label: "سياسة اعتماد المسير", perm: "hr.read", eg: true, company: true },
     { to: "/tax/salary-tax-report", label: "تقرير ضريبة المرتبات (نموذج 4 والتسوية)", perm: "accounting.read", eg: true, company: true },
-    { to: "/reports-center?m=hr", label: "تقارير الرواتب التفصيلية", perm: "reports.read", company: true },
+    { to: "/reports-center?m=hr", label: "تقارير الموارد البشرية والرواتب", perm: "reports.read", company: true },
   ] },
   { key: "tax", ic: "٪", label: "الضرائب والزكاة", items: [
     { to: "/vat", label: "ضريبة القيمة المضافة والإقرار", perm: "vat.read", company: true },
@@ -281,29 +288,40 @@ export function SideNav({ can, lockedBranch, extra }: { can: (p: string) => bool
   const [q, setQ] = useState("");
   useEffect(() => { if (active?.g.items) setOpen(active.g.key); }, [active?.g.key]);
   const nq = norm(q.trim());
+  const hasSector = tree.some((g) => SECTOR_KEYS.includes(g.key));
+  const [tab, setTabRaw] = useState<string>(() => { try { return active ? tabOf(active.g.key) : localStorage.getItem("mz_nav_tab") || "main"; } catch { return "main"; } });
+  const setTab = (t: string) => { setTabRaw(t); try { localStorage.setItem("mz_nav_tab", t); } catch { /* private window */ } };
+  // opening a screen from a link or the search shows the tab it lives in
+  useEffect(() => { if (active && (active.g.items || active.g.key === "sectors") && tabOf(active.g.key) !== tab) setTabRaw(tabOf(active.g.key)); }, [active?.g.key]);
+  const shown = (g: NavGroup) => !!nq || !hasSector || tabOf(g.key) === tab;
   const [favs, toggleFav] = useFavs();
   const loc = useLocation();
   const here = loc.pathname + loc.search;
   return (
     <nav>
       <div className="nav-search"><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث في القائمة…" aria-label="بحث في القائمة" />{q && <button onClick={() => setQ("")} aria-label="مسح">✕</button>}</div>
-      {!nq && favs.length > 0 && <div className="nav-group open nav-favs">
+      {hasSector && !nq && <div className="nav-tabs" role="tablist" aria-label="أقسام القائمة">
+        <button role="tab" aria-selected={tab === "main"} className={tab === "main" ? "on" : ""} onClick={() => setTab("main")} data-nav-tab="main">الأساسي</button>
+        <button role="tab" aria-selected={tab === "sector"} className={tab === "sector" ? "on" : ""} onClick={() => setTab("sector")} data-nav-tab="sector">الأنشطة المتخصصة</button>
+      </div>}
+      {!nq && favs.length > 0 && tab === "main" && <div className="nav-group open nav-favs">
         <div className="nav-top"><span className="ic">★</span><span className="grow">المفضلة</span></div>
         <div className="nav-sub">{favs.map((f) => <span key={f.to} className="fav-row"><Link to={f.to} className={here === f.to ? "active" : ""}>{f.label}</Link><button onClick={() => toggleFav(f)} aria-label={"إزالة " + f.label + " من المفضلة"} title="إزالة">✕</button></span>)}</div>
       </div>}
       {tree.map((g) => {
-        if (g.to) return nq && !norm(g.label).includes(nq) ? null : <Link key={g.key} to={g.to} className={"nav-top" + (active?.g.key === g.key ? " active" : "")}><span className="ic">{g.ic}</span>{g.label}</Link>;
+        if (g.to) return nq && !norm(g.label).includes(nq) ? null : <Link key={g.key} to={g.to} hidden={!shown(g)} className={"nav-top" + (active?.g.key === g.key ? " active" : "")}><span className="ic">{g.ic}</span>{g.label}</Link>;
         // matching screens; a hit on the module name alone lists the whole module
         const hits = nq ? g.items!.filter((i) => norm(i.label).includes(nq)) : g.items!;
         const items = nq && !hits.length && norm(g.label).includes(nq) ? g.items! : hits;
         if (nq && !items.length) return null;
         const isOpen = nq ? true : open === g.key;
         return (
-          <div key={g.key} className={"nav-group" + (isOpen ? " open" : "") + (active?.g.key === g.key ? " current" : "")}>
+          <div key={g.key} hidden={!shown(g)} data-nav-group={g.key} className={"nav-group" + (isOpen ? " open" : "") + (active?.g.key === g.key ? " current" : "")}>
             <button className="nav-top" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : g.key)}><span className="ic">{g.ic}</span><span className="grow">{g.label}</span><span className="chev">‹</span></button>
             <div className="nav-sub">{items.map((i) => <Link key={i.to} to={i.to} className={(i.action ? "action" : "") + (active?.i?.to === i.to ? " active" : "")}>{i.action ? "＋ " : ""}{i.label}</Link>)}</div>
           </div>);
       })}
+      {hasSector && !nq && tab === "sector" && <div className="nav-hint">أقسام الأنشطة: المطاعم، التصنيع، التأجير، الاشتراكات{CFG.country === "SA" ? "، المتاجر الإلكترونية" : ""}. كلها مرتبطة بالمبيعات والمخزون والحسابات.</div>}
       {extra}
     </nav>
   );

@@ -77,6 +77,7 @@ const ReorderPage = lz(() => import("./pages/Stock"), "ReorderPage");
 const CollectionsPage = lz(() => import("./pages/Collections"), "CollectionsPage");
 const CustomerPortal = lz(() => import("./pages/Integrations"), "CustomerPortal");
 const EmployeePortal = lz(() => import("./pages/EmpPortal"), "EmployeePortal");
+const SectorsPage = lz(() => import("./pages/Sectors"), "SectorsPage");
 const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
@@ -241,6 +242,7 @@ export function App() {
             <div className="content" id="content" role="main" tabIndex={-1}>
               <ScreenGuard resetKey={loc.pathname}><React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/sectors" element={<SectorsPage />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />
                 <Route path="/sales/quotations" element={<DocumentsPage direction="SALE" kinds={["QUOTATION", "ORDER"]} title="عروض الأسعار وأوامر البيع" />} />
                 <Route path="/sales/credit-notes" element={<DocumentsPage direction="SALE" kinds={["CREDIT_NOTE", "DEBIT_NOTE"]} title="الإشعارات الدائنة والمدينة" />} />
