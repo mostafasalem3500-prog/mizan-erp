@@ -62,6 +62,10 @@ export function PosPage() {
   const [newPartner, setNewPartner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const products = useFetch(`/products${q({ limit: 1000, use: "sale" })}`);
+  // items sold through a recipe hold no stock themselves: the server says how many can still be made from what was produced
+  const availF = useFetch<Record<string, { left: number | null; prep?: string }>>("/pos/availability");
+  const avail = availF.data || {};
+  useEffect(() => { const h = setInterval(() => { if (navigator.onLine) availF.reload(); }, 60000); return () => clearInterval(h); }, []);
   // offers and loyalty settings are cached so the POS keeps applying them while offline
   const promosF = useFetch<any[]>("/promotions/live");
   const loyF = useFetch<any>("/loyalty/settings");
@@ -240,14 +244,15 @@ export function PosPage() {
           return <div className="subcats" data-pos-subcats><button className={cat === parent.id ? "active" : ""} onClick={() => setCat(parent.id)}>كل {parent.name}</button>{kids.map((k: any) => <button key={k.id} className={cat === k.id ? "active" : ""} data-pos-subcat={k.name} onClick={() => setCat(k.id)}>{k.icon || ""} {k.name}</button>)}</div>; })()}
         <div className="items">
           {list.map((p: any) => {
-            const out = p.type === "STOCK" && Number(p.qty) <= 0 && !me.company.allowNegativeStock;
+            const rc = avail[p.id];
+            const out = rc ? rc.left !== null && rc.left <= 0 : p.saleClass === "RECIPE" ? false : p.type === "STOCK" && Number(p.qty) <= 0 && !me.company.allowNegativeStock;
             return (
-              <div key={p.id} className={"item" + (out && !imgMode ? " out" : "") + (imgMode ? " sel-mode" + (imgSel[p.id] ? " sel" : "") : "")} title={out && !imgMode ? (canOversell ? "الرصيد المسجل صفر — اضغط للبيع بعد التأكيد" : "الرصيد صفر") : undefined} onClick={() => { if (imgMode) return setImgSel((x) => ({ ...x, [p.id]: !x[p.id] })); if (!out) return add(p); if (!canOversell) return toast(`الرصيد المسجل للصنف «${p.name}» صفر، والمنشأة تمنع البيع بلا رصيد`, "err"); if (oversellOk.current[p.id] || confirmDlg(`الرصيد المسجل للصنف «${p.name}» صفر.\n\nهل البضاعة موجودة فعلاً أمامك وتريد بيعها؟ سيُسجَّل التخطي باسمك ويظهر الصنف بالسالب حتى يُسجَّل الوارد.`)) { oversellOk.current[p.id] = true; add(p); } }}>
+              <div key={p.id} className={"item" + (out && !imgMode ? " out" : "") + (imgMode ? " sel-mode" + (imgSel[p.id] ? " sel" : "") : "")} data-pos-item={p.sku} title={out && !imgMode ? (rc ? `نفد «${rc.prep}» المنتَج مسبقاً — أدخل طبخة جديدة أو بِع بعد التأكيد` : canOversell ? "الرصيد المسجل صفر — اضغط للبيع بعد التأكيد" : "الرصيد صفر") : undefined} onClick={() => { if (imgMode) return setImgSel((x) => ({ ...x, [p.id]: !x[p.id] })); if (!out) return add(p); if (!canOversell) return toast(`الرصيد المسجل للصنف «${p.name}» صفر، والمنشأة تمنع البيع بلا رصيد`, "err"); if (oversellOk.current[p.id] || confirmDlg(rc ? `نفد «${rc.prep}» المنتَج مسبقاً، فلا يكفي لصنف «${p.name}».\n\nهل هو موجود فعلاً وتريد البيع؟ سيظهر رصيد «${rc.prep}» بالسالب حتى تُسجَّل الطبخة.` : `الرصيد المسجل للصنف «${p.name}» صفر.\n\nهل البضاعة موجودة فعلاً أمامك وتريد بيعها؟ سيُسجَّل التخطي باسمك ويظهر الصنف بالسالب حتى يُسجَّل الوارد.`)) { oversellOk.current[p.id] = true; add(p); } }}>
                 {imgMode && <input type="checkbox" className="sel-ck" checked={!!imgSel[p.id]} readOnly />}
                 <div className="img" style={p.categoryColor ? { background: p.categoryColor + "22", color: p.categoryColor } : {}}>{p.image ? <img src={p.image} alt="" loading="lazy" /> : EMOJI[p.category] || "📦"}</div>
                 {imgMode && <button className="btn sm img-edit" title="صورة هذا الصنف" onClick={(e) => { e.stopPropagation(); setImgEdit([p]); }}>{p.image ? "✎ تغيير" : "＋ صورة"}</button>}
                 <div className="name">{p.name}</div>
-                <div className="row between"><span className="price num">{money(p.salePrice)}</span>{p.type === "STOCK" && <span className="stock num">{Number(p.qty)}</span>}</div>
+                <div className="row between"><span className="price num">{money(p.salePrice)}</span>{rc ? (rc.left !== null && <span className={"stock num" + (rc.left <= 0 ? " sold-out" : rc.left <= 10 ? " few" : "")} data-pos-left={rc.left}>{rc.left <= 0 ? "نفد" : `باقي ${rc.left}`}</span>) : p.type === "STOCK" && <span className="stock num">{Number(p.qty)}</span>}</div>
               </div>);
           })}
           {!list.length && <div className="empty" style={{ gridColumn: "1/-1" }}>{imgMode && imgMissing ? "كل الأصناف الظاهرة لها صور ✓" : "لا توجد أصناف — أضف أصنافاً من شاشة الأصناف"}</div>}
@@ -321,7 +326,7 @@ export function PosPage() {
             inv = await api("/pos/sale", { body: { ...body, allowOversell: true } });
             toast("تم البيع مع تخطي الرصيد — بلّغ المحاسب لتسجيل الوارد", "info");
           }
-          finish(inv); sess.reload(); products.reload();
+          finish(inv); sess.reload(); products.reload(); availF.reload();
         } catch (e: any) {
           if (e.code !== "OFFLINE") throw e;
           setQueue((q) => [...q, { body }]); finish(localReceipt(body, cart, tenders)); toast("انقطع الاتصال — حُفظت العملية وستُرحّل تلقائياً", "info");

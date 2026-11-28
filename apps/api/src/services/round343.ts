@@ -600,3 +600,26 @@ export async function wasteLog(t: Db, C: string, q: { from?: string; to?: string
   const pv = rows.reduce((s, r) => s + r.producedValue, 0), wv = rows.reduce((s, r) => s + r.wastedValue, 0);
   return { from, to, rows, days, totals: { producedValue: r2(pv), wastedValue: r2(wv), wastePct: pv > 0 ? r2((wv / pv) * 100) : null } };
 }
+
+// ───────────────────────── the till: how many of each recipe item can still be sold ─────────────────────────
+/**
+ * Items sold through their recipe hold no stock of their own, so the till cannot read their balance. For each one:
+ * `left` = how many can still be made from the bulk preparations on hand (null when the recipe draws only on raw
+ * materials, which may run negative and never stop a sale).
+ */
+export async function posAvailability(t: Db, C: string) {
+  const all = await loadAll(t, C);
+  const out: Record<string, { left: number | null; prep?: string }> = {};
+  for (const [id, n] of all.nodes) {
+    if (!exploded(n)) continue;
+    let left: number | null = null, prep: string | undefined;
+    for (const [leaf, need] of explode(all, id, 1)) {
+      const ln = all.nodes.get(leaf);
+      if (!ln || ln.method !== "BATCH" || !(need > 0)) continue; // only what is produced in advance can run out
+      const can = Math.max(0, Math.floor(((all.infos.get(leaf)?.onHand || 0) + 1e-9) / need));
+      if (left === null || can < left) { left = can; prep = ln.name; }
+    }
+    out[id] = { left, ...(prep ? { prep } : {}) };
+  }
+  return out;
+}
