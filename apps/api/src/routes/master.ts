@@ -221,8 +221,8 @@ master.get("/products/:id/last-price", perm("products.read"), h(async (req) => {
   const direction = req.query.direction === "PURCHASE" ? "PURCHASE" : "SALE";
   const pid = /^[0-9a-f-]{36}$/i.test(String(req.query.partnerId || "")) ? String(req.query.partnerId) : null;
   if (!pid) return { last: null };
-  const r = await db.maybe(`SELECT i.id, i.number, i.date, l.unit_price / NULLIF(l.factor,0) / CASE WHEN i.prices_include_vat THEN 1 + l.tax_rate/100.0 ELSE 1 END AS price, l.discount_pct
-     FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.partner_id=$2 AND l.product_id=$3 AND i.direction=$4 AND i.kind='INVOICE' AND i.status='POSTED' AND i.exchange_rate=1 AND l.unit_price > 0
+  const r = await db.maybe(`SELECT i.id, i.number, i.date, l.net_amount / NULLIF(l.qty * (1 - l.discount_pct/100.0) * l.factor, 0) AS price, l.discount_pct
+     FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.partner_id=$2 AND l.product_id=$3 AND i.direction=$4 AND i.kind='INVOICE' AND i.status='POSTED' AND i.exchange_rate=1 AND l.unit_price > 0 AND l.qty > 0 AND l.discount_pct < 100 AND COALESCE(l.promo_discount,0) = 0
      ORDER BY i.date DESC, i.created_at DESC LIMIT 1`, [cid(req), pid, p(req).id, direction]);
   return { last: r ? { invoiceId: r.id, number: r.number, date: r.date, price: Math.round(Number(r.price) * 10000) / 10000, discountPct: Number(r.discountPct) } : null };
 }));
