@@ -18,6 +18,7 @@ r343.post("/setoffs/:id/cancel", perm("accounting.write"), h(async (req) => { co
 r343.get("/recipes/engineering", perm("products.read"), h(async (req) => s.menuEngineering(db, cid(req), { days: Number(req.query.days || 30) })));
 r343.post("/preps/example", perm("products.write"), h(async (req) => { const r = await tx((t) => s.seedShawarmaExample(t, req.company, actor(req), req.auth.userId)); await audit(req, "CREATE", "example", null, { example: "shawarma" }); return r; }));
 // till appearance and the best sellers shown first
+r343.get("/pos/availability", perm("pos.use"), h(async (req) => s.posAvailability(db, cid(req))));
 r343.get("/pos/ui", perm("pos.use"), h(async (req) => {
   const co = await db.one(`SELECT accounting->'pos'->'ui' ui FROM companies WHERE id=$1`, [cid(req)]);
   const top = await db.rows(`SELECT l.product_id id FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.direction='SALE' AND i.kind='INVOICE' AND i.status='POSTED' AND i.channel='POS' AND i.date > CURRENT_DATE - 30 AND l.product_id IS NOT NULL GROUP BY l.product_id ORDER BY SUM(l.qty) DESC LIMIT 24`, [cid(req)]);

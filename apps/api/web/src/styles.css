@@ -1003,3 +1003,7 @@ tr.plan-critical td:first-child { box-shadow: inset 4px 0 0 #ef4444; } tr.plan-l
 /* 3.57.0: a quiet inline action (the last-price hint under a price) */
 .btn-link { background: none; border: 0; padding: 2px 0 0; color: var(--primary); cursor: pointer; font: inherit; font-size: 12px; display: block; text-align: start; white-space: nowrap; }
 .btn-link:hover { text-decoration: underline; }
+
+/* 3.58.0: what is left of an item sold from bulk production, on its tile at the till */
+.pos .item .stock.few { color: var(--accent); font-weight: 700; }
+.pos .item .stock.sold-out { color: var(--danger-ink, #b91c1c); font-weight: 700; }
