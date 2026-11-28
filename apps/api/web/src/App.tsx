@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
+import { Routes, Route, NavLink, Link, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select, useFetch } from "./lib";
 import { GlobalSearch } from "./pages/Search";
 const CharityApp = React.lazy(() => import("./charity/CharityApp").then((m) => ({ default: m.CharityApp })));
@@ -78,6 +78,7 @@ const CollectionsPage = lz(() => import("./pages/Collections"), "CollectionsPage
 const CustomerPortal = lz(() => import("./pages/Integrations"), "CustomerPortal");
 const EmployeePortal = lz(() => import("./pages/EmpPortal"), "EmployeePortal");
 const SectorsPage = lz(() => import("./pages/Sectors"), "SectorsPage");
+const WhatsNewPage = lz(() => import("./pages/WhatsNew"), "WhatsNewPage");
 const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
@@ -181,6 +182,16 @@ function AssocBrand() {
   return <div className="brand assoc-brand"><img src={st.data?.logoUrl || b?.logo || DEFAULT_LOGO} alt="" /><span><b>{name}</b><small>النظام المحاسبي</small></span></div>;
 }
 
+/** The version under the menu opens «ما الجديد»; a dot shows while the newest release has not been looked at. */
+function VersionLink() {
+  const [unseen, setUnseen] = useState(false);
+  useEffect(() => {
+    const check = () => { try { setUnseen(localStorage.getItem("mz_seen_version") !== String((window as any).MIZAN_VERSION)); } catch { setUnseen(false); } };
+    check(); window.addEventListener("mz-seen-version", check); return () => window.removeEventListener("mz-seen-version", check);
+  }, []);
+  return <Link to="/whats-new" className="small" data-version-link style={{ opacity: .75, color: "inherit", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }} title="ما الجديد في هذا الإصدار">الإصدار {(window as any).MIZAN_VERSION}{unseen && <span data-version-dot style={{ width: 7, height: 7, borderRadius: 7, background: "var(--accent)", display: "inline-block" }} />}<span style={{ textDecoration: "underline" }}>ما الجديد</span></Link>;
+}
+
 export function App() {
   const [me, setMe] = useState<any>(null);
   const [loading, setLoading] = useState(!!session.token);
@@ -219,7 +230,7 @@ export function App() {
             </>} />
             <div className="foot">
               <SubscriptionLine me={me} />
-              <div className="small" style={{ opacity: .6 }} title="رقم الإصدار المعروض الآن">الإصدار {(window as any).MIZAN_VERSION}</div>
+              <VersionLink />
               <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={logout}>تسجيل الخروج</button>
             </div>
           </aside>
@@ -243,6 +254,7 @@ export function App() {
               <ScreenGuard resetKey={loc.pathname}><React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/sectors" element={<SectorsPage />} />
+                <Route path="/whats-new" element={<WhatsNewPage />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />
                 <Route path="/sales/quotations" element={<DocumentsPage direction="SALE" kinds={["QUOTATION", "ORDER"]} title="عروض الأسعار وأوامر البيع" />} />
                 <Route path="/sales/credit-notes" element={<DocumentsPage direction="SALE" kinds={["CREDIT_NOTE", "DEBIT_NOTE"]} title="الإشعارات الدائنة والمدينة" />} />
