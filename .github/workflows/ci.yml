@@ -107,6 +107,8 @@ jobs:
           DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/mizan_eg PORT=3200 JWT_SECRET=ci-eg MIZAN_COUNTRY=EG nohup node dist/server.js > ../../server-eg.log 2>&1 &
           for i in $(seq 1 90); do curl -sf http://127.0.0.1:3100/api/health > /dev/null && curl -sf http://127.0.0.1:3200/api/health > /dev/null && break; sleep 2; done
           curl -sf http://127.0.0.1:3100/api/health && curl -sf http://127.0.0.1:3200/api/health
+          # the start-up self-check loads the database heavily; a screen opened while it runs can take over a minute
+          for i in $(seq 1 60); do grep -q "\[selfcheck\]" server-sa.log && grep -q "\[selfcheck\]" server-eg.log && break; sleep 2; done
       - name: Screen tests (menu crawl in Arabic and English, English interface, 3.30 features)
         run: bash tests/ui/run_all.sh
       - name: Server logs on failure

@@ -90,13 +90,14 @@ export function ProductsPage() {
   const { can } = useCompanyContext();
   const [search, setSearch] = useUrlSearch();
   const [cat, setCat] = useState(() => new URLSearchParams(window.location.search).get("cat") || "");
-  const [type, setType] = useState("");
+  const [type, setType] = useState(() => { const v = new URLSearchParams(window.location.search).get("type") || ""; return ["STOCK", "SERVICE", "COMPONENT", "RECIPE", "NOSALE"].includes(v) ? v : ""; });
   const [stock, setStock] = useState("");
   const [img, setImg] = useState("");
   const [status, setStatus] = useState("active");
   const dq = useDebounce(search);
   const [edit, setEdit] = useState<any>(null);
   useNewParam(() => setEdit({}));
+  const [classify, setClassify] = useState<any[] | null>(null);
   const [card, setCard] = useState<any>(null);
   const navP = useNavigate();
   const [cats, setCats] = useState(false);
@@ -139,7 +140,7 @@ export function ProductsPage() {
           <FilterInfo shown={filtered.length} total={data?.length || 0} active={active} onClear={clear} />
           <div className="grow" />{data && <ExportBtn name="الأصناف" rows={() => s.sorted.map((p: any) => ({ الرمز: p.sku, الباركود: p.barcode, الاسم: p.name, التصنيف: p.category, النوع: p.type === "STOCK" ? "مخزني" : "خدمة", الوحدة: p.unit, "سعر البيع": p.salePrice, "سعر الشراء": p.purchasePrice, "متوسط التكلفة": p.avgCost, الكمية: p.qty, "قيمة المخزون": p.stockValue, الضريبة: TAX_AR[p.taxCode], الصورة: p.image ? "نعم" : "" }))} />}
         </div>
-        {selected.length > 0 && <div className="alert info row between" style={{ marginTop: 0 }}><span>محدد {selected.length} صنف</span><span className="row" style={{ gap: 6 }}>{can("products.write") && <button className="btn sm primary" onClick={() => setImages(selected)}>🖼 رفع صور المحدد</button>}<button className="btn sm ghost" onClick={() => setSel({})}>إلغاء التحديد</button></span></div>}
+        {selected.length > 0 && <div className="alert info row between" style={{ marginTop: 0 }}><span>محدد {selected.length} صنف</span><span className="row" style={{ gap: 6 }}>{can("products.write") && <><button className="btn sm primary" data-bulk-classify onClick={() => setClassify(selected)}>🏷 تصنيف المحدد</button><button className="btn sm" onClick={() => setImages(selected)}>🖼 رفع صور المحدد</button></>}<button className="btn sm ghost" onClick={() => setSel({})}>إلغاء التحديد</button></span></div>}
         {loading && !data ? <Loading /> : !filtered.length ? <Empty text={active ? "لا نتائج مطابقة للفلاتر" : "لا توجد بيانات"} /> : (
           <div className="table-wrap"><table className="tbl"><thead><tr><th style={{ width: 28 }}><input type="checkbox" checked={allSel} onChange={(e) => { const n: Record<string, boolean> = { ...sel }; filtered.forEach((p: any) => { n[p.id] = e.target.checked; }); setSel(n); }} title="تحديد الكل" /></th><Th k="sku" s={s}>الرمز</Th><Th k="name" s={s}>الصنف</Th><Th k="category" s={s}>التصنيف</Th><Th k="salePrice" s={s} n>سعر البيع</Th><Th k="avgCost" s={s} n>متوسط التكلفة</Th><Th k="qty" s={s} n>الكمية</Th><Th k="stockValue" s={s} n>قيمة المخزون</Th><th>الضريبة</th><th /></tr></thead>
             <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
@@ -159,8 +160,32 @@ export function ProductsPage() {
       {card && <StockCardModal p={card} onClose={() => setCard(null)} />}
       {cats && <CategoriesModal onClose={() => { setCats(false); categories.reload(); reload(); }} />}
       {imp && <ImportModal kind="products" onClose={(d) => { setImp(false); if (d) { reload(); categories.reload(); } }} />}
+      {classify && <ClassifyModal products={classify} onClose={(done) => { setClassify(null); if (done) { reload(); setSel({}); } }} />}
       {images && <ProductImagesModal products={images} onClose={(changed) => { setImages(null); if (changed) { reload(); setSel({}); } }} />}
     </div>
+  );
+}
+
+/** Classifies the selected items at once: the sale class and the «ingredient» use. What cannot take the change is listed with the reason. */
+function ClassifyModal({ products, onClose }: { products: any[]; onClose: (done?: boolean) => void }) {
+  const [sale, setSale] = useState("KEEP");
+  const [comp, setComp] = useState("KEEP");
+  const [res, setRes] = useState<any>(null);
+  const { run, busy } = useAction();
+  const nothing = sale === "KEEP" && comp === "KEEP";
+  return (
+    <Modal title={`تصنيف ${products.length} صنف`} onClose={() => onClose(!!res)} footer={<><div className="grow" /><button className="btn" onClick={() => onClose(!!res)}>{res ? "إغلاق" : "إلغاء"}</button>
+      {!res && <button className="btn primary" disabled={busy || nothing} data-classify-apply onClick={() => run(async () => { setRes(await api("/products/classify", { body: { ids: products.map((p) => p.id), ...(sale !== "KEEP" ? { saleClass: sale || null } : {}), ...(comp !== "KEEP" ? { component: comp === "ADD" } : {}) } })); })}>تطبيق</button>}</>}>
+      {!res ? <>
+        <div className="alert small" style={{ marginBottom: 10 }}>يفيد بعد التحديث: الأصناف القديمة صُنِّفت من نوعها، فالخامات ما زالت تظهر في البيع. حدّدها ثم اجعلها «لا يُباع» و«مكوِّن».</div>
+        <div className="form-grid">
+          <Field label="في البيع"><Select value={sale} onChange={(e) => setSale(e.target.value)} data-classify-sale><option value="KEEP">بلا تغيير</option><option value="">لا يُباع</option><option value="STOCK">صنف مخزني</option><option value="RECIPE">صنف له خلطة</option><option value="SERVICE">صنف خدمي</option></Select></Field>
+          <Field label="استخدام «مكوِّن» في المشتريات"><Select value={comp} onChange={(e) => setComp(e.target.value)} data-classify-comp><option value="KEEP">بلا تغيير</option><option value="ADD">إضافة «مكوِّن»</option><option value="REMOVE">إزالة «مكوِّن»</option></Select></Field>
+        </div></> : <div data-classify-result>
+        <div className="alert info">صُنِّف {res.updated} صنف{res.skipped.length ? `، وتُرك ${res.skipped.length}` : ""}.</div>
+        {res.skipped.length > 0 && <div className="table-wrap"><table className="tbl compact"><thead><tr><th>الصنف</th><th>سبب تركه</th></tr></thead><tbody>{res.skipped.map((x: any, i: number) => <tr key={i}><td><b>{x.name}</b></td><td className="small">{x.reason}</td></tr>)}</tbody></table></div>}
+      </div>}
+    </Modal>
   );
 }
 

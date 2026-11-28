@@ -265,10 +265,18 @@ function DayClose({ canWrite }: { canWrite: boolean }) {
   const invalid = chosen.some((r: any) => !(r.w > 0) || r.w > r.left + 1e-9);
   const value = chosen.reduce((a: number, r: any) => a + r.w * r.unitCost, 0);
   const many = new Set((data?.rows || []).map((r: any) => r.warehouseId)).size > 1;
+  const preps = useFetch<any>(canWrite ? "/preps" : null);
+  const batchPreps = (preps.data?.rows || []).filter((r: any) => r.method === "BATCH");
+  const [prepId, setPrepId] = useState("");
+  const [cook, setCook] = useState<any>(null);
+  const log = useFetch<any>("/preps/waste-log", [data]);
   return (
     <div className="card" data-day-close>
       <div className="alert small" style={{ marginBottom: 10 }}>للأصناف التي تُنتَج مسبقاً بكمية (الشاورما، المندي…): تُدخل الكمية المنتَجة من «التحضيرات ← طبخة جديدة»، والبيع يسحب منها خلال اليوم. في نهاية اليوم يُهلَك المتبقي هنا إن وُجد: يخرج من المخزون بتكلفته إلى حساب عجز وتالف المخزون.</div>
-      <div className="row" style={{ gap: 8, alignItems: "flex-end", marginBottom: 10 }}><Field label="اليوم"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-close-date /></Field></div>
+      <div className="row" style={{ gap: 8, alignItems: "flex-end", marginBottom: 10, flexWrap: "wrap" }}><Field label="اليوم"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-close-date /></Field>
+        {canWrite && batchPreps.length > 0 && <><Field label="إدخال إنتاج"><select className="input" value={prepId} onChange={(e) => setPrepId(e.target.value)} data-close-prep><option value="">اختر التحضيرة</option>{batchPreps.map((r: any) => <option key={r.productId} value={r.productId}>{r.name}</option>)}</select></Field>
+          <button className="btn primary" disabled={!prepId} data-close-cook onClick={() => setCook(batchPreps.find((r: any) => r.productId === prepId))}>＋ طبخة جديدة</button></>}</div>
+      {cook && <BatchModal prep={cook} onClose={(done) => { setCook(null); if (done) reload(); }} />}
       {!data ? <Loading /> : !data.rows.length ? <Empty text="لا إنتاج ولا متبقٍّ في هذا اليوم — الأصناف التي تظهر هنا تحضيرات بطريقة «إنتاج مسبق»" /> : <><div className="table-wrap"><table className="tbl" data-close-list>
         <thead><tr><th style={{ width: 28 }} /><th>التحضيرة</th>{many && <th>المستودع</th>}<th className="n">أُنتج اليوم</th><th className="n">سحبه البيع</th><th className="n">دخل في طبخات</th><th className="n">أُهلك</th><th className="n">المتبقي</th><th className="n">يُهلَك</th><th className="n">القيمة</th></tr></thead>
         <tbody>{data.rows.map((r: any) => <tr key={key(r)} className={r.left > 0 ? "" : "muted"}>
@@ -278,6 +286,12 @@ function DayClose({ canWrite }: { canWrite: boolean }) {
           <td className="n">{r.left > 0 ? <Money v={(off[key(r)] ? 0 : (qty[key(r)] === undefined || qty[key(r)] === "" ? r.left : Number(qty[key(r)]) || 0)) * r.unitCost} /> : "—"}</td></tr>)}</tbody></table></div>
         {canWrite && <div className="row mt" style={{ gap: 10, alignItems: "center" }}><button className="btn primary" disabled={busy || !chosen.length || invalid} data-close-waste onClick={() => { if (confirmDlg(`إهلاك المتبقي من ${chosen.length} صنف بقيمة ${money(value)}؟ يُرحَّل قيد: من ح/ عجز وتالف المخزون إلى ح/ المخزون.`)) run(async () => { await api("/preps/leftovers/waste", { body: { date, lines: chosen.map((r: any) => ({ productId: r.productId, warehouseId: r.warehouseId, qty: r.w })) } }); reload(); }, "أُهلك المتبقي وأُقفل اليوم"); }}>إهلاك المتبقي ({money(value)})</button>
           {!left.length && <span className="small muted" data-close-done>لا متبقٍّ: اليوم مقفل.</span>}{invalid && <span className="small neg-val">الكمية أكبر من المتبقي أو صفر</span>}</div>}</>}
+      {log.data && log.data.rows.length > 0 && <div data-waste-log>
+        <div className="card-h mt"><h3>الهالك في آخر 30 يوماً</h3><span className="small muted">أُنتج بقيمة <b>{money(log.data.totals.producedValue)}</b> وأُهلك <b data-waste-total>{money(log.data.totals.wastedValue)}</b>{log.data.totals.wastePct !== null && <> ({log.data.totals.wastePct}%)</>}</span></div>
+        <div className="table-wrap"><table className="tbl compact"><thead><tr><th>التحضيرة</th><th className="n">أُنتج</th><th className="n">أُهلك</th><th className="n">أيام الإهلاك</th><th className="n">قيمة الهالك</th><th style={{ width: 150 }}>نسبة الهالك</th></tr></thead>
+          <tbody>{log.data.rows.map((r: any) => <tr key={r.productId}><td><b>{r.name}</b></td><td className="n">{r.produced} {r.unit}</td><td className="n">{r.wasted}</td><td className="n">{r.days}</td><td className="n"><Money v={r.wastedValue} /></td><td>{r.wastePct === null ? "—" : <PctBar v={r.wastePct} target={10} />}</td></tr>)}</tbody></table></div>
+        <div className="small muted">نسبة الهالك = ما أُهلك ÷ ما أُنتج في الفترة. نسبة عالية متكررة تعني أن كمية الطبخة أكبر من البيع: صغّر التشغيلة أو راجع الحد الأدنى.</div>
+      </div>}
     </div>
   );
 }
