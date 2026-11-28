@@ -198,7 +198,16 @@ export function App() {
   const [menu, setMenu] = useState(false);
   const nav = useNavigate();
   const loc = useLocation();
-  const reload = () => api("/auth/me").then(setMe).catch(() => { session.token = null; setMe(null); }).finally(() => setLoading(false));
+  const [down, setDown] = useState(false);
+  const tries = React.useRef(0);
+  // Only a refused session (401 — the request helper clears the token itself) signs the user out. A server that does not
+  // answer (a restart during an update, a weak connection, a page reload cutting the request short) leaves the session
+  // as it is and tries again: signing out here used to send people to the login page for nothing.
+  const reload = (): Promise<void> => api("/auth/me").then((m) => { tries.current = 0; setDown(false); setMe(m); setLoading(false); }).catch(() => {
+    if (!session.token) { setDown(false); setMe(null); setLoading(false); return; }
+    setDown(true); setLoading(false);
+    if (tries.current++ < 40) setTimeout(reload, Math.min(15000, 1500 * tries.current));
+  });
   useEffect(() => { if (session.token) reload(); const h = () => { setMe(null); nav("/login"); }; window.addEventListener("mz-logout", h); return () => window.removeEventListener("mz-logout", h); }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
   useEffect(() => { if (me?.company) warmScreens(); }, [!!me?.company]);
@@ -207,6 +216,7 @@ export function App() {
   if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/e/")) return <React.Suspense fallback={Wait}><Routes><Route path="/e/:token" element={<EmployeePortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
+  if (!me && down && session.token) return <div className="empty" style={{ paddingTop: 120 }} data-server-wait><span className="spinner" /><div style={{ marginTop: 14 }}>تعذّر الوصول إلى الخادم الآن — نعيد المحاولة تلقائياً، وجلستك محفوظة.</div><button className="btn mt" onClick={() => { tries.current = 0; reload(); }}>إعادة المحاولة الآن</button></div>;
   if (!me) return <React.Suspense fallback={null}><Routes><Route path="/privacy" element={<LegalPage kind="privacy" />} /><Route path="/terms" element={<LegalPage kind="terms" />} /><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes></React.Suspense>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});

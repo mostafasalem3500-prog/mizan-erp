@@ -1,4 +1,5 @@
-"""3.59: «ما الجديد» — the version under the menu opens it, the dot goes once it has been seen, links respect permissions."""
+"""3.59: «ما الجديد» — the version under the menu opens it and the dot goes once seen; and a server that does not
+answer no longer signs the user out."""
 from playwright.sync_api import sync_playwright
 from ui_lib import *
 t = api.register('r359ui')
@@ -13,5 +14,16 @@ with sync_playwright() as pw:
     pg.locator('[data-release="3.56.0"] a').first.click(); pg.wait_for_url('**/products'); ok(True, 'an item opens its screen')
     pg.goto(B + '/'); pg.wait_for_selector('[data-version-link]', timeout=60000); pg.wait_for_timeout(300); ok(pg.locator('[data-version-dot]').count() == 0, 'and stays gone on the next visit')
     ok(not errs, 'no console errors ' + str(errs[:2]))
+    # a server that does not answer keeps the session; only a refused session signs out
+    p2, e2 = signed_in(b, t, service_workers='block'); n = {'c': 0}
+    def flaky(route):
+        n['c'] += 1
+        route.abort() if n['c'] <= 2 else route.continue_()
+    p2.route('**/api/auth/me', flaky)
+    p2.goto(B + '/'); p2.wait_for_selector('[data-server-wait]', timeout=30000)
+    ok('جلستك محفوظة' in p2.inner_text('[data-server-wait]') and p2.evaluate("!!localStorage.getItem('mz_token')"), 'the server not answering: a waiting screen, and the session is kept')
+    p2.wait_for_selector('[data-version-link]', timeout=60000); ok(n['c'] >= 3, 'it tries again by itself and the program opens once the server answers')
+    p3, e3 = signed_in(b, 'not-a-real-token', service_workers='block'); p3.goto(B + '/'); p3.wait_for_selector('input[type=password]', timeout=30000)
+    ok(not p3.evaluate("!!localStorage.getItem('mz_token')"), 'a refused session still goes to the login page')
     b.close()
 done()
