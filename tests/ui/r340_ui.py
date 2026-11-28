@@ -24,7 +24,8 @@ with sync_playwright() as pw:
     # ── POS: zero stock → confirmation → sold ──
     pg.goto(B + '/pos'); pg.wait_for_selector('.auth, .pos .items', timeout=60000)
     if pg.locator('.auth').count(): pg.fill('.auth input[type=number]', '0'); pg.click('.auth .btn.primary')
-    pg.wait_for_selector('.pos .items .item')
+    try: pg.wait_for_selector('.pos .items .item', timeout=60000)
+    except Exception: pg.reload(); pg.wait_for_selector('.pos .items .item', timeout=90000)   # an occasional slow first load on a busy runner: one reload
     pg.fill('.pos .search input', 'صنف تخطي الرصيد'); pg.wait_for_timeout(500)
     pg.locator('.pos .items .item', has_text='صنف تخطي الرصيد').first.click(); pg.wait_for_timeout(300)
     pg.click('button:has-text("الدفع")'); pg.wait_for_selector('.modal'); pg.locator('.modal .m-f .btn.primary, .modal button:has-text("تأكيد")').last.click(); pg.wait_for_selector('.thermal', timeout=20000)
@@ -49,6 +50,9 @@ with sync_playwright() as pw:
     after = call(f"/invoices/{cn['id']}")
     ok(bool(after['reversedBy']) and 'إشعار مدين' in pg.inner_text('body'), 'reversed from the screen: a debit note is issued and opened')
     # ── card settlement ──
+    # three card sales of today: the sample data may hold only returns in the open week, and a return alone cannot be settled
+    ses = call('/pos/session')['session'] or call('/pos/session/open', {'openingCash': 0}); svc = next(p for p in call('/products?limit=1000') if p['sku'].startswith('SV'))
+    for v in (40, 55, 70): call('/pos/sale', {'sessionId': ses['id'], 'lines': [{'productId': svc['id'], 'qty': 1, 'unitPrice': v}], 'tenders': [{'method': 'CARD', 'amount': None}]})
     pg.goto(B + '/bank/card-settlement'); pg.wait_for_selector('[data-clearing="CARD"]', timeout=60000); pg.wait_for_timeout(800)
     ok('تسوية أجهزة الشبكة والبطاقات' in pg.inner_text('.sidebar'), 'card settlement is in the cash & banks menu')
     v0 = call('/clearing/CARD')
@@ -66,7 +70,7 @@ with sync_playwright() as pw:
     ok(len(v1['open']) == len(v0['open']) - 2 and abs(v1['batches'][0]['fees'] + v1['batches'][0]['feeVat'] - 3.45) < 0.011 and abs(v1['unexplained']) < 0.011, 'two sales settled from the screen: fee from the amount received, list still equals the ledger')
     ok(pg.locator('[data-batches] tbody tr').count() >= 1, 'the deposit appears in the deposits tab')
     # a statement file with one unknown transaction
-    o = v1['open'][0]
+    o = next(x for x in v1['open'] if float(x['open']) > 0)   # a sale: a return alone has nothing to settle against
     path = os.path.join(tempfile.mkdtemp(), 'stmt.csv')
     open(path, 'w', encoding='utf-8').write(f"reference,date,amount,fee\n{o['number']},{o['date']},{o['open']},1.20\nRRN-NOPE,{o['date']},77.00,0.60\n")
     pg.set_input_files('input[type=file]', path); pg.wait_for_selector('[data-col="ref"]', timeout=20000)
@@ -92,7 +96,7 @@ with sync_playwright() as pw:
         if box.count(): box.first.check(); pg.wait_for_timeout(1200)
         ok(pg.locator('[data-dismiss-att]').count() >= 1 or 'stmt.csv' in pg.inner_text('body'), 'the attached evidence shows next to the justified note')
     if not EG:
-        ok('المتاجر الإلكترونية' in pg.inner_text('.sidebar'), 'e-stores have their own menu section')
+        pg.click('[data-nav-tab=sector]'); pg.wait_for_timeout(200); ok(pg.locator('[data-nav-group=estore]').is_visible() and 'المتاجر الإلكترونية' in pg.inner_text('.sidebar'), 'e-stores have their own menu section, on the activity tab')
         pg.goto(B + '/estore/settlement'); pg.wait_for_selector('[data-clearing="SALLA"]', timeout=60000)
         ok('متجر سلة' in pg.inner_text('body') and 'متجر زد' in pg.inner_text('body'), 'platform settlement: Salla and Zid tabs')
         pg.goto(B + '/estore/profit'); pg.wait_for_selector('[data-estore-profit] .mini-kpis', timeout=60000)

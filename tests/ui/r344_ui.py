@@ -27,7 +27,7 @@ with sync_playwright() as pw:
     def pick(scope, ph, text):
         pg.fill(f'{scope} input[placeholder="{ph}"]', text); o = pg.locator(f'{scope} .suggest div', has_text=text).first; o.wait_for(timeout=15000); o.dispatch_event('mousedown'); pg.wait_for_timeout(300)
     pick('[data-recipes]', 'ابحث عن الطبق أو الباقة', 'بطاطس مقلية'); pg.click('[data-recipe-new]'); pg.wait_for_selector('.modal')
-    pick('.modal', 'ابحث عن المكوّن', 'بطاطس خام')
+    pg.check('[data-recipe-all]'); pick('.modal', 'ابحث عن المكوّن', 'بطاطس خام')
     pg.locator('[data-recipe-qty]').first.fill('0.2'); pg.locator('[data-recipe-waste]').first.fill('25'); pg.wait_for_timeout(200)
     ok('1.25' in pg.inner_text('[data-recipe-cost]'), 'recipe window: 0.2 kg with 25% waste costs 1.25')
     pg.fill('[data-recipe-target]', '75'); pg.wait_for_timeout(200)

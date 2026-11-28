@@ -10,7 +10,7 @@ export const etaQrText = (d: any) => !d?.etaUuid ? "" : d.etaKind === "RECEIPT"
   ? `https://invoicing.eta.gov.eg/receipts/search/${d.etaUuid}/share/${(d.issuedAt ? new Date(d.issuedAt) : new Date(d.date + "T10:00:00+02:00")).toISOString().replace(/\.\d{3}Z$/, "Z")}#Total:${Number(d.total).toFixed(2)},IssuerRIN:${d.company?.vatNumber || ""}`
   : `https://invoicing.eta.gov.eg/documents/${d.etaUuid}/share/${d.etaLongId || ""}`;
 import { amountToArabicWords } from "../shared/tafqeet";
-import { useBase, api, q, DownloadBtn, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
+import { useBase, api, q, DownloadBtn, useFetch, Money, money, Loading, Empty, Badge, KIND_AR, STATUS_AR, ZATCA_AR, TAX_AR, fmtDate, fmtDT, today, Modal, Field, Input, Select, NumInput, Picker, partnerFetcher, productFetcher, productFetcherFor, accountFetcher, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, confirmDlg, METHOD_AR, useUrlSearch, SearchBox, FilterInfo, PeriodFilter, useNewParam } from "../lib";
 import { PartnerStatement } from "./Statements";
 import { InvoicePaper } from "./InvoicePaper";
 import { ReverseReturnModal } from "./Round340";
@@ -128,6 +128,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   const [loaded, setLoaded] = useState(!id);
   const [newPartner, setNewPartner] = useState(false);
   const isSale = direction === "SALE";
+  const lineFetcher = useMemo(() => productFetcherFor(isSale ? "sale" : "buy"), [isSale]);
   const isNote = kind === "CREDIT_NOTE" || kind === "DEBIT_NOTE";
   const { data: currencies } = useFetch("/currencies");
   const [currency, setCurrency] = useState(CFG.currency);
@@ -277,7 +278,7 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
           <tr key={l.key}>
             <td>
               {isNote || (kind === "INVOICE" && !isSale && !l.product && l.description) ? null : null}
-              <Picker value={l.product} onChange={(p) => pickProduct(l.key, p)} fetcher={productFetcher} label={(p: any) => `${p.name}${p.sku ? " (" + p.sku + ")" : ""}`} placeholder="ابحث عن صنف (أو اكتب بياناً حراً أدناه)" renderItem={(p: any) => <div className="row between"><span>{p.name} <span className="muted small">{p.sku}</span></span><span className="num small">{money(isSale ? p.salePrice : p.purchasePrice)}{p.type === "STOCK" ? ` · متاح ${Number(p.qty)}` : ""}</span></div>} />
+              <Picker value={l.product} onChange={(p) => pickProduct(l.key, p)} fetcher={lineFetcher} label={(p: any) => `${p.name}${p.sku ? " (" + p.sku + ")" : ""}`} placeholder="ابحث عن صنف (أو اكتب بياناً حراً أدناه)" renderItem={(p: any) => <div className="row between"><span>{p.name} <span className="muted small">{p.sku}</span></span><span className="num small">{money(isSale ? p.salePrice : p.purchasePrice)}{p.type === "STOCK" ? ` · متاح ${Number(p.qty)}` : ""}</span></div>} />
               <Input style={{ marginTop: 4 }} placeholder="البيان" value={l.description} onChange={(e) => upd(l.key, { description: e.target.value })} />
               {!isSale && l.product?.trackLots && kind !== "CREDIT_NOTE" && <div className="row" style={{ marginTop: 4, gap: 4 }}><Input placeholder="رقم الدفعة (Lot)" dir="ltr" value={l.lotNo || ""} onChange={(e) => upd(l.key, { lotNo: e.target.value })} /><Input type="date" title="تاريخ الانتهاء" value={l.expiryDate || ""} onChange={(e) => upd(l.key, { expiryDate: e.target.value })} /></div>}
               {!isSale && !l.product && <div style={{ marginTop: 4 }}><Picker value={l.account || null} onChange={(a) => upd(l.key, { account: a })} fetcher={accountFetcher((a) => a.type === "EXPENSE" || a.type === "ASSET")} label={(a: any) => `${a.code} ${a.nameAr}`} placeholder="حساب المصروف/الأصل (للبنود غير المخزنية)" /></div>}

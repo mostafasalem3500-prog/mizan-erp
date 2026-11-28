@@ -122,15 +122,15 @@ export async function setoffGuardOnReverse(t: Db, C: string, entryId: string) {
  *  • DIRECT (الخصم المباشر): nothing is produced into stock; a sale is exploded through the preparation down to the
  *    raw materials by the standard yield and takes them directly.
  */
-type Node = { id: string; name: string; type: string; output: number; method: string; lines: { componentId: string; qty: number; wastePct: number; used: number }[] };
+type Node = { id: string; name: string; type: string; output: number; method: string; minBatch: number; lines: { componentId: string; qty: number; wastePct: number; used: number }[] };
 type Info = { id: string; name: string; sku: string; unit: string; type: string; purchasePrice: number; avg: number | null; onHand: number; salePrice: number };
 
 async function loadAll(t: Db, C: string) {
-  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty, r.waste_pct, p.name, p.type, COALESCE(h.output_qty,1) output, COALESCE(h.method,'DIRECT') method
+  const rows = await t.rows(`SELECT r.product_id, r.component_id, r.qty, r.waste_pct, p.name, p.type, COALESCE(h.output_qty,1) output, COALESCE(h.method,'DIRECT') method, COALESCE(h.min_batch,0) min_batch
      FROM product_recipes r JOIN products p ON p.id=r.product_id LEFT JOIN recipe_headers h ON h.product_id=r.product_id WHERE r.company_id=$1 ORDER BY r.sort`, [C]);
   const nodes = new Map<string, Node>();
   for (const r of rows) {
-    const n: Node = nodes.get(r.productId) || { id: r.productId, name: r.name, type: r.type, output: r.type === "STOCK" ? Number(r.output) : 1, method: r.method, lines: [] };
+    const n: Node = nodes.get(r.productId) || { id: r.productId, name: r.name, type: r.type, output: r.type === "STOCK" ? Number(r.output) : 1, method: r.method, minBatch: Number(r.minBatch || 0), lines: [] };
     const w = Number(r.wastePct || 0); n.lines.push({ componentId: r.componentId, qty: Number(r.qty), wastePct: w, used: Number(r.qty) * (1 + w / 100) }); nodes.set(r.productId, n);
   }
   const ids = [...new Set([...nodes.keys(), ...rows.map((r: any) => r.componentId)])];
@@ -168,7 +168,7 @@ function explode(all: { nodes: Map<string, Node>; infos: Map<string, Info> }, id
 }
 
 export async function getRecipe(t: Db, C: string, productId: string) {
-  const prod = await t.one(`SELECT id, name, type, unit, sale_price FROM products WHERE id=$1 AND company_id=$2`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
+  const prod = await t.one(`SELECT id, name, type, unit, sale_price, sale_class FROM products WHERE id=$1 AND company_id=$2`, [UUID.test(productId) ? productId : null, C], "الصنف غير موجود");
   const all = await loadAll(t, C);
   const n = all.nodes.get(prod.id);
   const isPrep = prod.type === "STOCK";
@@ -182,7 +182,7 @@ export async function getRecipe(t: Db, C: string, productId: string) {
   let canMake: number | null = null;
   if (n) { const need = explode(all, prod.id, 1); canMake = Math.max(0, Math.floor(Math.min(...[...need.entries()].map(([id, q]) => (all.infos.get(id)?.onHand || 0) / q)))); }
   return { productId: prod.id, name: prod.name, type: prod.type, unit: prod.unit, isPrep, canHaveRecipe: true, lines, cost: isPrep ? cost : batchCost, batchCost, outputQty: output, inputTotal, yieldPct: isPrep && inputTotal > 0 ? r2((output / inputTotal) * 100) : null,
-    method: isPrep ? (n?.method || "DIRECT") : null, onHand: isPrep ? r3(all.infos.get(prod.id)?.onHand || 0) : null, stockCost: isPrep ? all.infos.get(prod.id)?.avg ?? null : null,
+    minBatch: isPrep && n?.minBatch ? n.minBatch : null, saleClass: prod.saleClass ?? null, method: isPrep ? (n?.method || "DIRECT") : null, onHand: isPrep ? r3(all.infos.get(prod.id)?.onHand || 0) : null, stockCost: isPrep ? all.infos.get(prod.id)?.avg ?? null : null,
     salePrice: price, margin: !isPrep && price > 0 ? r2(price - batchCost) : null, marginPct: !isPrep && price > 0 ? r2(((price - batchCost) / price) * 100) : null, canMake };
 }
 
@@ -218,7 +218,13 @@ export async function saveRecipe(t: Db, C: string, productId: string, b: any) {
   await t.exec(`DELETE FROM recipe_headers WHERE product_id=$1`, [prod.id]);
   let i = 0;
   for (const l of lines) await t.exec(`INSERT INTO product_recipes (company_id, product_id, component_id, qty, sort, waste_pct) VALUES ($1,$2,$3,$4,$5,$6)`, [C, prod.id, l.componentId, Math.round(num(l.qty) * 10000) / 10000, i++, Math.round(num(l.wastePct) * 100) / 100]);
-  if (isPrep && lines.length) await t.exec(`INSERT INTO recipe_headers (product_id, company_id, output_qty, method) VALUES ($1,$2,$3,$4)`, [prod.id, C, output, method]);
+  const minBatch = isPrep && method === "BATCH" && num(b.minBatch) > 0 ? Math.round(num(b.minBatch) * 10000) / 10000 : null;
+  if (isPrep && lines.length) await t.exec(`INSERT INTO recipe_headers (product_id, company_id, output_qty, method, min_batch) VALUES ($1,$2,$3,$4,$5)`, [prod.id, C, output, method, minBatch]);
+  // classification follows the recipe: what goes into a recipe is an ingredient, and a stock item sold through its recipe is «له خلطة»
+  if (lines.length) {
+    await t.exec(`UPDATE products SET buy_roles = array_append(buy_roles, 'COMPONENT') WHERE company_id=$1 AND id = ANY($2::uuid[]) AND NOT ('COMPONENT' = ANY(buy_roles))`, [C, lines.map((l) => l.componentId)]);
+    await t.exec(`UPDATE products SET sale_class='RECIPE' WHERE id=$1 AND sale_class='STOCK'`, [prod.id]);
+  }
   return getRecipe(t, C, prod.id);
 }
 
@@ -336,7 +342,7 @@ export async function recipeList(t: Db, C: string) {
 export async function prepList(t: Db, C: string) {
   const ids = await t.rows(`SELECT DISTINCT r.product_id id FROM product_recipes r JOIN products p ON p.id=r.product_id WHERE r.company_id=$1 AND p.type = 'STOCK'`, [C]);
   const rows: any[] = [];
-  for (const x of ids) { const r = await getRecipe(t, C, x.id); rows.push({ productId: r.productId, name: r.name, unit: r.unit, method: r.method, components: r.lines.length, inputTotal: r.inputTotal, outputQty: r.outputQty, yieldPct: r.yieldPct, cost: r.cost, stockCost: r.stockCost, onHand: r.onHand, canMake: r.canMake }); }
+  for (const x of ids) { const r = await getRecipe(t, C, x.id); rows.push({ productId: r.productId, name: r.name, unit: r.unit, method: r.method, minBatch: r.minBatch, components: r.lines.length, inputTotal: r.inputTotal, outputQty: r.outputQty, yieldPct: r.yieldPct, cost: r.cost, stockCost: r.stockCost, onHand: r.onHand, canMake: r.canMake }); }
   rows.sort((a, b) => a.name.localeCompare(b.name, "ar"));
   return { rows };
 }
@@ -352,11 +358,12 @@ async function batchPlan(t: Db, C: string, b: any) {
   const expected = Math.round(n.output * factor * 10000) / 10000;
   const output = b.outputQty === undefined || b.outputQty === null || b.outputQty === "" ? expected : Math.round(num(b.outputQty) * 10000) / 10000;
   if (!(output > 0)) throw bad("الناتج الفعلي يجب أن يكون أكبر من صفر");
+  if (n.minBatch > 0 && expected + 1e-9 < n.minBatch) throw bad(`الحد الأدنى لتشغيل «${n.name}» ${r3(n.minBatch)}: هذه الكمية تعطي ${r3(expected)} فقط`);
   const need = new Map<string, number>();
   for (const l of n.lines) { const q = l.used * factor; if (exploded(all.nodes.get(l.componentId))) explode(all, l.componentId, q, need); else need.set(l.componentId, (need.get(l.componentId) || 0) + q); }
   const lines = [...need.entries()].map(([id, q]) => { const i = all.infos.get(id)!; return { componentId: id, name: i.name, unit: i.unit, qty: r3(q), onHand: r3(i.onHand), unitCost: Math.round(unitCost(all, id) * 10000) / 10000, cost: r2(q * unitCost(all, id)), short: i.onHand + 1e-9 < q }; });
   const cost = r2(lines.reduce((s, l) => s + l.cost, 0));
-  return { all, node: n, productId: n.id, name: n.name, unit: all.infos.get(n.id)?.unit, inputQty: r3(inputStd * factor), inputStd: r3(inputStd), factor, expectedQty: expected, outputQty: output, yieldPct: r2((output / (inputStd * factor)) * 100), standardYieldPct: r2((n.output / inputStd) * 100), lines, cost, unitCost: Math.round((cost / output) * 10000) / 10000, standardUnitCost: Math.round((cost / expected) * 10000) / 10000 };
+  return { all, node: n, minBatch: n.minBatch || null, productId: n.id, name: n.name, unit: all.infos.get(n.id)?.unit, inputQty: r3(inputStd * factor), inputStd: r3(inputStd), factor, expectedQty: expected, outputQty: output, yieldPct: r2((output / (inputStd * factor)) * 100), standardYieldPct: r2((n.output / inputStd) * 100), lines, cost, unitCost: Math.round((cost / output) * 10000) / 10000, standardUnitCost: Math.round((cost / expected) * 10000) / 10000 };
 }
 export async function batchPreview(t: Db, C: string, b: any) { const { all, node, ...p } = await batchPlan(t, C, b); return p; }
 
@@ -526,4 +533,49 @@ ${rows.map((r, i) => `   <CdtTrfTxInf><PmtId><EndToEndId>${x(run.number)}-${i + 
 </Document>
 `;
   return { xml, xmlFilename: `${run.number}-pain001.xml`, number: run.number, status: run.status, count: rows.length, total: r2(rows.reduce((s, r) => s + r.amount, 0)), missing, debitIban: src?.iban || null, rows, csv, filename: `${run.number}-bank.csv` };
+}
+
+// ───────────────────────── end of day: what is left of the cooked preparations ─────────────────────────
+/**
+ * Preparations made in bulk (the batch method) per warehouse on a day: what was produced, what the sales and other
+ * batches took, what was written off, and what is still on hand — the quantity to write off when the day is closed.
+ */
+export async function dayLeftovers(t: Db, C: string, q: { date?: string; warehouseId?: string }) {
+  const date = isDate(q.date) ? String(q.date) : today();
+  const wh = UUID.test(String(q.warehouseId)) ? String(q.warehouseId) : null;
+  const mv = (cond: string) => `COALESCE((SELECT SUM(m.qty) FROM stock_moves m WHERE m.company_id=$1 AND m.product_id=p.id AND m.warehouse_id=w.id AND m.date=$2 AND ${cond}),0)`;
+  const rows = await t.rows(`SELECT p.id product_id, p.name, p.unit, w.id warehouse_id, w.name warehouse, COALESCE(b.qty,0) qty, COALESCE(b.value,0) value, COALESCE(h.min_batch,0) min_batch,
+       ${mv("m.source_type='PRODUCTION' AND m.qty > 0")} produced, -${mv("m.source_type IN ('POS','SALE')")} sold,
+       -${mv("m.source_type='PRODUCTION' AND m.qty < 0")} used, -${mv("m.source_type='ADJUSTMENT' AND m.qty < 0")} wasted
+     FROM recipe_headers h JOIN products p ON p.id=h.product_id CROSS JOIN warehouses w
+     LEFT JOIN stock_balances b ON b.company_id=$1 AND b.product_id=p.id AND b.warehouse_id=w.id
+     WHERE h.company_id=$1 AND w.company_id=$1 AND h.method='BATCH' AND p.type='STOCK' AND ($3::uuid IS NULL OR w.id=$3)
+       AND (COALESCE(b.qty,0) > 0 OR EXISTS (SELECT 1 FROM stock_moves m WHERE m.company_id=$1 AND m.product_id=p.id AND m.warehouse_id=w.id AND m.date=$2))
+     ORDER BY w.name, p.name`, [C, date, wh]);
+  const out = rows.map((r: any) => ({ productId: r.productId, name: r.name, unit: r.unit, warehouseId: r.warehouseId, warehouse: r.warehouse, produced: r3(Number(r.produced)), sold: r3(Number(r.sold)), used: r3(Number(r.used)), wasted: r3(Number(r.wasted)),
+    left: r3(Math.max(0, Number(r.qty))), value: Number(r.qty) > 0 ? r2(Number(r.value)) : 0, unitCost: Number(r.qty) > 0 ? Math.round((Number(r.value) / Number(r.qty)) * 10000) / 10000 : 0 }));
+  return { date, rows: out, totals: { left: out.filter((r) => r.left > 0).length, value: r2(out.reduce((s, r) => s + r.value, 0)) } };
+}
+
+/** Closes the day for the cooked preparations: writes off what is left (Dr stock loss and damage / Cr inventory), one voucher per warehouse. */
+export async function wasteLeftovers(t: Db, C: string, user: string, b: any, opts: { isDemo?: boolean } = {}) {
+  const date = isDate(b.date) ? String(b.date) : today();
+  await assertOpenDate(t, C, date);
+  const lines: any[] = Array.isArray(b?.lines) ? b.lines : [];
+  if (!lines.length) throw bad("اختر ما يُهلَك من المتبقي");
+  const byWh = new Map<string, { productId: string; qty: number }[]>();
+  for (const l of lines) {
+    if (!UUID.test(String(l.productId)) || !UUID.test(String(l.warehouseId))) throw bad("حدّد الصنف والمستودع");
+    const row = await t.maybe(`SELECT p.name, COALESCE(sb.qty,0) qty FROM recipe_headers h JOIN products p ON p.id=h.product_id LEFT JOIN stock_balances sb ON sb.company_id=$1 AND sb.product_id=p.id AND sb.warehouse_id=$3
+       WHERE h.company_id=$1 AND h.product_id=$2 AND h.method='BATCH'`, [C, l.productId, l.warehouseId]);
+    if (!row) throw bad("الإهلاك اليومي لتحضيرة تُنتَج مسبقاً (طريقة الطبخة)");
+    const qty = l.qty === undefined || l.qty === null || l.qty === "" ? Number(row.qty) : r3(num(l.qty));
+    if (!(Number(row.qty) > 0) || !(qty > 0)) throw bad(`لا يوجد متبقٍّ من «${row.name}» لإهلاكه`);
+    if (qty > Number(row.qty) + 1e-9) throw bad(`المتبقي من «${row.name}» ${r3(Number(row.qty))} فقط`);
+    byWh.set(l.warehouseId, [...(byWh.get(l.warehouseId) || []), { productId: l.productId, qty }]);
+  }
+  const { stockAdjustment } = require("./misc") as typeof import("./misc");
+  const vouchers: any[] = [];
+  for (const [warehouseId, ls] of byWh) vouchers.push(await stockAdjustment(t, C, user, { kind: "DAMAGE", warehouseId, date, notes: String(b.notes || "إهلاك متبقي نهاية اليوم").slice(0, 200), lines: ls, isDemo: !!opts.isDemo }));
+  return { date, vouchers, value: r2(vouchers.reduce((s, v) => s + Math.abs(Number(v.totalValue ?? v.value ?? 0)), 0)), count: lines.length };
 }
