@@ -98,7 +98,7 @@ export function DocumentsPage({ direction, kinds, title }: { direction: "SALE" |
 }
 
 // ─── editor ────────────────────────────────────────────────────────────────
-type Line = { key: number; promotionId?: string | null; promoPct?: number; promoName?: string; baseDisc?: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; lotNo?: string; expiryDate?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
+type Line = { key: number; last?: any; promotionId?: string | null; promoPct?: number; promoName?: string; baseDisc?: number; product: any | null; account?: any | null; description: string; qty: number; unitPrice: number; discountPct: number; taxCode: string; lotNo?: string; expiryDate?: string; uom?: { id: string; name: string; factor: number; salePrice?: number | null; purchasePrice?: number | null } | null };
 const newLine = (): Line => ({ key: Math.random(), product: null, description: "", qty: 1, unitPrice: 0, discountPct: 0, taxCode: "S", uom: null });
 
 function calc(l: Line, incl: boolean) {
@@ -190,8 +190,11 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
   };
   const pickProduct = (k: number, p: any, u: any | null = null) => {
     if (!p) return upd(k, { product: null, uom: null });
-    upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S" });
+    upd(k, { product: p, uom: u, description: p.name + (u ? ` — ${u.name}` : ""), unitPrice: unitPriceFor(p, u), taxCode: isSale || p.taxCode !== "S" ? p.taxCode : "S", last: null });
+    // what this customer last paid for it / what this supplier last charged — a hint under the price, never applied by itself
+    if (partner?.id && kind !== "CREDIT_NOTE" && kind !== "DEBIT_NOTE" && !fc) api(`/products/${p.id}/last-price${q({ partnerId: partner.id, direction })}`).then((r) => { if (r?.last) setLines((ls) => ls.map((x) => (x.key === k && x.product?.id === p.id ? { ...x, last: r.last } : x))); }).catch(() => undefined);
   };
+  const lastFor = (l: Line) => { const x = (l as any).last; if (!x) return null; const f = Number(l.uom?.factor || 1), tr = incl && l.taxCode === "S" ? 1 + CFG.vatRate / 100 : 1; return Math.round(x.price * f * tr * 10000) / 10000; };
   const body = () => ({ direction, kind, date, dueDate: dueDate || null, partnerId: partner?.id, notes, supplierRef: supplierRef || null, costCenterId: costCenterId || null, reason: reason || null, originId: originId || null, pricesIncludeVat: incl, currency, exchangeRate: fc ? rate : 1, priceListId: priceList?.id || null, warehouseId: warehouseId || undefined,
     lines: lines.filter((l) => l.product || l.description).map((l) => ({ productId: l.product?.id || null, accountId: l.account?.id || null, description: l.description, qty: l.qty, unitPrice: l.unitPrice, discountPct: l.discountPct, taxCode: l.taxCode, uomId: l.uom?.id || null, lotNo: l.lotNo || null, expiryDate: l.expiryDate || null, promotionId: l.promotionId || null, promoPct: l.promoPct || 0 })) });
   /** Sales: apply the offers valid on the document date (best offer per line, on top of the manual discount). */
@@ -285,7 +288,8 @@ export function DocEditor({ direction, kind, id, onClose, originId, prefill, rev
             </td>
             <td><NumInput value={l.qty} min={0} onChange={(e) => { const qty = Number(e.target.value); const lp = l.product && !l.uom && priceList?.kind === "FIXED" ? listPrice(l.product, qty) : null; upd(l.key, { qty, ...(lp !== null && lp !== undefined ? { unitPrice: fc ? Math.round((lp / rate) * 10000) / 10000 : lp } : {}) }); }} />
               {l.product && (l.product.uoms?.length > 0 || l.uom) && <Select style={{ marginTop: 4 }} value={l.uom?.id || ""} onChange={(e) => { const u = (l.product.uoms || []).find((x: any) => x.id === e.target.value) || null; if (!u && e.target.value) return; pickProduct(l.key, l.product, u); }}><option value="">{l.product.unit || "وحدة"}</option>{(l.product.uoms || []).map((u: any) => <option key={u.id} value={u.id}>{u.name} ({Number(u.factor)})</option>)}{l.uom && !(l.product.uoms || []).some((u: any) => u.id === l.uom!.id) && <option value={l.uom.id}>{l.uom.name} ({l.uom.factor})</option>}</Select>}</td>
-            <td><NumInput value={l.unitPrice} min={0} onChange={(e) => upd(l.key, { unitPrice: Number(e.target.value) })} /></td>
+            <td><NumInput value={l.unitPrice} min={0} onChange={(e) => upd(l.key, { unitPrice: Number(e.target.value) })} />
+              {(() => { const lp = lastFor(l); return lp !== null && Math.abs(lp - Number(l.unitPrice)) > 0.00005 ? <button type="button" className="btn-link small" data-last-price title={`${(l as any).last.number} — ${fmtDate((l as any).last.date)}`} onClick={() => upd(l.key, { unitPrice: lp })}>{isSale ? "آخر سعر له" : "آخر سعر منه"}: {money(lp)}</button> : null; })()}</td>
             <td><NumInput value={l.discountPct} min={0} max={100} onChange={(e) => upd(l.key, { discountPct: Number(e.target.value) })} /></td>
             <td><Select value={l.taxCode} onChange={(e) => upd(l.key, { taxCode: e.target.value })}>{(isSale ? ["S", "Z", "X", "E", "O"] : ["S", "IM", "RC", "Z", "E", "O"]).map((t) => <option key={t} value={t}>{TAX_AR[t]}</option>)}</Select></td>
             <td className="n"><Money v={c.net} /></td><td className="n"><Money v={c.vat} /></td><td className="n"><b><Money v={c.net + c.vat} /></b></td>

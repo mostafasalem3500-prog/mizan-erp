@@ -58,7 +58,7 @@ r5.get("/reports/income-compare", perm("reports.read"), h(async (req) => incomeS
 r5.get("/reports/cost-centers", perm("reports.read"), h(async (req) => costCenterPnl(db, cid(req), req.query)));
 // each alert is shown to whoever may open the screen it points to: a cashier or the HR officer does not see the
 // receivables, VAT or bank alerts, and the HR alerts reach the HR officer
-const alertPerm = (to?: string) => !to ? "accounting.read" : /^\/(hr|payroll)\b/.test(to) ? "hr.read" : /^\/(inventory|lots)\b/.test(to) ? "inventory.read" : to.startsWith("/recipes") ? "products.read" : to.startsWith("/pos") ? "pos.use" : to.startsWith("/sales") ? "sales.read" : to.startsWith("/purchases") ? "purchases.read" : to.startsWith("/settings") ? "settings.read" : "accounting.read";
+const alertPerm = (to?: string) => !to ? "accounting.read" : /^\/(hr|payroll)\b/.test(to) ? "hr.read" : /^\/(inventory|lots)\b/.test(to) ? "inventory.read" : to.startsWith("/recipes") ? "products.read" : to.startsWith("/mfg") ? "mfg.read" : /^\/(rentals|subs)\b/.test(to) ? "sales.read" : to.startsWith("/pos") ? "pos.use" : to.startsWith("/sales") ? "sales.read" : to.startsWith("/purchases") ? "purchases.read" : to.startsWith("/settings") ? "settings.read" : "accounting.read";
 r5.get("/alerts", perm("dashboard.read"), h(async (req) => {
   if (req.auth.lockedBranchId) return { items: [], vat: { filed: true } };
   const r: any = await accountantAlerts(db, cid(req), today());

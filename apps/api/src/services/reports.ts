@@ -627,6 +627,16 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   const thin = await n(`SELECT COUNT(*)::int c FROM (SELECT d.id FROM products d JOIN product_recipes r ON r.product_id=d.id JOIN products c ON c.id=r.component_id WHERE d.company_id=$1 AND d.is_active AND d.sale_price > 0 GROUP BY d.id, d.sale_price
       HAVING SUM(r.qty * (1 + r.waste_pct/100.0) * COALESCE((SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.product_id=c.id AND b.qty > 0), c.purchase_price, 0)) > d.sale_price * 0.7) x`, [companyId]);
   if (thin.c) items.push({ level: "warn", text: `${thin.c} صنف بوصفة صارت تكلفته أكثر من 70% من سعر بيعه — راجع السعر أو الوصفة`, to: "/recipes", count: thin.c });
+  // 3.57.0: the activity sections and the HR file each raise what is about to slip
+  const mfgLate = await n(`SELECT COUNT(*)::int c FROM mfg_orders WHERE company_id=$1 AND status IN ('CONFIRMED','IN_PROGRESS') AND due_date < $2`, [companyId, td]);
+  if (mfgLate.c) items.push({ level: "warn", text: `${mfgLate.c} أمر تصنيع تجاوز تاريخ استحقاقه ولم يكتمل`, to: "/mfg/orders", count: mfgLate.c });
+  const rent = await t.one(`SELECT COUNT(*) FILTER (WHERE end_date < $2)::int late, COUNT(*) FILTER (WHERE end_date >= $2 AND end_date <= ($2::date + 3))::int soon FROM rental_contracts WHERE company_id=$1 AND status='ACTIVE'`, [companyId, td]);
+  if (rent.late) items.push({ level: "warn", text: `${rent.late} عقد تأجير انتهت مدته ولم يُسجَّل إرجاعه — سجّل الإرجاع أو مدّد العقد`, to: "/rentals/contracts", count: rent.late });
+  if (rent.soon) items.push({ level: "info", text: `${rent.soon} عقد تأجير ينتهي خلال 3 أيام`, to: "/rentals/contracts", count: rent.soon });
+  const trials = await n(`SELECT COUNT(*)::int c FROM subscriptions WHERE company_id=$1 AND status='TRIAL' AND trial_end >= $2 AND trial_end <= ($2::date + 3)`, [companyId, td]);
+  if (trials.c) items.push({ level: "info", text: `${trials.c} اشتراك تنتهي تجربته خلال 3 أيام — تواصل مع المشترك قبل أول فاتورة`, to: "/subs/list", count: trials.c });
+  const prob = await n(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND probation_end >= $2 AND probation_end <= ($2::date + 14)`, [companyId, td]);
+  if (prob.c) items.push({ level: "info", text: `${prob.c} موظف تنتهي فترة تجربته خلال 14 يوماً — ثبّته أو أنهِ التجربة قبل انتهائها`, to: "/hr", count: prob.c });
   // 3.56.0: an item classed «له خلطة» with no ingredients sells nothing from stock; a bulk preparation still on hand from an earlier day was never closed
   const bare = await n(`SELECT COUNT(*)::int c FROM products p WHERE p.company_id=$1 AND p.is_active AND p.sale_class='RECIPE' AND NOT EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=p.id)`, [companyId]);
   if (bare.c) items.push({ level: "warn", text: `${bare.c} صنف مصنَّف «له خلطة» بلا مكونات — أضف خلطته أو غيّر تصنيفه`, to: "/products?type=RECIPE", count: bare.c });
