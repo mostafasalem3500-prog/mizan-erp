@@ -637,6 +637,12 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   if (trials.c) items.push({ level: "info", text: `${trials.c} اشتراك تنتهي تجربته خلال 3 أيام — تواصل مع المشترك قبل أول فاتورة`, to: "/subs/list", count: trials.c });
   const prob = await n(`SELECT COUNT(*)::int c FROM employees WHERE company_id=$1 AND is_active AND probation_end >= $2 AND probation_end <= ($2::date + 14)`, [companyId, td]);
   if (prob.c) items.push({ level: "info", text: `${prob.c} موظف تنتهي فترة تجربته خلال 14 يوماً — ثبّته أو أنهِ التجربة قبل انتهائها`, to: "/hr", count: prob.c });
+  // fixed assets not depreciated up to the end of last month; bank statement lines imported and left unmatched for over two weeks
+  const lastMonthEnd = new Date(Date.UTC(Number(td.slice(0, 4)), Number(td.slice(5, 7)) - 1, 0)).toISOString().slice(0, 10);
+  const depLate = await n(`SELECT COUNT(*)::int c FROM fixed_assets WHERE company_id=$1 AND status='ACTIVE' AND acquisition_date <= $2 AND (last_depreciation IS NULL OR last_depreciation < $2) AND accumulated < cost - COALESCE(salvage_value,0)`, [companyId, lastMonthEnd]);
+  if (depLate.c) items.push({ level: "info", text: `${depLate.c} أصل ثابت لم يُحتسب إهلاكه حتى نهاية الشهر الماضي`, to: "/assets", count: depLate.c });
+  const bankOpen = await n(`SELECT COUNT(*)::int c FROM bank_statement_lines WHERE company_id=$1 AND status='OPEN' AND date < ($2::date - 14)`, [companyId, td]);
+  if (bankOpen.c) items.push({ level: "info", text: `${bankOpen.c} سطر في كشف البنك لم يُطابَق منذ أكثر من أسبوعين`, to: "/bank", count: bankOpen.c });
   // 3.56.0: an item classed «له خلطة» with no ingredients sells nothing from stock; a bulk preparation still on hand from an earlier day was never closed
   const bare = await n(`SELECT COUNT(*)::int c FROM products p WHERE p.company_id=$1 AND p.is_active AND p.sale_class='RECIPE' AND NOT EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=p.id)`, [companyId]);
   if (bare.c) items.push({ level: "warn", text: `${bare.c} صنف مصنَّف «له خلطة» بلا مكونات — أضف خلطته أو غيّر تصنيفه`, to: "/products?type=RECIPE", count: bare.c });

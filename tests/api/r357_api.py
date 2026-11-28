@@ -48,6 +48,11 @@ c('/mfg/boms',{'productId':tbl['id'],'outputQty':1,'lines':[{'componentId':ck['i
 c('/mfg/orders',{'productId':tbl['id'],'qty':10,'confirm':True,'date':D(-4),'dueDate':D(-1)})
 ok(has('أمر تصنيع'),'manufacturing: a confirmed order past its due date')
 c('/mfg/orders',{'productId':tbl['id'],'qty':5,'confirm':True,'dueDate':D(5)}); ok(sum('أمر تصنيع' in a and a.startswith('1 ') for a in alerts())==1,'an order due later is not counted')
+ok(not has('أصل ثابت') and not has('كشف البنك'),'no asset or bank reminder yet')
+c('/assets',{'name':'فرن','acquisitionDate':D(-70),'cost':12000,'usefulLifeMonths':24,'payAccountId':acc['BANK']['id']}); ok(has('أصل ثابت'),'assets: depreciation not run up to the end of last month')
+bank=[x for x in A if x.get('systemKey')=='BANK'][0]
+c(f"/bank/{bank['id']}/statement/import",{'rows':[{'date':D(-20),'description':'رسوم','amount':-15,'reference':'F1'},{'date':D(-2),'description':'حديث','amount':-9,'reference':'F2'}]})
+ok(sum('كشف البنك' in a and a.startswith('1 ') for a in alerts())==1,'bank: only the statement line older than two weeks is raised')
 # ── reports ──
 cat=c('/reports/catalog'); keys=[r['key'] for r in cat['reports']]
 ok('resto' in [m['key'] for m in cat['modules']] and all(k in keys for k in ['resto.waste','resto.batches','inventory.classes']),'report centre: the restaurant module and the classification report are listed')
