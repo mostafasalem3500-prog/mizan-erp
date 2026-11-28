@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, NavLink, useNavigate, useLocation, Navigate } from "react-router-dom";
+import { Routes, Route, NavLink, Link, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { api, session, AppCtx, useToast, Input, Field, useAction, Modal, Select, useFetch } from "./lib";
 import { GlobalSearch } from "./pages/Search";
 const CharityApp = React.lazy(() => import("./charity/CharityApp").then((m) => ({ default: m.CharityApp })));
@@ -78,6 +78,7 @@ const CollectionsPage = lz(() => import("./pages/Collections"), "CollectionsPage
 const CustomerPortal = lz(() => import("./pages/Integrations"), "CustomerPortal");
 const EmployeePortal = lz(() => import("./pages/EmpPortal"), "EmployeePortal");
 const SectorsPage = lz(() => import("./pages/Sectors"), "SectorsPage");
+const WhatsNewPage = lz(() => import("./pages/WhatsNew"), "WhatsNewPage");
 const LotsPage = lz(() => import("./pages/Lots"), "LotsPage");
 const ReportsPage = lz(() => import("./pages/Reports"), "ReportsPage");
 const VatPage = lz(() => import("./pages/Reports"), "VatPage");
@@ -181,13 +182,32 @@ function AssocBrand() {
   return <div className="brand assoc-brand"><img src={st.data?.logoUrl || b?.logo || DEFAULT_LOGO} alt="" /><span><b>{name}</b><small>النظام المحاسبي</small></span></div>;
 }
 
+/** The version under the menu opens «ما الجديد»; a dot shows while the newest release has not been looked at. */
+function VersionLink() {
+  const [unseen, setUnseen] = useState(false);
+  useEffect(() => {
+    const check = () => { try { setUnseen(localStorage.getItem("mz_seen_version") !== String((window as any).MIZAN_VERSION)); } catch { setUnseen(false); } };
+    check(); window.addEventListener("mz-seen-version", check); return () => window.removeEventListener("mz-seen-version", check);
+  }, []);
+  return <Link to="/whats-new" className="small" data-version-link style={{ opacity: .75, color: "inherit", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }} title="ما الجديد في هذا الإصدار">الإصدار {(window as any).MIZAN_VERSION}{unseen && <span data-version-dot style={{ width: 7, height: 7, borderRadius: 7, background: "var(--accent)", display: "inline-block" }} />}<span style={{ textDecoration: "underline" }}>ما الجديد</span></Link>;
+}
+
 export function App() {
   const [me, setMe] = useState<any>(null);
   const [loading, setLoading] = useState(!!session.token);
   const [menu, setMenu] = useState(false);
   const nav = useNavigate();
   const loc = useLocation();
-  const reload = () => api("/auth/me").then(setMe).catch(() => { session.token = null; setMe(null); }).finally(() => setLoading(false));
+  const [down, setDown] = useState(false);
+  const tries = React.useRef(0);
+  // Only a refused session (401 — the request helper clears the token itself) signs the user out. A server that does not
+  // answer (a restart during an update, a weak connection, a page reload cutting the request short) leaves the session
+  // as it is and tries again: signing out here used to send people to the login page for nothing.
+  const reload = (): Promise<void> => api("/auth/me").then((m) => { tries.current = 0; setDown(false); setMe(m); setLoading(false); }).catch(() => {
+    if (!session.token) { setDown(false); setMe(null); setLoading(false); return; }
+    setDown(true); setLoading(false);
+    if (tries.current++ < 40) setTimeout(reload, Math.min(15000, 1500 * tries.current));
+  });
   useEffect(() => { if (session.token) reload(); const h = () => { setMe(null); nav("/login"); }; window.addEventListener("mz-logout", h); return () => window.removeEventListener("mz-logout", h); }, []);
   useEffect(() => setMenu(false), [loc.pathname]);
   useEffect(() => { if (me?.company) warmScreens(); }, [!!me?.company]);
@@ -196,6 +216,7 @@ export function App() {
   if (loc.pathname.startsWith("/c/")) return <React.Suspense fallback={Wait}><Routes><Route path="/c/:token" element={<CustomerPortal />} /></Routes></React.Suspense>;
   if (loc.pathname.startsWith("/e/")) return <React.Suspense fallback={Wait}><Routes><Route path="/e/:token" element={<EmployeePortal />} /></Routes></React.Suspense>;
   if (loading) return <div className="empty" style={{ paddingTop: 120 }}><span className="spinner" /></div>;
+  if (!me && down && session.token) return <div className="empty" style={{ paddingTop: 120 }} data-server-wait><span className="spinner" /><div style={{ marginTop: 14 }}>تعذّر الوصول إلى الخادم الآن — نعيد المحاولة تلقائياً، وجلستك محفوظة.</div><button className="btn mt" onClick={() => { tries.current = 0; reload(); }}>إعادة المحاولة الآن</button></div>;
   if (!me) return <React.Suspense fallback={null}><Routes><Route path="/privacy" element={<LegalPage kind="privacy" />} /><Route path="/terms" element={<LegalPage kind="terms" />} /><Route path="/register" element={<AuthPage mode="register" onDone={reload} />} /><Route path="*" element={<AuthPage mode="login" onDone={reload} />} /></Routes></React.Suspense>;
   const can = (p: string) => canRole(me.role, p, me.superAdmin);
   setSheetMeta(me.company ? { company: me.company.nameAr, taxId: me.company.vatNumber, taxLabel: CFG.taxIdLabel } : {});
@@ -219,7 +240,7 @@ export function App() {
             </>} />
             <div className="foot">
               <SubscriptionLine me={me} />
-              <div className="small" style={{ opacity: .6 }} title="رقم الإصدار المعروض الآن">الإصدار {(window as any).MIZAN_VERSION}</div>
+              <VersionLink />
               <button className="btn sm ghost" style={{ color: "#fff", marginTop: 6 }} onClick={logout}>تسجيل الخروج</button>
             </div>
           </aside>
@@ -243,6 +264,7 @@ export function App() {
               <ScreenGuard resetKey={loc.pathname}><React.Suspense fallback={Wait}><Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/sectors" element={<SectorsPage />} />
+                <Route path="/whats-new" element={<WhatsNewPage />} />
                 <Route path="/sales/invoices" element={<DocumentsPage direction="SALE" kinds={["INVOICE"]} title="فواتير المبيعات" />} />
                 <Route path="/sales/quotations" element={<DocumentsPage direction="SALE" kinds={["QUOTATION", "ORDER"]} title="عروض الأسعار وأوامر البيع" />} />
                 <Route path="/sales/credit-notes" element={<DocumentsPage direction="SALE" kinds={["CREDIT_NOTE", "DEBIT_NOTE"]} title="الإشعارات الدائنة والمدينة" />} />
