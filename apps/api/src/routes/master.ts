@@ -216,6 +216,17 @@ async function reclassCheck(companyId: string, id: string, b: any) {
   return { ...cls, typeChanged };
 }
 
+/** The last posted price of an item with a party (what this customer paid, what this supplier charged): before VAT, per base unit, base-currency invoices only. */
+master.get("/products/:id/last-price", perm("products.read"), h(async (req) => {
+  const direction = req.query.direction === "PURCHASE" ? "PURCHASE" : "SALE";
+  const pid = /^[0-9a-f-]{36}$/i.test(String(req.query.partnerId || "")) ? String(req.query.partnerId) : null;
+  if (!pid) return { last: null };
+  const r = await db.maybe(`SELECT i.id, i.number, i.date, l.net_amount / NULLIF(l.qty * (1 - l.discount_pct/100.0) * l.factor, 0) AS price, l.discount_pct
+     FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id WHERE i.company_id=$1 AND i.partner_id=$2 AND l.product_id=$3 AND i.direction=$4 AND i.kind='INVOICE' AND i.status='POSTED' AND i.exchange_rate=1 AND l.unit_price > 0 AND l.qty > 0 AND l.discount_pct < 100 AND COALESCE(l.promo_discount,0) = 0
+     ORDER BY i.date DESC, i.created_at DESC LIMIT 1`, [cid(req), pid, p(req).id, direction]);
+  return { last: r ? { invoiceId: r.id, number: r.number, date: r.date, price: Math.round(Number(r.price) * 10000) / 10000, discountPct: Number(r.discountPct) } : null };
+}));
+
 /** Classifies many items at once: the sale class, and adding or removing the «ingredient» use. Items that cannot take the change are skipped with the reason. */
 master.post("/products/classify", perm("products.write"), h(async (req) => {
   const b = req.body || {};

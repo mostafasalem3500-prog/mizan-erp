@@ -934,3 +934,42 @@ IMPL["subs.billing"] = async (t, C, q) => {
   const rows = await t.rows(`SELECT ${G} grp, COUNT(*) FILTER (WHERE m.kind IN ('INVOICE','CHANGE'))::int invoices, COALESCE(SUM(m.amount) FILTER (WHERE m.kind IN ('INVOICE','CHANGE')),0) invoiced, COUNT(*) FILTER (WHERE m.kind='CREDIT')::int credits, COALESCE(SUM(ABS(m.amount)) FILTER (WHERE m.kind='CREDIT'),0) credited, COUNT(DISTINCT m.subscription_id)::int subscribers FROM sub_moves m JOIN subscriptions s ON s.id=m.subscription_id JOIN sub_plans pl ON pl.id=s.plan_id WHERE ${w.sql} GROUP BY 1 ORDER BY 1`, w.params);
   return { columns: [{ key: "grp", label: (q.groupBy || "month") === "plan" ? "الخطة" : "الشهر" }, { key: "subscribers", label: "المشتركون", type: "int" }, { key: "invoices", label: "الفواتير", type: "int", sum: true }, { key: "invoiced", label: "المفوتر (قبل الضريبة)", type: "money", sum: true }, { key: "credits", label: "الإشعارات الدائنة", type: "int", sum: true }, { key: "credited", label: "المردود", type: "money", sum: true }, { key: "net", label: "الصافي", type: "money", sum: true }], rows: rows.map((r: any) => ({ ...r, net: r2(Number(r.invoiced) - Number(r.credited)) })) };
 };
+
+// ───────────────────────── 3.57.0: restaurants (preparations and waste), items by classification ─────────────────────────
+MODULES.push({ key: "resto", label: "المطاعم والتحضيرات" });
+CATALOG.push(
+  { key: "resto.waste", module: "resto", title: "الهالك من الإنتاج المسبق", desc: "ما أُنتج من كل تحضيرة وما أُهلك عند إقفال اليوم، بالكمية والقيمة ونسبة الهالك", filters: ["period"], chart: "wastedValue" },
+  { key: "resto.batches", module: "resto", title: "الطبخات ونسبة الناتج", desc: "كل طبخة بمدخلاتها وناتجها المتوقع والفعلي وتكلفتها، مجمّعة حسب التحضيرة أو الشهر", filters: ["period", "product", "q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "product", label: "حسب التحضيرة" }, { key: "month", label: "حسب الشهر" }] },
+  { key: "inventory.classes", module: "inventory", title: "الأصناف حسب التصنيف", desc: "استخدام كل صنف في المشتريات وتصنيفه في البيع مع رصيده وقيمته", filters: ["q"], groupBy: [{ key: "none", label: "تفصيلي" }, { key: "sale", label: "حسب تصنيف البيع" }] },
+);
+IMPL["resto.waste"] = async (t, C, q) => {
+  const { wasteLog } = require("./round343") as typeof import("./round343");
+  const { from, to } = period(q);
+  const r = await wasteLog(t, C, { from: from === "1900-01-01" ? undefined : from, to });
+  return { columns: [{ key: "name", label: "التحضيرة" }, { key: "unit", label: "الوحدة" }, { key: "produced", label: "أُنتج", type: "qty" }, { key: "producedValue", label: "قيمة الإنتاج", type: "money", sum: true }, { key: "wasted", label: "أُهلك", type: "qty" }, { key: "days", label: "أيام الإهلاك", type: "int" }, { key: "wastedValue", label: "قيمة الهالك", type: "money", sum: true }, { key: "wastePct", label: "نسبة الهالك %", type: "pct" }], rows: r.rows };
+};
+IMPL["resto.batches"] = async (t, C, q) => {
+  const { from, to } = period(q); const g = String(q.groupBy || "none");
+  const w = new W("b.company_id=?", C); w.range("b.date", from, to).uuid("b.product_id", q.productId).like(["b.number", "p.name", "b.notes"], q.q);
+  if (g === "none") {
+    const rows = await t.rows(`SELECT b.number, ${D10("b.date")} date, p.name, p.unit, b.input_qty, b.expected_qty, b.output_qty, b.cost, b.status FROM prep_batches b JOIN products p ON p.id=b.product_id WHERE ${w.sql} ORDER BY b.date DESC, b.number DESC LIMIT 2000`, w.params);
+    return { columns: [{ key: "number", label: "الرقم" }, { key: "date", label: "التاريخ", type: "date" }, { key: "name", label: "التحضيرة" }, { key: "inputQty", label: "المدخلات", type: "qty" }, { key: "expectedQty", label: "المتوقع", type: "qty" }, { key: "outputQty", label: "الناتج", type: "qty" }, { key: "yieldPct", label: "نسبة الناتج %", type: "pct" }, { key: "cost", label: "التكلفة", type: "money", sum: true }, { key: "unitCost", label: "تكلفة الوحدة", type: "money" }, { key: "status", label: "الحالة" }],
+      rows: rows.map((r: any) => ({ ...r, inputQty: Number(r.inputQty), expectedQty: Number(r.expectedQty), outputQty: Number(r.outputQty), cost: r.status === "POSTED" ? Number(r.cost) : 0, yieldPct: Number(r.inputQty) > 0 ? r2((Number(r.outputQty) / Number(r.inputQty)) * 100) : null, unitCost: Number(r.outputQty) > 0 ? Math.round((Number(r.cost) / Number(r.outputQty)) * 10000) / 10000 : 0, status: r.status === "POSTED" ? "مرحّلة" : "ملغاة" })) };
+  }
+  w.raw("b.status='POSTED'");
+  const rows = await t.rows(`SELECT ${g === "product" ? "p.name" : "to_char(b.date,'YYYY-MM')"} grp, COUNT(*)::int batches, SUM(b.input_qty) input, SUM(b.expected_qty) expected, SUM(b.output_qty) output, SUM(b.cost) cost FROM prep_batches b JOIN products p ON p.id=b.product_id WHERE ${w.sql} GROUP BY 1 ORDER BY 1`, w.params);
+  return { columns: [{ key: "grp", label: g === "product" ? "التحضيرة" : "الشهر" }, { key: "batches", label: "الطبخات", type: "int", sum: true }, { key: "input", label: "المدخلات", type: "qty", sum: true }, { key: "expected", label: "المتوقع", type: "qty", sum: true }, { key: "output", label: "الناتج", type: "qty", sum: true }, { key: "variance", label: "الفرق عن المتوقع", type: "qty", sum: true }, { key: "yieldPct", label: "نسبة الناتج %", type: "pct" }, { key: "cost", label: "التكلفة", type: "money", sum: true }],
+    rows: rows.map((r: any) => ({ grp: r.grp, batches: r.batches, input: Number(r.input), expected: Number(r.expected), output: Number(r.output), variance: Math.round((Number(r.output) - Number(r.expected)) * 1000) / 1000, yieldPct: Number(r.input) > 0 ? r2((Number(r.output) / Number(r.input)) * 100) : null, cost: Number(r.cost) })) };
+};
+const SALE_AR: Record<string, string> = { STOCK: "مخزني", RECIPE: "له خلطة", SERVICE: "خدمي" }, BUY_AR: Record<string, string> = { STOCK: "مخزني", SERVICE: "خدمي", COMPONENT: "مكوِّن" };
+IMPL["inventory.classes"] = async (t, C, q) => {
+  const w = new W("p.company_id=?", C); w.like(["p.name", "p.sku"], q.q).raw("p.is_active");
+  const rows = await t.rows(`SELECT p.sku, p.name, p.unit, p.buy_roles, p.sale_class, EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=p.id) has_recipe, COALESCE((SELECT SUM(b.qty) FROM stock_balances b WHERE b.company_id=p.company_id AND b.product_id=p.id),0) qty, COALESCE((SELECT SUM(b.value) FROM stock_balances b WHERE b.company_id=p.company_id AND b.product_id=p.id),0) value FROM products p WHERE ${w.sql} ORDER BY p.sku LIMIT 5000`, w.params);
+  const shaped = rows.map((r: any) => ({ sku: r.sku, name: r.name, unit: r.unit, buy: (r.buyRoles || []).map((x: string) => BUY_AR[x] || x).join("، ") || "لا يُشترى", sale: r.saleClass ? SALE_AR[r.saleClass] : "لا يُباع", recipe: r.hasRecipe ? "نعم" : r.saleClass === "RECIPE" ? "ناقصة" : "—", qty: Number(r.qty), value: Number(r.value) }));
+  if (String(q.groupBy) === "sale") {
+    const m = new Map<string, any>();
+    for (const r of shaped) { const x = m.get(r.sale) || { grp: r.sale, items: 0, value: 0 }; x.items++; x.value = r2(x.value + r.value); m.set(r.sale, x); }
+    return { columns: [{ key: "grp", label: "تصنيف البيع" }, { key: "items", label: "الأصناف", type: "int", sum: true }, { key: "value", label: "قيمة المخزون", type: "money", sum: true }], rows: [...m.values()] };
+  }
+  return { columns: [{ key: "sku", label: "الرمز" }, { key: "name", label: "الصنف" }, { key: "unit", label: "الوحدة" }, { key: "buy", label: "في المشتريات" }, { key: "sale", label: "في البيع" }, { key: "recipe", label: "له خلطة مكتوبة" }, { key: "qty", label: "الرصيد", type: "qty" }, { key: "value", label: "قيمة المخزون", type: "money", sum: true }], rows: shaped };
+};
