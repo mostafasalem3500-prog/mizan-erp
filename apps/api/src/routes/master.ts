@@ -135,7 +135,7 @@ export async function nextCode(companyId: string, prefix: string) {
 // ─── products & categories ────────────────────────────────────────────────
 
 /** Product columns for lists — the image travels as a cacheable media URL (versioned), never as inline base64. */
-export const PRODUCT_COLS = `p.id, p.company_id, p.sku, p.barcode, p.name, p.name_en, p.type, p.category_id, p.unit, p.sale_price, p.purchase_price, p.tax_code, p.reorder_level, p.is_active, p.is_demo, p.created_at, p.track_lots, p.shelf_life_days, p.image_updated_at,
+export const PRODUCT_COLS = `p.id, p.company_id, p.sku, p.barcode, p.name, p.name_en, p.type, p.category_id, p.unit, p.sale_price, p.purchase_price, p.tax_code, p.reorder_level, p.is_active, p.is_demo, p.created_at, p.track_lots, p.shelf_life_days, p.image_updated_at, p.buy_roles, p.sale_class,
   CASE WHEN p.image IS NOT NULL THEN '/api/media/products/' || p.id || '?v=' || COALESCE(floor(extract(epoch FROM p.image_updated_at))::bigint, 0) END AS image`;
 
 const IMG_RE = /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
@@ -161,6 +161,12 @@ master.get(
     if (req.query.barcode) { params.push(req.query.barcode); where.push(`(p.barcode=$${params.length} OR p.sku=$${params.length} OR EXISTS (SELECT 1 FROM product_uoms u WHERE u.product_id=p.id AND u.barcode=$${params.length}))`); }
     if (req.query.categoryId && /^[0-9a-f-]{36}$/i.test(String(req.query.categoryId))) { params.push([String(req.query.categoryId)]); where.push(`p.category_id IN ${CAT_TREE(`$${params.length}`)}`); }
     if (req.query.active !== "all") where.push("p.is_active");
+    // classification: what the sale screens, the purchase screens and the recipe editor offer
+    if (req.query.use === "sale") where.push("p.sale_class IS NOT NULL");
+    else if (req.query.use === "buy") where.push("cardinality(p.buy_roles) > 0");
+    else if (req.query.use === "component") where.push("p.type='STOCK' AND ('COMPONENT' = ANY(p.buy_roles) OR EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=p.id))");
+    if (["STOCK", "RECIPE", "SERVICE"].includes(String(req.query.saleClass))) { params.push(String(req.query.saleClass)); where.push(`p.sale_class=$${params.length}`); }
+    else if (req.query.saleClass === "NONE") where.push("p.sale_class IS NULL");
     params.push(limit, offset);
     const rows = await db.rows(
       `SELECT ${PRODUCT_COLS}, c.name AS category, c.color AS category_color, COALESCE(s.qty,0) qty, COALESCE(s.value,0) stock_value, CASE WHEN COALESCE(s.qty,0)>0 THEN s.value/s.qty ELSE p.purchase_price END avg_cost,
@@ -179,6 +185,24 @@ master.get(
   }),
 );
 
+/**
+ * Item classification. Purchases: any of stock / service / ingredient. Sales: stock item, item with a recipe, service,
+ * or not sold. The engine's type follows: anything held in stock or made from a recipe is STOCK, the rest SERVICE.
+ * A request that sends only `type` (imports, the public API, older screens) is classified from it.
+ */
+export function classify(b: any, current?: { type: string; buyRoles: string[]; saleClass: string | null }) {
+  const sent = b.buyRoles !== undefined || b.saleClass !== undefined;
+  if (!sent) return null;
+  let roles: string[] = Array.isArray(b.buyRoles) ? [...new Set(b.buyRoles.map((x: any) => String(x).toUpperCase()))].filter((x) => ["STOCK", "SERVICE", "COMPONENT"].includes(x as string)) as string[] : current?.buyRoles || [];
+  const sc = b.saleClass === undefined ? current?.saleClass ?? null : ["STOCK", "RECIPE", "SERVICE"].includes(String(b.saleClass).toUpperCase()) ? String(b.saleClass).toUpperCase() : null;
+  if (!roles.length && !sc) throw bad("حدّد استخدام الصنف: في المشتريات (مخزني، خدمي، مكوِّن) أو في البيع (مخزني، له خلطة، خدمي)");
+  const stockish = roles.includes("STOCK") || roles.includes("COMPONENT") || sc === "STOCK" || sc === "RECIPE";
+  if (sc === "SERVICE" && roles.includes("COMPONENT")) throw bad("الصنف الذي يُباع كخدمة لا يكون مكوِّناً مخزنياً في الوقت نفسه — عرّف المكوِّن صنفاً مستقلاً");
+  if (sc === "SERVICE" && roles.includes("STOCK")) throw bad("الصنف الذي يُباع كخدمة لا يُشترى كصنف مخزني — اختر «خدمي» في المشتريات أو غيّر تصنيف البيع");
+  const type = sc === "SERVICE" ? "SERVICE" : stockish ? "STOCK" : "SERVICE";
+  return { type, buyRoles: roles, saleClass: sc, classed: true };
+}
+
 master.post(
   "/products",
   perm("products.write"),
@@ -188,7 +212,10 @@ master.post(
     if (b.taxCode && !TAX_CODES[b.taxCode]) throw bad("رمز ضريبي غير صحيح");
     const image = cleanImage(b.image) ?? null;
     const sku = b.sku?.trim() || (await nextCode(cid(req), "P"));
+    const cls = classify(b);
+    if (cls) b.type = cls.type;
     const row = await db.insert("products", {
+      ...(cls ? { buyRoles: `{${cls.buyRoles.join(",")}}`, saleClass: cls.saleClass, classed: true } : {}),
       companyId: cid(req), sku, barcode: b.barcode || null, name, nameEn: b.nameEn || null, type: b.type === "SERVICE" ? "SERVICE" : "STOCK", categoryId: b.categoryId || null, unit: b.unit || "حبة",
       salePrice: num(b.salePrice), purchasePrice: num(b.purchasePrice), taxCode: b.taxCode || "S", reorderLevel: num(b.reorderLevel), image, imageUpdatedAt: image ? new Date() : null,
       trackLots: b.type !== "SERVICE" && !!b.trackLots, shelfLifeDays: b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,
@@ -211,7 +238,22 @@ master.put(
     const b = req.body || {};
     if (b.taxCode && !TAX_CODES[b.taxCode]) throw bad("رمز ضريبي غير صحيح");
     const image = cleanImage(b.image);
+    let cls: ReturnType<typeof classify> = null;
+    if (b.buyRoles !== undefined || b.saleClass !== undefined) {
+      const cur = await db.one(`SELECT type, buy_roles, sale_class FROM products WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الصنف غير موجود");
+      cls = classify(b, cur);
+      if (cls && cls.type !== cur.type) {
+        if (cls.type === "SERVICE") {
+          const used = await db.one(`SELECT (SELECT COUNT(*) FROM stock_moves WHERE company_id=$1 AND product_id=$2)::int moves, (SELECT COUNT(*) FROM product_recipes WHERE company_id=$1 AND component_id=$2)::int comp`, [cid(req), p(req).id]);
+          if (used.moves) throw bad("للصنف حركات مخزون، فلا يتحول إلى خدمة. أوقفه وعرّف صنفاً خدمياً جديداً");
+          if (used.comp) throw bad("الصنف مكوِّن في خلطة، فلا يتحول إلى خدمة");
+        }
+        b.type = cls.type;
+      } else b.type = undefined;
+      if (cls && cls.type === "SERVICE") b.trackLots = false;
+    } else b.type = undefined; // the type of an existing item changes only through its classification
     const row = await db.update("products", { id: p(req).id, companyId: cid(req) }, {
+      ...(cls ? { buyRoles: `{${cls.buyRoles.join(",")}}`, saleClass: cls.saleClass, classed: true } : {}),
       sku: b.sku, barcode: b.barcode ?? null, name: b.name, nameEn: b.nameEn ?? null, categoryId: b.categoryId ?? null, unit: b.unit, salePrice: b.salePrice === undefined ? undefined : num(b.salePrice),
       purchasePrice: b.purchasePrice === undefined ? undefined : num(b.purchasePrice), taxCode: b.taxCode, reorderLevel: b.reorderLevel === undefined ? undefined : num(b.reorderLevel), image, imageUpdatedAt: image === undefined ? undefined : new Date(), isActive: b.isActive, type: b.type,
       trackLots: b.trackLots === undefined ? undefined : !!b.trackLots, shelfLifeDays: b.shelfLifeDays === undefined ? undefined : b.shelfLifeDays ? Math.max(1, Math.round(num(b.shelfLifeDays))) : null,

@@ -4,8 +4,9 @@ import { ProductImagesModal } from "./ProductImages";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ImportModal } from "./Import";
+import { RecipeModal } from "./Round343";
 import { CategoryOptions, CategoryEditor } from "./Categories";
-import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches, useNewParam, useTabParam } from "../lib";
+import { api, q, useFetch, Money, money, Loading, Empty, Badge, Modal, Field, Input, Select, NumInput, useAction, useToast, useCompanyContext, ExportBtn, PrintBtn, useDebounce, DateRange, monthStart, today, TAX_AR, fmtDate, fileToDataUrl, Picker, productFetcher, SALE_CLASS_AR, BUY_ROLE_AR, confirmDlg, JTYPE_AR, useUrlSearch, useSorted, Th, SearchBox, FilterInfo, matches, useNewParam, useTabParam } from "../lib";
 
 // ─── partners ──────────────────────────────────────────────────────────────
 export function PartnersPage({ role }: { role: "CUSTOMER" | "SUPPLIER" }) {
@@ -107,7 +108,10 @@ export function ProductsPage() {
   const filtered = useMemo(() => (data || []).filter((p: any) => {
     if (status === "active" && !p.isActive) return false;
     if (status === "inactive" && p.isActive) return false;
-    if (type && p.type !== type) return false;
+    if (type === "STOCK" || type === "SERVICE") { if (p.type !== type) return false; }
+    else if (type === "COMPONENT") { if (!(p.buyRoles || []).includes("COMPONENT")) return false; }
+    else if (type === "RECIPE") { if (p.saleClass !== "RECIPE") return false; }
+    else if (type === "NOSALE") { if (p.saleClass) return false; }
     const qn = Number(p.qty);
     if (stock === "out" && !(p.type === "STOCK" && qn <= 0)) return false;
     if (stock === "low" && !(p.type === "STOCK" && qn > 0 && qn <= Number(p.reorderLevel))) return false;
@@ -128,7 +132,7 @@ export function ProductsPage() {
         <div className="toolbar">
           <SearchBox value={search} onChange={setSearch} placeholder="بحث بالاسم / الرمز / الباركود" width={260} />
           <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">كل التصنيفات</option><CategoryOptions cats={categories.data || []} /></Select>
-          <Select value={type} onChange={(e) => setType(e.target.value)}><option value="">مخزني وخدمة</option><option value="STOCK">أصناف مخزنية</option><option value="SERVICE">خدمات</option></Select>
+          <Select value={type} onChange={(e) => setType(e.target.value)} data-prod-type-filter><option value="">كل الأنواع</option><option value="STOCK">أصناف مخزنية</option><option value="SERVICE">خدمات</option><option value="COMPONENT">أصناف مكوِّنة</option><option value="RECIPE">أصناف لها خلطة</option><option value="NOSALE">لا تُباع</option></Select>
           <Select value={stock} onChange={(e) => setStock(e.target.value)}><option value="">كل حالات المخزون</option><option value="ok">متوفر</option><option value="low">منخفض (حد الطلب)</option><option value="out">نافد</option></Select>
           <Select value={img} onChange={(e) => setImg(e.target.value)}><option value="">بصورة وبدون</option><option value="with">لها صورة</option><option value="without">بدون صورة</option></Select>
           <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">النشطة</option><option value="inactive">الموقوفة</option><option value="all">الكل</option></Select>
@@ -141,7 +145,7 @@ export function ProductsPage() {
             <tbody>{s.sorted.map((p: any) => <tr key={p.id} className={p.isActive ? "" : "muted"}>
               <td><input type="checkbox" checked={!!sel[p.id]} onChange={(e) => setSel({ ...sel, [p.id]: e.target.checked })} /></td>
               <td className="num">{p.sku}<div className="small muted num">{p.barcode}</div></td>
-              <td><div className="cell-item">{p.image ? <img src={p.image} loading="lazy" style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover" }} alt="" /> : <span style={{ width: 34, height: 34, borderRadius: 6, background: "var(--bg)", display: "inline-grid", placeItems: "center", color: "var(--muted)", cursor: can("products.write") ? "pointer" : undefined }} title={can("products.write") ? "إضافة صورة" : ""} onClick={() => can("products.write") && setImages([p])}>🖼</span>}<div><b>{p.name}</b>{p.type === "SERVICE" && <span className="badge blue" style={{ marginInlineStart: 6 }}>خدمة</span>}{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}<div className="small muted">{p.unit}{p.uoms?.length ? ` · ${p.uoms.map((u: any) => u.name).join("، ")}` : ""}</div></div></div></td>
+              <td><div className="cell-item">{p.image ? <img src={p.image} loading="lazy" style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover" }} alt="" /> : <span style={{ width: 34, height: 34, borderRadius: 6, background: "var(--bg)", display: "inline-grid", placeItems: "center", color: "var(--muted)", cursor: can("products.write") ? "pointer" : undefined }} title={can("products.write") ? "إضافة صورة" : ""} onClick={() => can("products.write") && setImages([p])}>🖼</span>}<div><b>{p.name}</b>{p.type === "SERVICE" && <span className="badge blue" style={{ marginInlineStart: 6 }}>خدمة</span>}{p.saleClass === "RECIPE" && <span className="badge teal" style={{ marginInlineStart: 6 }} data-class-badge="RECIPE">له خلطة</span>}{(p.buyRoles || []).includes("COMPONENT") && <span className="badge amber" style={{ marginInlineStart: 6 }} data-class-badge="COMPONENT">مكوِّن</span>}{!p.saleClass && <span className="badge gray" style={{ marginInlineStart: 6 }} data-class-badge="NOSALE">لا يُباع</span>}{!p.isActive && <span className="badge gray" style={{ marginInlineStart: 6 }}>موقوف</span>}<div className="small muted">{p.unit}{p.uoms?.length ? ` · ${p.uoms.map((u: any) => u.name).join("، ")}` : ""}</div></div></div></td>
               <td>{p.category && <span className="badge" style={p.categoryColor ? { background: p.categoryColor + "22", boxShadow: `inset 3px 0 0 ${p.categoryColor}`, color: "var(--text)", whiteSpace: "nowrap" } : { whiteSpace: "nowrap" }}>{p.category}</span>}</td>
               <td className="n"><Money v={p.salePrice} /></td><td className="n">{p.type === "STOCK" ? <Money v={p.avgCost} /> : ""}</td>
               <td className={"n " + (p.type === "STOCK" && Number(p.qty) <= Number(p.reorderLevel) ? "neg-val" : "")}>{p.type === "STOCK" ? Number(p.qty) : "—"}</td>
@@ -163,19 +167,29 @@ export function ProductsPage() {
 export function ProductEditor({ p, categories, onClose }: { p: any; categories: any[]; onClose: (s?: boolean) => void }) {
   const { run, busy } = useAction();
   const toast = useToast();
-  const [f, setF] = useState<any>({ type: "STOCK", unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p, uoms: (p.uoms || []).map((u: any) => ({ ...u, key: Math.random() })) });
-  const s = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  const updU = (k: number, patch: any) => setF({ ...f, uoms: f.uoms.map((u: any) => (u.key === k ? { ...u, ...patch } : u)) });
+  const [f0, setF] = useState<any>({ unit: "حبة", taxCode: "S", salePrice: 0, purchasePrice: 0, reorderLevel: 0, isActive: true, ...p, buyRoles: p.buyRoles || (p.id ? [] : ["STOCK"]), saleClass: p.id ? p.saleClass || "" : p.saleClass ?? "STOCK", uoms: (p.uoms || []).map((u: any) => ({ ...u, key: Math.random() })) });
+  // the engine's type follows the classification: held in stock or made from a recipe → stock item, otherwise a service
+  const roles: string[] = f0.buyRoles || [];
+  const f = { ...f0, type: f0.saleClass === "SERVICE" ? "SERVICE" : roles.includes("STOCK") || roles.includes("COMPONENT") || f0.saleClass === "STOCK" || f0.saleClass === "RECIPE" ? "STOCK" : "SERVICE" };
+  const toggleRole = (r: string) => setF({ ...f0, buyRoles: roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r] });
+  const clash = f0.saleClass === "SERVICE" && (roles.includes("STOCK") || roles.includes("COMPONENT"));
+  const [recipeFor, setRecipeFor] = useState<any>(null);
+  const s = (k: string) => (e: any) => setF({ ...f0, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const updU = (k: number, patch: any) => setF({ ...f0, uoms: f.uoms.map((u: any) => (u.key === k ? { ...u, ...patch } : u)) });
   const [cats, setCats] = useState<any[]>(categories);
   const [newCat, setNewCat] = useState(false);
   useEffect(() => { setCats(categories); }, [categories]);
+  if (recipeFor) return <RecipeModal product={recipeFor} canWrite onClose={() => { const wasNew = recipeFor.isNew; setRecipeFor(null); if (wasNew) onClose(true); }} />;
   return (<>
     <Modal wide title={p.id ? `تعديل: ${p.name}` : "صنف جديد"} onClose={() => onClose()} footer={<>
       {p.id && <button className="btn danger sm" onClick={() => run(async () => { if (!confirmDlg("حذف الصنف؟")) return; const r = await api(`/products/${p.id}`, { method: "DELETE" }); if (r.message) toast(r.message); onClose(true); })}>حذف</button>}
-      <div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button><button className="btn primary" disabled={busy} onClick={() => run(async () => { p.id ? await api(`/products/${p.id}`, { method: "PUT", body: f }) : await api("/products", { body: f }); onClose(true); }, "تم الحفظ")}>حفظ</button></>}>
+      <div className="grow" /><button className="btn" onClick={() => onClose()}>إلغاء</button>{p.id && (f.saleClass === "RECIPE" || f.saleClass === "SERVICE") && <button className="btn" data-prod-recipe onClick={() => setRecipeFor({ id: p.id, name: f.name })}>🧾 الخلطة والمكونات</button>}
+      <button className="btn primary" disabled={busy || clash || (!roles.length && !f.saleClass)} data-prod-save onClick={() => run(async () => { const body = { ...f, saleClass: f.saleClass || null }; const row = p.id ? await api(`/products/${p.id}`, { method: "PUT", body }) : await api("/products", { body }); if (!p.id && f.saleClass === "RECIPE") setRecipeFor({ id: row.id, name: row.name, isNew: true }); else onClose(true); }, "تم الحفظ")}>{!p.id && f.saleClass === "RECIPE" ? "حفظ ثم إضافة الخلطة" : "حفظ"}</button></>}>
       <div className="form-grid">
         <Field label="اسم الصنف" span2><Input autoFocus value={f.name || ""} onChange={s("name")} /></Field>
-        <Field label="النوع"><Select value={f.type} onChange={s("type")} disabled={!!p.id}><option value="STOCK">صنف مخزني</option><option value="SERVICE">خدمة</option></Select></Field>
+        <Field label="في المشتريات" hint="اختر واحداً أو أكثر. «مكوِّن»: مادة تدخل في خلطات أصناف البيع (دجاج، زيت، بهارات)" span2><div className="row" style={{ gap: 14, flexWrap: "wrap" }} data-prod-buy>{(["STOCK", "SERVICE", "COMPONENT"] as const).map((r) => <label className="check" key={r}><input type="checkbox" checked={roles.includes(r)} onChange={() => toggleRole(r)} data-buy-role={r} /> {r === "STOCK" ? "صنف مخزني" : r === "SERVICE" ? "صنف خدمي" : "صنف مكوِّن"}</label>)}</div></Field>
+        <Field label="في البيع" hint={f.saleClass === "RECIPE" ? "يُباع بخلطته: تُخصم مكوناته بنِسبها عند البيع، أو يُنتَج مسبقاً ويُباع من الناتج" : f.saleClass === "STOCK" ? "يُشترى ويُباع كما هو (مثل المشروبات: يُشترى بالكرتون ويُباع بالحبة)" : f.saleClass === "SERVICE" ? "لا مخزون له، ويمكن أن تكون له خلطة" : "لا يظهر في نقطة البيع ولا فواتير المبيعات"}><Select value={f.saleClass} onChange={s("saleClass")} data-prod-sale><option value="">لا يُباع</option><option value="STOCK">صنف مخزني</option><option value="RECIPE">صنف له خلطة</option><option value="SERVICE">صنف خدمي</option></Select></Field>
+        {clash && <div className="alert warn small" style={{ gridColumn: "1 / -1" }} data-prod-clash>الصنف الذي يُباع كخدمة لا يكون مخزنياً أو مكوِّناً في المشتريات. عرّف المادة المخزنية صنفاً مستقلاً.</div>}
         <Field label="الرمز SKU (تلقائي)"><Input value={f.sku || ""} onChange={s("sku")} dir="ltr" /></Field>
         <Field label="الباركود"><Input value={f.barcode || ""} onChange={s("barcode")} dir="ltr" /></Field>
         <Field label="التصنيف"><div className="row" style={{ gap: 6, flexWrap: "nowrap" }}><Select style={{ flex: 1, minWidth: 0 }} value={f.categoryId || ""} onChange={s("categoryId")} data-prod-cat><option value="">—</option><CategoryOptions cats={cats} /></Select><button type="button" className="btn sm ghost" title="تصنيف جديد" data-prod-cat-new onClick={() => setNewCat(true)}>＋</button></div></Field>

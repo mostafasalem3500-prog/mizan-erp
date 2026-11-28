@@ -46,7 +46,7 @@ with sync_playwright() as pw:
     def pick(scope, ph, text):
         pg.fill(f'{scope} input[placeholder="{ph}"]', text); o = pg.locator(f'{scope} .suggest div', has_text=text).first; o.wait_for(timeout=15000); o.dispatch_event('mousedown'); pg.wait_for_timeout(300)
     pick('[data-recipes]', 'ابحث عن الطبق أو الباقة', 'بيتزا'); pg.click('[data-recipe-new]'); pg.wait_for_selector('.modal')
-    pick('.modal', 'ابحث عن المكوّن', 'دقيق'); pick('.modal', 'ابحث عن المكوّن', 'جبن')
+    pg.check('[data-recipe-all]'); pick('.modal', 'ابحث عن المكوّن', 'دقيق'); pick('.modal', 'ابحث عن المكوّن', 'جبن')
     qs = pg.locator('[data-recipe-qty]'); qs.nth(0).fill('0.25'); qs.nth(1).fill('0.1'); pg.wait_for_timeout(200)
     ok('4.00' in pg.inner_text('[data-recipe-cost]'), 'recipe window: cost 0.25×4 + 0.1×30 = 4.00')
     pg.click('[data-recipe-save]'); pg.wait_for_selector('[data-recipe-list]', timeout=20000)

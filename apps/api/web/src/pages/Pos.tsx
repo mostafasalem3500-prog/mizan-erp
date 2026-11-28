@@ -61,7 +61,7 @@ export function PosPage() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [newPartner, setNewPartner] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const products = useFetch(`/products${q({ limit: 1000 })}`);
+  const products = useFetch(`/products${q({ limit: 1000, use: "sale" })}`);
   // offers and loyalty settings are cached so the POS keeps applying them while offline
   const promosF = useFetch<any[]>("/promotions/live");
   const loyF = useFetch<any>("/loyalty/settings");

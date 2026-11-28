@@ -302,6 +302,10 @@ export function Picker<T extends { id: string }>({ value, onChange, fetcher, lab
 
 export const partnerFetcher = (role?: "CUSTOMER" | "SUPPLIER") => (s: string) => api(`/partners${q({ q: s, role, limit: 20 })}`);
 export const productFetcher = (s: string) => api(`/products${q({ q: s, limit: 20 })}`);
+/** Items by how they are used: "sale" (sold), "buy" (purchased), "component" (goes into a recipe). */
+export const productFetcherFor = (use: "sale" | "buy" | "component") => (s: string) => api(`/products${q({ q: s, limit: 20, use })}`);
+export const SALE_CLASS_AR: Record<string, string> = { STOCK: "مخزني", RECIPE: "له خلطة", SERVICE: "خدمي" };
+export const BUY_ROLE_AR: Record<string, string> = { STOCK: "مخزني", SERVICE: "خدمي", COMPONENT: "مكوِّن" };
 export const accountFetcher = (filter?: (a: any) => boolean) => async (s: string) => { const r = await api("/accounts"); return r.rows.filter((a: any) => !a.isGroup && a.isActive && (!filter || filter(a)) && (!s || a.code.includes(s) || a.nameAr.includes(s))).slice(0, 30); };
 
 export function useCompanyContext() { return useContext(AppCtx); }

@@ -38,6 +38,8 @@ r343.get("/prep-batches", perm("inventory.read"), h(async (req) => s.listBatches
 r343.post("/prep-batches/preview", perm("inventory.read"), h(async (req) => s.batchPreview(db, cid(req), req.body || {})));
 r343.post("/prep-batches", perm("inventory.write"), h(async (req) => { const r = await tx((t) => s.createBatch(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "prep_batch", r.id, { number: r.number, item: r.name, output: r.outputQty, cost: r.cost }); return r; }));
 r343.post("/prep-batches/:id/cancel", perm("inventory.write"), h(async (req) => { const r = await tx((t) => s.cancelBatch(t, cid(req), actor(req), p(req).id)); await audit(req, "CANCEL", "prep_batch", r.id, { number: r.number }); return r; }));
+r343.get("/preps/leftovers", perm("inventory.read"), h(async (req) => s.dayLeftovers(db, cid(req), { date: String(req.query.date || ""), warehouseId: String(req.query.warehouseId || "") })));
+r343.post("/preps/leftovers/waste", perm("inventory.write"), h(async (req) => { const r = await tx((t) => s.wasteLeftovers(t, cid(req), actor(req), req.body || {})); await audit(req, "POST", "day_waste", null, { date: r.date, count: r.count, value: r.value }); return r; }));
 r343.get("/recipes", perm("products.read"), h(async (req) => s.recipeList(db, cid(req))));
 r343.get("/products/:id/recipe", perm("products.read"), h(async (req) => s.getRecipe(db, cid(req), p(req).id)));
 r343.put("/products/:id/recipe", perm("products.write"), h(async (req) => { const r = await tx((t) => s.saveRecipe(t, cid(req), p(req).id, req.body || {})); await audit(req, "UPDATE", "recipe", p(req).id, { components: r.lines.length, cost: r.cost }); return r; }));
