@@ -77,8 +77,7 @@ exp_net=round(150+600-(25+171.88+25)-48.13-4000-3000-1500,2)
 isY=c(f'/reports/income-statement?from={Y}-01-01&to={Y}-12-31'); net=float(isY.get('netIncome', isY.get('net', 0)) if not isinstance(isY.get('totals'),dict) else isY['totals'].get('netIncome', isY['totals'].get('net', 0)))
 ok(near(net,exp_net,0.03),f'income statement for the year: net result {net} = worked by hand {exp_net}')
 # ═══ a month locked ═══
-periods=c('/periods'); periods=periods.get('periods') or periods.get('rows') or periods if isinstance(periods,dict) else periods
-nov=[p for p in periods if str(p.get('startDate') or p.get('start_date') or p.get('from'))[:7]==f'{Y}-11'][0]
+nov=[p for p in c('/fiscal-years')['periods'] if p['startDate'][:7]==f'{Y}-11'][0]
 ck_=c(f"/closing?periodId={nov['id']}"); ok(isinstance(ck_.get('items') or ck_.get('checks'),list),'month-close cockpit lists its checks')
 try: c(f"/closing/{nov['id']}/lock",{})
 except E: c(f"/closing/{nov['id']}/lock",{'force':True})
