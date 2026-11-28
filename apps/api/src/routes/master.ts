@@ -203,6 +203,42 @@ export function classify(b: any, current?: { type: string; buyRoles: string[]; s
   return { type, buyRoles: roles, saleClass: sc, classed: true };
 }
 
+/** Classification of an existing item: the new classes, and whether the engine's type would change (refused when the item has stock history). */
+async function reclassCheck(companyId: string, id: string, b: any) {
+  const cur = await db.one(`SELECT type, buy_roles, sale_class FROM products WHERE id=$1 AND company_id=$2`, [id, companyId], "الصنف غير موجود");
+  const cls = classify(b, cur)!;
+  const typeChanged = cls.type !== cur.type;
+  if (typeChanged && cls.type === "SERVICE") {
+    const used = await db.one(`SELECT (SELECT COUNT(*) FROM stock_moves WHERE company_id=$1 AND product_id=$2)::int moves, (SELECT COUNT(*) FROM product_recipes WHERE company_id=$1 AND component_id=$2)::int comp`, [companyId, id]);
+    if (used.moves) throw bad("للصنف حركات مخزون، فلا يتحول إلى خدمة. أوقفه وعرّف صنفاً خدمياً جديداً");
+    if (used.comp) throw bad("الصنف مكوِّن في خلطة، فلا يتحول إلى خدمة");
+  }
+  return { ...cls, typeChanged };
+}
+
+/** Classifies many items at once: the sale class, and adding or removing the «ingredient» use. Items that cannot take the change are skipped with the reason. */
+master.post("/products/classify", perm("products.write"), h(async (req) => {
+  const b = req.body || {};
+  const ids: string[] = Array.isArray(b.ids) ? [...new Set(b.ids.map(String))].filter((x) => /^[0-9a-f-]{36}$/i.test(x as string)) as string[] : [];
+  if (!ids.length) throw bad("حدّد الأصناف");
+  if (ids.length > 2000) throw bad("حتى 2000 صنف في المرة");
+  const setSale = b.saleClass !== undefined, setComp = b.component === true || b.component === false;
+  if (!setSale && !setComp) throw bad("اختر ما يتغير: تصنيف البيع أو استخدام «مكوِّن»");
+  const rows = await db.rows(`SELECT id, name, buy_roles, sale_class FROM products WHERE company_id=$1 AND id = ANY($2::uuid[])`, [cid(req), ids]);
+  let updated = 0; const skipped: { name: string; reason: string }[] = [];
+  for (const r of rows) {
+    let roles: string[] = r.buyRoles || [];
+    if (setComp) roles = b.component ? [...new Set([...roles, "COMPONENT"])] : roles.filter((x) => x !== "COMPONENT");
+    try {
+      const cls = await reclassCheck(cid(req), r.id, { buyRoles: roles, ...(setSale ? { saleClass: b.saleClass } : {}) });
+      await db.exec(`UPDATE products SET buy_roles=$2::text[], sale_class=$3, classed=true${cls.typeChanged ? ", type=$4" : ""}${cls.type === "SERVICE" ? ", track_lots=false" : ""} WHERE id=$1`, cls.typeChanged ? [r.id, `{${cls.buyRoles.join(",")}}`, cls.saleClass, cls.type] : [r.id, `{${cls.buyRoles.join(",")}}`, cls.saleClass]);
+      updated++;
+    } catch (e: any) { skipped.push({ name: r.name, reason: String(e?.message || "تعذّر") }); }
+  }
+  await audit(req, "CLASSIFY", "product", null, { count: updated, skipped: skipped.length, saleClass: setSale ? b.saleClass ?? null : undefined, component: setComp ? b.component : undefined });
+  return { updated, skipped };
+}));
+
 master.post(
   "/products",
   perm("products.write"),
@@ -238,20 +274,9 @@ master.put(
     const b = req.body || {};
     if (b.taxCode && !TAX_CODES[b.taxCode]) throw bad("رمز ضريبي غير صحيح");
     const image = cleanImage(b.image);
-    let cls: ReturnType<typeof classify> = null;
-    if (b.buyRoles !== undefined || b.saleClass !== undefined) {
-      const cur = await db.one(`SELECT type, buy_roles, sale_class FROM products WHERE id=$1 AND company_id=$2`, [p(req).id, cid(req)], "الصنف غير موجود");
-      cls = classify(b, cur);
-      if (cls && cls.type !== cur.type) {
-        if (cls.type === "SERVICE") {
-          const used = await db.one(`SELECT (SELECT COUNT(*) FROM stock_moves WHERE company_id=$1 AND product_id=$2)::int moves, (SELECT COUNT(*) FROM product_recipes WHERE company_id=$1 AND component_id=$2)::int comp`, [cid(req), p(req).id]);
-          if (used.moves) throw bad("للصنف حركات مخزون، فلا يتحول إلى خدمة. أوقفه وعرّف صنفاً خدمياً جديداً");
-          if (used.comp) throw bad("الصنف مكوِّن في خلطة، فلا يتحول إلى خدمة");
-        }
-        b.type = cls.type;
-      } else b.type = undefined;
-      if (cls && cls.type === "SERVICE") b.trackLots = false;
-    } else b.type = undefined; // the type of an existing item changes only through its classification
+    const cls = b.buyRoles !== undefined || b.saleClass !== undefined ? await reclassCheck(cid(req), p(req).id, b) : null;
+    b.type = cls?.typeChanged ? cls.type : undefined; // the type of an existing item changes only through its classification
+    if (cls && cls.type === "SERVICE") b.trackLots = false;
     const row = await db.update("products", { id: p(req).id, companyId: cid(req) }, {
       ...(cls ? { buyRoles: `{${cls.buyRoles.join(",")}}`, saleClass: cls.saleClass, classed: true } : {}),
       sku: b.sku, barcode: b.barcode ?? null, name: b.name, nameEn: b.nameEn ?? null, categoryId: b.categoryId ?? null, unit: b.unit, salePrice: b.salePrice === undefined ? undefined : num(b.salePrice),

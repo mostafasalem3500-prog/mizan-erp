@@ -627,6 +627,12 @@ export async function accountantAlerts(t: Db, companyId: string, td: string) {
   const thin = await n(`SELECT COUNT(*)::int c FROM (SELECT d.id FROM products d JOIN product_recipes r ON r.product_id=d.id JOIN products c ON c.id=r.component_id WHERE d.company_id=$1 AND d.is_active AND d.sale_price > 0 GROUP BY d.id, d.sale_price
       HAVING SUM(r.qty * (1 + r.waste_pct/100.0) * COALESCE((SELECT SUM(b.value)/NULLIF(SUM(b.qty),0) FROM stock_balances b WHERE b.product_id=c.id AND b.qty > 0), c.purchase_price, 0)) > d.sale_price * 0.7) x`, [companyId]);
   if (thin.c) items.push({ level: "warn", text: `${thin.c} صنف بوصفة صارت تكلفته أكثر من 70% من سعر بيعه — راجع السعر أو الوصفة`, to: "/recipes", count: thin.c });
+  // 3.56.0: an item classed «له خلطة» with no ingredients sells nothing from stock; a bulk preparation still on hand from an earlier day was never closed
+  const bare = await n(`SELECT COUNT(*)::int c FROM products p WHERE p.company_id=$1 AND p.is_active AND p.sale_class='RECIPE' AND NOT EXISTS (SELECT 1 FROM product_recipes r WHERE r.product_id=p.id)`, [companyId]);
+  if (bare.c) items.push({ level: "warn", text: `${bare.c} صنف مصنَّف «له خلطة» بلا مكونات — أضف خلطته أو غيّر تصنيفه`, to: "/products?type=RECIPE", count: bare.c });
+  const stale = await n(`SELECT COUNT(*)::int c, COALESCE(SUM(x.value),0) v FROM (SELECT h.product_id, SUM(b.value) value FROM recipe_headers h JOIN stock_balances b ON b.company_id=$1 AND b.product_id=h.product_id AND b.qty > 0
+      WHERE h.company_id=$1 AND h.method='BATCH' AND NOT EXISTS (SELECT 1 FROM stock_moves m WHERE m.company_id=$1 AND m.product_id=h.product_id AND m.source_type='PRODUCTION' AND m.qty > 0 AND m.date >= $2) GROUP BY h.product_id) x`, [companyId, td]);
+  if (stale.c) items.push({ level: "info", text: `${stale.c} تحضيرة بقي منها رصيد من إنتاج سابق (${r2(stale.v).toLocaleString("en-US", { minimumFractionDigits: 2 })} ${CFG.currencySymbol}) — أقفل اليوم أو أهلك المتبقي`, to: "/recipes?tab=close", count: stale.c });
   if (lowStock.c) items.push({ level: "info", text: `${lowStock.c} صنف وصل حد إعادة الطلب`, to: "/inventory", count: lowStock.c });
   if (staleSessions.c) items.push({ level: "warn", text: `${staleSessions.c} وردية نقاط بيع مفتوحة منذ أكثر من 20 ساعة — أغلقها`, to: "/pos", count: staleSessions.c });
   if (emps.c && !payroll.c && Number(td.slice(8, 10)) >= 25) items.push({ level: "info", text: `لم يُنشأ مسير رواتب شهر ${td.slice(0, 7)} بعد`, to: "/payroll" });

@@ -557,6 +557,7 @@ export async function dayLeftovers(t: Db, C: string, q: { date?: string; warehou
   return { date, rows: out, totals: { left: out.filter((r) => r.left > 0).length, value: r2(out.reduce((s, r) => s + r.value, 0)) } };
 }
 
+const WASTE_NOTE = "إهلاك متبقي نهاية اليوم";
 /** Closes the day for the cooked preparations: writes off what is left (Dr stock loss and damage / Cr inventory), one voucher per warehouse. */
 export async function wasteLeftovers(t: Db, C: string, user: string, b: any, opts: { isDemo?: boolean } = {}) {
   const date = isDate(b.date) ? String(b.date) : today();
@@ -576,6 +577,26 @@ export async function wasteLeftovers(t: Db, C: string, user: string, b: any, opt
   }
   const { stockAdjustment } = require("./misc") as typeof import("./misc");
   const vouchers: any[] = [];
-  for (const [warehouseId, ls] of byWh) vouchers.push(await stockAdjustment(t, C, user, { kind: "DAMAGE", warehouseId, date, notes: String(b.notes || "إهلاك متبقي نهاية اليوم").slice(0, 200), lines: ls, isDemo: !!opts.isDemo }));
+  for (const [warehouseId, ls] of byWh) vouchers.push(await stockAdjustment(t, C, user, { kind: "DAMAGE", warehouseId, date, notes: (WASTE_NOTE + (b.notes ? " — " + String(b.notes) : "")).slice(0, 200), lines: ls, isDemo: !!opts.isDemo }));
   return { date, vouchers, value: r2(vouchers.reduce((s, v) => s + Math.abs(Number(v.totalValue ?? v.value ?? 0)), 0)), count: lines.length };
+}
+
+/** What the day closes wrote off, by preparation, against what was produced in the same period: the share of production that was thrown away. */
+export async function wasteLog(t: Db, C: string, q: { from?: string; to?: string }) {
+  const to = isDate(q.to) ? String(q.to) : today();
+  const from = isDate(q.from) ? String(q.from) : new Date(new Date(to + "T00:00:00Z").getTime() - 29 * 86400000).toISOString().slice(0, 10);
+  const adj = await t.rows(`SELECT a.number, a.date, a.lines FROM stock_adjustments a WHERE a.company_id=$1 AND a.kind='DAMAGE' AND a.notes LIKE $4 AND a.date BETWEEN $2 AND $3 ORDER BY a.date DESC, a.number DESC`, [C, from, to, WASTE_NOTE + "%"]);
+  const made = await t.rows(`SELECT m.product_id, p.name, p.unit, SUM(m.qty) qty, SUM(m.value) value FROM stock_moves m JOIN recipe_headers h ON h.product_id=m.product_id AND h.method='BATCH' JOIN products p ON p.id=m.product_id
+     WHERE m.company_id=$1 AND m.source_type='PRODUCTION' AND m.qty > 0 AND m.date BETWEEN $2 AND $3 GROUP BY m.product_id, p.name, p.unit`, [C, from, to]);
+  const by = new Map<string, any>();
+  for (const m of made) by.set(m.productId, { productId: m.productId, name: m.name, unit: m.unit, produced: Number(m.qty), producedValue: Number(m.value), wasted: 0, wastedValue: 0, days: 0 });
+  const days: any[] = [];
+  for (const a of adj) for (const l of a.lines || []) {
+    const r = by.get(l.productId) || { productId: l.productId, name: l.name, unit: "", produced: 0, producedValue: 0, wasted: 0, wastedValue: 0, days: 0 };
+    r.wasted += Math.abs(Number(l.qty)); r.wastedValue += Math.abs(Number(l.value)); r.days++; by.set(l.productId, r);
+    days.push({ date: iso(a.date), number: a.number, productId: l.productId, name: l.name, qty: r3(Math.abs(Number(l.qty))), value: r2(Math.abs(Number(l.value))) });
+  }
+  const rows = [...by.values()].map((r) => ({ ...r, produced: r3(r.produced), producedValue: r2(r.producedValue), wasted: r3(r.wasted), wastedValue: r2(r.wastedValue), wastePct: r.produced > 0 ? r2((r.wasted / r.produced) * 100) : null })).sort((a, b) => b.wastedValue - a.wastedValue);
+  const pv = rows.reduce((s, r) => s + r.producedValue, 0), wv = rows.reduce((s, r) => s + r.wastedValue, 0);
+  return { from, to, rows, days, totals: { producedValue: r2(pv), wastedValue: r2(wv), wastePct: pv > 0 ? r2((wv / pv) * 100) : null } };
 }
